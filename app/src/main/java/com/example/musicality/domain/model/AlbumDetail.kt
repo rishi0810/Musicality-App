@@ -7,6 +7,7 @@ data class AlbumDetail(
     val albumThumbnail: String,
     val albumName: String,
     val artist: String,
+    val artistThumbnail: String,
     val count: String,
     val duration: String,
     val songs: List<AlbumSong>,

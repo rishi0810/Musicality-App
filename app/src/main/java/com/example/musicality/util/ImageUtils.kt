@@ -20,4 +20,16 @@ object ImageUtils {
         
         return result
     }
+    
+    /**
+     * Resizes a Google thumbnail URL to custom width and height
+     * Used for Explore More album thumbnails (480x360)
+     * Example input: https://lh3.googleusercontent.com/.../image=w544-h544-l90-rj
+     * Example output: https://lh3.googleusercontent.com/.../image=w480-h360-l90-rj
+     */
+    fun resizeThumbnail(url: String, width: Int, height: Int): String {
+        return url
+            .replace(Regex("=w\\d+"), "=w$width")  // Match =w followed by digits
+            .replace(Regex("-h\\d+"), "-h$height")  // Match -h followed by digits
+    }
 }

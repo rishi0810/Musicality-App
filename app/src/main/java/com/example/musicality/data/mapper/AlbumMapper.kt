@@ -14,6 +14,7 @@ fun Map<String, Any>.parseAlbumDetails(): AlbumDetail {
     var albumThumbnail = ""
     var albumName = ""
     var artist = ""
+    var artistThumbnail = ""
     var count = ""
     var duration = ""
     val songs = mutableListOf<AlbumSong>()
@@ -63,6 +64,22 @@ fun Map<String, Any>.parseAlbumDetails(): AlbumDetail {
             artist = (firstRun?.get("text") as? String) ?: ""
         } catch (e: Exception) {
             Log.w(TAG, "Failed to extract artist name: ${e.message}")
+        }
+        
+        // Extract artist thumbnail from straplineThumbnail
+        try {
+            val straplineThumbnail = headerRenderer?.get("straplineThumbnail") as? Map<*, *>
+            val musicThumbnailRenderer = straplineThumbnail?.get("musicThumbnailRenderer") as? Map<*, *>
+            val thumbnailObj = musicThumbnailRenderer?.get("thumbnail") as? Map<*, *>
+            val thumbnails = thumbnailObj?.get("thumbnails") as? List<*>
+            if (thumbnails != null && thumbnails.isNotEmpty()) {
+                // Prefer index 2, fallback to last available
+                val artistThumb = (thumbnails.getOrNull(2) as? Map<*, *>)
+                    ?: (thumbnails.last() as? Map<*, *>)
+                artistThumbnail = (artistThumb?.get("url") as? String) ?: ""
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to extract artist thumbnail: ${e.message}")
         }
         
         // Extract count and duration from secondSubtitle
@@ -238,6 +255,7 @@ fun Map<String, Any>.parseAlbumDetails(): AlbumDetail {
         albumThumbnail = albumThumbnail,
         albumName = albumName,
         artist = artist,
+        artistThumbnail = artistThumbnail,
         count = count,
         duration = duration,
         songs = songs,

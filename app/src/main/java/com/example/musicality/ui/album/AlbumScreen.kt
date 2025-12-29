@@ -32,6 +32,7 @@ import com.example.musicality.domain.model.AlbumSong
 import com.example.musicality.domain.model.QueueSong
 import com.example.musicality.domain.model.RelatedAlbum
 import com.example.musicality.ui.components.MarqueeText
+import com.example.musicality.util.ImageUtils
 import com.example.musicality.util.UiState
 
 /**
@@ -159,7 +160,6 @@ private fun AlbumContent(
         ) { song ->
             AlbumSongItem(
                 song = song,
-                albumThumbnail = albumDetail.albumThumbnail,
                 onClick = { onSongClick(song.videoId, albumDetail.albumThumbnail) }
             )
         }
@@ -174,12 +174,12 @@ private fun AlbumContent(
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
                     color = Color.White,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
                 )
                 
                 LazyRow(
                     modifier = Modifier.fillMaxWidth(),
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
                     items(
@@ -222,7 +222,7 @@ private fun AlbumHeader(
         IconButton(
             onClick = onBackClick,
             modifier = Modifier
-                .padding(start = 12.dp, top = 8.dp)
+                .padding(start = 20.dp, top = 8.dp)
                 .size(44.dp)
                 .background(
                     color = Color.White.copy(alpha = 0.1f),
@@ -240,55 +240,98 @@ private fun AlbumHeader(
             )
         }
         
-        Spacer(modifier = Modifier.height(25.dp))
+        Spacer(modifier = Modifier.height(20.dp))
         
-        // Album cover - with 12dp horizontal padding, rounded
-        AsyncImage(
-            model = albumDetail.albumThumbnail,
-            contentDescription = albumDetail.albumName,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp)
-                .aspectRatio(1f) // Square album art
-                .clip(RoundedCornerShape(12.dp)),
-            contentScale = ContentScale.Crop
-        )
+        // Album cover - 70% width, centered, rounded
+        Box(
+            modifier = Modifier.fillMaxWidth(),
+            contentAlignment = Alignment.Center
+        ) {
+            AsyncImage(
+                model = albumDetail.albumThumbnail,
+                contentDescription = albumDetail.albumName,
+                modifier = Modifier
+                    .fillMaxWidth(0.7f)
+                    .aspectRatio(1f) // Square album art
+                    .clip(RoundedCornerShape(12.dp)),
+                contentScale = ContentScale.Crop
+            )
+        }
         
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(20.dp))
         
-        // Info row: Artist/Album on left, circular buttons on right
+        // Main info row: Left side (album name, artist, metrics) | Right side (buttons)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp),
+                .padding(horizontal = 20.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.Top
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            // Left side - Artist name and Album name only (buttons match this height)
+            // Left side - Album name, Artist with image, Metrics
             Column(
                 modifier = Modifier.weight(1f)
             ) {
-                Text(
-                    text = albumDetail.artist,
-                    style = MaterialTheme.typography.titleLarge,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = Color.White.copy(alpha = 0.8f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                
-                Spacer(modifier = Modifier.height(2.dp))
-                
+                // Album name on top
                 Text(
                     text = albumDetail.albumName,
                     style = MaterialTheme.typography.headlineMedium,
-                    fontSize = 24.sp,
+                    fontSize = 22.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color.White,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
+                
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                // Artist image + name row
+                Row(
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Small circular artist image
+                    AsyncImage(
+                        model = albumDetail.artistThumbnail,
+                        contentDescription = albumDetail.artist,
+                        modifier = Modifier
+                            .size(28.dp)
+                            .clip(CircleShape),
+                        contentScale = ContentScale.Crop
+                    )
+                    
+                    Spacer(modifier = Modifier.width(8.dp))
+                    
+                    // Artist name
+                    Text(
+                        text = albumDetail.artist,
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color.White.copy(alpha = 0.8f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                
+                Spacer(modifier = Modifier.height(6.dp))
+                
+                // Song count and duration
+                Row {
+                    if (albumDetail.count.isNotBlank()) {
+                        Text(
+                            text = albumDetail.count,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.White.copy(alpha = 0.6f)
+                        )
+                    }
+                    if (albumDetail.duration.isNotBlank()) {
+                        Text(
+                            text = " • ${albumDetail.duration}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.White.copy(alpha = 0.6f)
+                        )
+                    }
+                }
             }
             
             Spacer(modifier = Modifier.width(12.dp))
@@ -302,7 +345,7 @@ private fun AlbumHeader(
                 IconButton(
                     onClick = onShuffleClick,
                     modifier = Modifier
-                        .size(52.dp)
+                        .size(44.dp)
                         .background(
                             color = if (isShuffleEnabled) Color.White else Color.White.copy(alpha = 0.15f),
                             shape = CircleShape
@@ -312,7 +355,7 @@ private fun AlbumHeader(
                         painter = painterResource(id = R.drawable.shuffle_24px),
                         contentDescription = "Shuffle",
                         tint = if (isShuffleEnabled) Color.Black else Color.White,
-                        modifier = Modifier.size(24.dp)
+                        modifier = Modifier.size(20.dp)
                     )
                 }
                 
@@ -320,7 +363,7 @@ private fun AlbumHeader(
                 IconButton(
                     onClick = onPlayClick,
                     modifier = Modifier
-                        .size(52.dp)
+                        .size(44.dp)
                         .background(
                             color = Color.White,
                             shape = CircleShape
@@ -332,34 +375,9 @@ private fun AlbumHeader(
                         ),
                         contentDescription = if (isPlaying) "Pause" else "Play",
                         tint = Color.Black,
-                        modifier = Modifier.size(24.dp)
+                        modifier = Modifier.size(20.dp)
                     )
                 }
-            }
-        }
-        
-        Spacer(modifier = Modifier.height(8.dp))
-        
-        // Song count and duration - separate row below
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            if (albumDetail.count.isNotBlank()) {
-                Text(
-                    text = albumDetail.count,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = Color.White.copy(alpha = 0.6f)
-                )
-            }
-            if (albumDetail.duration.isNotBlank()) {
-                Text(
-                    text = "• ${albumDetail.duration}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = Color.White.copy(alpha = 0.6f)
-                )
             }
         }
         
@@ -368,18 +386,17 @@ private fun AlbumHeader(
 }
 
 /**
- * Individual song item in the album (similar to queue item style)
+ * Individual song item in the album (no thumbnail - album art shown at top)
  */
 @Composable
 private fun AlbumSongItem(
     song: AlbumSong,
-    albumThumbnail: String,
     onClick: () -> Unit
 ) {
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 4.dp)
+            .padding(horizontal = 20.dp, vertical = 4.dp)
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(8.dp),
         color = Color.White.copy(alpha = 0.08f)
@@ -387,21 +404,9 @@ private fun AlbumSongItem(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
+                .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Thumbnail using album art
-            AsyncImage(
-                model = albumThumbnail,
-                contentDescription = song.title,
-                modifier = Modifier
-                    .size(52.dp)
-                    .clip(RoundedCornerShape(6.dp)),
-                contentScale = ContentScale.Crop
-            )
-            
-            Spacer(modifier = Modifier.width(12.dp))
-            
             // Song info
             Column(
                 modifier = Modifier.weight(1f)
@@ -411,7 +416,7 @@ private fun AlbumSongItem(
                     style = MaterialTheme.typography.bodyLarge,
                     fontWeight = FontWeight.Medium,
                     color = Color.White,
-                    modifier = Modifier.fillMaxWidth(0.8f)
+                    modifier = Modifier.fillMaxWidth(0.6f)
                 )
                 
                 if (song.viewCount.isNotBlank()) {
@@ -455,9 +460,9 @@ private fun RelatedAlbumItem(
             .clickable(onClick = onClick),
         horizontalAlignment = Alignment.Start
     ) {
-        // Rounded album art
+        // Rounded album art - resized to 360x360 for optimal loading
         AsyncImage(
-            model = album.albumImg,
+            model = ImageUtils.resizeThumbnail(album.albumImg, 360, 360),
             contentDescription = album.albumName,
             modifier = Modifier
                 .size(140.dp)
