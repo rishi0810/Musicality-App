@@ -134,4 +134,33 @@ object NetworkModule {
     fun provideAlbumRepository(): com.example.musicality.domain.repository.AlbumRepository {
         return com.example.musicality.data.repository.AlbumRepositoryImpl(provideAlbumApiService())
     }
+    
+    /**
+     * Provides PlaylistApiService instance (uses same base URL as search/player/queue/album)
+     */
+    fun providePlaylistApiService(): com.example.musicality.data.remote.PlaylistApiService {
+        return provideSearchRetrofit().create(com.example.musicality.data.remote.PlaylistApiService::class.java)
+    }
+    
+    /**
+     * Provides PlaylistRepository instance
+     */
+    fun providePlaylistRepository(): com.example.musicality.domain.repository.PlaylistRepository {
+        return com.example.musicality.data.repository.PlaylistRepositoryImpl(providePlaylistApiService())
+    }
+    
+    /**
+     * Provides ArtistApiService instance (uses same base URL as search/player/queue/album/playlist)
+     */
+    fun provideArtistApiService(): com.example.musicality.data.remote.ArtistApiService {
+        return provideSearchRetrofit().create(com.example.musicality.data.remote.ArtistApiService::class.java)
+    }
+    
+    /**
+     * Provides ArtistRepository instance
+     */
+    fun provideArtistRepository(): com.example.musicality.domain.repository.ArtistRepository {
+        return com.example.musicality.data.repository.ArtistRepositoryImpl(provideArtistApiService())
+    }
 }
+

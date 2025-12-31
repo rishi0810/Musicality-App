@@ -34,6 +34,8 @@ fun SearchScreen(
     viewModel: SearchViewModel = viewModel(),
     onSongClick: (videoId: String, thumbnailUrl: String) -> Unit = { _, _ -> },
     onAlbumClick: (albumId: String) -> Unit = { },
+    onPlaylistClick: (playlistId: String) -> Unit = { },
+    onArtistClick: (artistId: String) -> Unit = { },
     bottomPadding: androidx.compose.ui.unit.Dp = 0.dp
 ) {
     val searchQuery by viewModel.searchQuery.collectAsState()
@@ -75,6 +77,8 @@ fun SearchScreen(
                     searchResponse = state.data,
                     onSongClick = onSongClick,
                     onAlbumClick = onAlbumClick,
+                    onPlaylistClick = onPlaylistClick,
+                    onArtistClick = onArtistClick,
                     modifier = Modifier.fillMaxSize()
                 )
             }
@@ -147,6 +151,8 @@ fun SearchResults(
     searchResponse: com.example.musicality.domain.model.SearchResponse,
     onSongClick: (videoId: String, thumbnailUrl: String) -> Unit,
     onAlbumClick: (albumId: String) -> Unit = { },
+    onPlaylistClick: (playlistId: String) -> Unit = { },
+    onArtistClick: (artistId: String) -> Unit = { },
     modifier: Modifier = Modifier
 ) {
     LazyColumn(
@@ -188,8 +194,13 @@ fun SearchResults(
                                 android.util.Log.d("SearchScreen", "Album clicked - ID: ${result.id}")
                                 onAlbumClick(result.id)
                             }
-                            else -> {
-                                // Artists and Playlists - no action yet
+                            is SearchResult.Playlist -> {
+                                android.util.Log.d("SearchScreen", "Playlist clicked - ID: ${result.id}")
+                                onPlaylistClick(result.id)
+                            }
+                            is SearchResult.Artist -> {
+                                android.util.Log.d("SearchScreen", "Artist clicked - ID: ${result.id}")
+                                onArtistClick(result.id)
                             }
                         }
                     }

@@ -41,6 +41,8 @@ import com.example.musicality.ui.player.PlayerViewModel
 import com.example.musicality.ui.player.QueueSheet
 import com.example.musicality.ui.search.SearchScreen
 import com.example.musicality.ui.album.AlbumScreen
+import com.example.musicality.ui.playlist.PlaylistScreen
+import com.example.musicality.ui.artist.ArtistScreen
 import com.google.common.util.concurrent.MoreExecutors
 
 sealed class Screen(val route: String, val labelRes: Int, val icon: ImageVector) {
@@ -179,6 +181,12 @@ fun MusicalityApp(openPlayerOnStart: Boolean = false) {
                             onAlbumClick = { albumId ->
                                 navController.navigate("album/$albumId")
                             },
+                            onPlaylistClick = { playlistId ->
+                                navController.navigate("playlist/$playlistId")
+                            },
+                            onArtistClick = { artistId ->
+                                navController.navigate("artist/$artistId")
+                            },
                             bottomPadding = bottomContentPadding
                         )
                     }
@@ -199,6 +207,40 @@ fun MusicalityApp(openPlayerOnStart: Boolean = false) {
                             },
                             onAlbumClick = { newAlbumId ->
                                 navController.navigate("album/$newAlbumId")
+                            }
+                        )
+                    }
+                    // Playlist detail screen
+                    composable("playlist/{playlistId}") { backStackEntry ->
+                        val playlistId = backStackEntry.arguments?.getString("playlistId") ?: ""
+                        PlaylistScreen(
+                            playlistId = playlistId,
+                            onBackClick = { navController.popBackStack() },
+                            onSongClick = { videoId, thumbnailUrl ->
+                                playerViewModel.playSong(videoId, thumbnailUrl)
+                            },
+                            onPlayPlaylist = { playlistSongs, playlistThumbnail, shuffle ->
+                                playerViewModel.playAlbum(playlistSongs, playlistThumbnail, shuffle)
+                            }
+                        )
+                    }
+                    // Artist detail screen
+                    composable("artist/{artistId}") { backStackEntry ->
+                        val artistId = backStackEntry.arguments?.getString("artistId") ?: ""
+                        ArtistScreen(
+                            artistId = artistId,
+                            onBackClick = { navController.popBackStack() },
+                            onSongClick = { videoId, thumbnailUrl ->
+                                playerViewModel.playSong(videoId, thumbnailUrl)
+                            },
+                            onAlbumClick = { albumId ->
+                                navController.navigate("album/$albumId")
+                            },
+                            onPlaylistClick = { playlistId ->
+                                navController.navigate("playlist/$playlistId")
+                            },
+                            onArtistClick = { newArtistId ->
+                                navController.navigate("artist/$newArtistId")
                             }
                         )
                     }
