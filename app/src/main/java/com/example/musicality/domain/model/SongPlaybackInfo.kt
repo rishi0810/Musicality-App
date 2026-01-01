@@ -10,5 +10,6 @@ data class SongPlaybackInfo(
     val lengthSeconds: String,
     val thumbnailUrl: String,
     val author: String,
-    val viewCount: String
+    val viewCount: String,
+    val channelId: String = ""
 )

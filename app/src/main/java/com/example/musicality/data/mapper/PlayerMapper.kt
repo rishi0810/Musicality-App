@@ -49,6 +49,7 @@ fun Map<String, Any>.parsePlayerResponse(): SongPlaybackInfo? {
     val lengthSeconds = videoDetails["lengthSeconds"] as? String ?: "0"
     val author = videoDetails["author"] as? String ?: ""
     val viewCount = videoDetails["viewCount"] as? String ?: "0"
+    val channelId = videoDetails["channelId"] as? String ?: ""
     
     // Get thumbnail URL
     val thumbnail = videoDetails["thumbnail"] as? Map<*, *>
@@ -63,6 +64,8 @@ fun Map<String, Any>.parsePlayerResponse(): SongPlaybackInfo? {
         lengthSeconds = lengthSeconds,
         thumbnailUrl = thumbnailUrl,
         author = author,
-        viewCount = viewCount
+        viewCount = viewCount,
+        channelId = channelId
     )
 }
+

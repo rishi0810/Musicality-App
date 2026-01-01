@@ -139,6 +139,7 @@ fun CollapsiblePlayer(
     onOpenQueue: () -> Unit = {},
     onNext: () -> Unit = {},
     onPrevious: () -> Unit = {},
+    onViewArtist: (channelId: String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     when (playerState) {
@@ -165,6 +166,7 @@ fun CollapsiblePlayer(
                         onOpenQueue = onOpenQueue,
                         onNext = onNext,
                         onPrevious = onPrevious,
+                        onViewArtist = onViewArtist,
                         modifier = modifier
                     )
                 } else {
@@ -239,6 +241,7 @@ fun ExpandedPlayer(
     onOpenQueue: () -> Unit = {},
     onNext: () -> Unit = {},
     onPrevious: () -> Unit = {},
+    onViewArtist: (channelId: String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val scope = rememberCoroutineScope()
@@ -339,13 +342,16 @@ fun ExpandedPlayer(
                     .padding(vertical = 16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Back button - top left (minimizes player)
+                // Back button - top left (minimizes player), Menu button - top right
+                var showMenu by remember { mutableStateOf(false) }
+                
                 Row(
                     modifier = Modifier
                         .fillMaxWidth(contentWidth)
                         .padding(bottom = 50.dp), // Increased from 16dp
-                    horizontalArrangement = Arrangement.Start
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
+                    // Back button
                     IconButton(
                         onClick = {
                             // Animate down smoothly before minimizing
@@ -376,6 +382,108 @@ fun ExpandedPlayer(
                                 .size(20.dp)
                                 .padding(end = 2.dp) // Center the arrow icon
                         )
+                    }
+                    
+                    // Menu button with dropdown
+                    Box {
+                        IconButton(
+                            onClick = { showMenu = true },
+                            modifier = Modifier
+                                .size(44.dp)
+                                .background(
+                                    color = Color.Black.copy(alpha = 0.5f),
+                                    shape = CircleShape
+                                )
+                                .border(0.7.dp, color = Color.DarkGray, shape = CircleShape)
+                        ) {
+                            Icon(
+                                painter = androidx.compose.ui.res.painterResource(id = com.example.musicality.R.drawable.list_24px),
+                                contentDescription = "Menu",
+                                tint = Color.White,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                        
+                        // Polished dropdown menu with elevation and icons
+                        MaterialTheme(
+                            shapes = MaterialTheme.shapes.copy(extraSmall = RoundedCornerShape(16.dp))
+                        ) {
+                            DropdownMenu(
+                                expanded = showMenu,
+                                onDismissRequest = { showMenu = false },
+                                offset = androidx.compose.ui.unit.DpOffset(x = 0.dp, y = 8.dp),
+                                modifier = Modifier
+                                    .width(200.dp)
+                                    .background(
+                                        color = Color(0xFF2C2C2E), // Dark surface container
+                                        shape = RoundedCornerShape(16.dp)
+                                    )
+                            ) {
+                                // View Artist option
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = "View Artist",
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            fontWeight = FontWeight.Medium,
+                                            color = if (songInfo.channelId.isNotBlank()) Color.White else Color.White.copy(alpha = 0.4f)
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            painter = androidx.compose.ui.res.painterResource(id = com.example.musicality.R.drawable.artist_24px),
+                                            contentDescription = null,
+                                            tint = if (songInfo.channelId.isNotBlank()) Color.White else Color.White.copy(alpha = 0.4f), // Green accent
+                                            modifier = Modifier.size(22.dp)
+                                        )
+                                    },
+                                    onClick = {
+                                        showMenu = false
+                                        if (songInfo.channelId.isNotBlank()) {
+                                            // Animate down before navigating
+                                            scope.launch {
+                                                offsetY.animateTo(
+                                                    targetValue = screenHeightPx,
+                                                    animationSpec = tween(
+                                                        durationMillis = 350,
+                                                        easing = FastOutSlowInEasing
+                                                    )
+                                                )
+                                                onDragDown()
+                                                onViewArtist(songInfo.channelId)
+                                            }
+                                        }
+                                    },
+                                    enabled = songInfo.channelId.isNotBlank(),
+                                    modifier = Modifier.padding(horizontal = 4.dp)
+                                )
+                                
+                                // View Queue option
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = "View Queue",
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            fontWeight = FontWeight.Medium,
+                                            color = Color.White
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            painter = androidx.compose.ui.res.painterResource(id = com.example.musicality.R.drawable.queue_music_24px),
+                                            contentDescription = null,
+                                            tint = Color.White, // Green accent
+                                            modifier = Modifier.size(22.dp)
+                                        )
+                                    },
+                                    onClick = {
+                                        showMenu = false
+                                        onOpenQueue()
+                                    },
+                                    modifier = Modifier.padding(horizontal = 4.dp)
+                                )
+                            }
+                        }
                     }
                 }
                 

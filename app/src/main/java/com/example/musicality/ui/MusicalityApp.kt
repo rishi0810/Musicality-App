@@ -334,6 +334,9 @@ fun MusicalityApp(openPlayerOnStart: Boolean = false) {
                 onOpenQueue = { playerViewModel.toggleQueueSheet() },
                 onNext = { playerViewModel.playNext() },
                 onPrevious = { playerViewModel.playPrevious() },
+                onViewArtist = { channelId ->
+                    navController.navigate("artist/$channelId")
+                },
                 modifier = Modifier
                     .fillMaxSize()
                     .zIndex(2f)
