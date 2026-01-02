@@ -80,6 +80,9 @@ dependencies {
     implementation(libs.media3.ui)
     implementation(libs.media3.session)
 
+    // Animation
+    implementation(libs.lottie.compose)
+
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

@@ -27,7 +27,6 @@ import com.example.musicality.R
 import com.example.musicality.domain.model.PlaylistDetail
 import com.example.musicality.domain.model.PlaylistSong
 import com.example.musicality.domain.model.QueueSong
-import com.example.musicality.ui.components.MarqueeText
 import com.example.musicality.util.UiState
 
 /**
@@ -350,12 +349,13 @@ private fun PlaylistSongItem(
             Column(
                 modifier = Modifier.weight(1f)
             ) {
-                MarqueeText(
+                Text(
                     text = song.songName,
                     style = MaterialTheme.typography.bodyLarge,
                     fontWeight = FontWeight.Medium,
                     color = Color.White,
-                    modifier = Modifier.fillMaxWidth(0.85f)
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
                 
                 if (song.artists.isNotBlank()) {

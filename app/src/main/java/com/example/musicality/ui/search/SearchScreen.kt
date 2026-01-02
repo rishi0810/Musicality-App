@@ -25,7 +25,6 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.compose.AsyncImage
 import com.example.musicality.domain.model.SearchResult
-import com.example.musicality.ui.components.MarqueeText
 import com.example.musicality.util.UiState
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -182,9 +181,11 @@ fun SearchResults(
                 items = searchResponse.results,
                 key = { it.id }
             ) { result ->
+                val keyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
                 SearchResultItem(
                     result = result,
                     onClick = {
+                        keyboardController?.hide()
                         when (result) {
                             is SearchResult.Song -> {
                                 android.util.Log.d("SearchScreen", "Song clicked - ID: ${result.id}, Thumbnail: ${result.thumbnailUrl}")
@@ -294,12 +295,14 @@ fun SearchResultItem(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    MarqueeText(
+                    Text(
                         text = result.name,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.fillMaxWidth(0.7f)
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
                     )
 
                     if (result.isExplicit) {

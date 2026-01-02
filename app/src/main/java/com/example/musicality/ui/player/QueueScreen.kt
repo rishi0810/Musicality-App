@@ -1,11 +1,8 @@
 package com.example.musicality.ui.player
 
-import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -15,34 +12,28 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalDensity
 import coil3.compose.AsyncImage
+import com.example.musicality.R
 import com.example.musicality.domain.model.QueueSong
-import com.example.musicality.ui.components.MarqueeText
 import com.example.musicality.util.UiState
-import kotlinx.coroutines.launch
 
 /**
- * Queue sheet that slides up from the bottom of the expanded player.
+ * Queue sheet using Material3 ModalBottomSheet for native behavior.
  * Shows related songs that can be played.
  * 
  * Behavior:
- * - Swipe up from the arrow at bottom of player to open
- * - Swipe down to close (drag-to-dismiss like the player)
+ * - Native swipe down to close with proper velocity detection
+ * - Nested scrolling with the list works correctly
  * - Tap a song to play it
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun QueueSheet(
     queueState: UiState<List<QueueSong>>,
@@ -51,143 +42,57 @@ fun QueueSheet(
     onDismiss: () -> Unit,
     onSongClick: (QueueSong) -> Unit,
     onOffsetChanged: (Float) -> Unit = {},
+    dragProgress: Float = 0f,
+    isDragging: Boolean = false,
     modifier: Modifier = Modifier
 ) {
-    if (!isVisible) return
+    // Only show if visible or if dragging is happening
+    if (!isVisible && !isDragging) return
     
-    // Get screen height for proper animation - calculate first before using
-    val configuration = LocalConfiguration.current
-    val density = LocalDensity.current
-    val screenHeightPx = with(density) { configuration.screenHeightDp.dp.toPx() }
+    val sheetState = rememberModalBottomSheetState(
+        skipPartiallyExpanded = true
+    )
     
-    // Initialize off-screen to prevent flash
-    val offsetY = remember { Animatable(screenHeightPx) }
-    val scope = rememberCoroutineScope()
-    
-    // Slide up animation when opening
-    LaunchedEffect(isVisible) {
-        if (isVisible) {
-            offsetY.animateTo(
-                targetValue = 0f,
-                animationSpec = tween(
-                    durationMillis = 300,
-                    easing = FastOutSlowInEasing
-                )
-            )
-        }
-    }
-    
-    // Report offset changes to parent
-    LaunchedEffect(offsetY.value) {
-        onOffsetChanged(offsetY.value)
-    }
-    
-    // Glassmorphic styling
-    val squircleShape = SquircleShape(cornerRadius = 24.dp)
-    
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-    ) {
-        // Content container with gesture handling
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .offset { androidx.compose.ui.unit.IntOffset(0, offsetY.value.toInt()) }
-                .background(Color.Black) // Background moves with the sheet
-                .pointerInput(Unit) {
-                    awaitPointerEventScope {
-                        while (true) {
-                            val pointerId = awaitFirstDown().id
-                            
-                            drag(pointerId) { change ->
-                                val dragAmount = change.positionChange().y
-                                val newOffset = (offsetY.value + dragAmount).coerceAtLeast(0f)
-                                
-                                scope.launch {
-                                    offsetY.snapTo(newOffset)
-                                }
-                                
-                                if (change.positionChange() != androidx.compose.ui.geometry.Offset.Zero) change.consume()
-                            }
-                            
-                            val threshold = size.height * 0.3f
-                            if (offsetY.value > threshold) {
-                                // Animate to bottom before dismissing
-                                scope.launch {
-                                    offsetY.animateTo(
-                                        targetValue = size.height.toFloat(),
-                                        animationSpec = tween(
-                                            durationMillis = 300,
-                                            easing = FastOutSlowInEasing
-                                        )
-                                    )
-                                    onDismiss()
-                                    offsetY.snapTo(0f) // Reset for next open
-                                }
-                            } else {
-                                scope.launch {
-                                    offsetY.animateTo(
-                                        targetValue = 0f,
-                                        animationSpec = spring(stiffness = Spring.StiffnessLow)
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-        ) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = Color.Black, // Pure black background
+        contentColor = Color.White,
+        dragHandle = {
+            // Custom header with drag handle and close button
             Column(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .statusBarsPadding()
-                    .navigationBarsPadding()
-                    .padding(vertical = 16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
+                    .fillMaxWidth()
+                    .padding(top = 20.dp, start = 16.dp, end = 16.dp)
             ) {
-                // Header with close button and title
-                Row(
+                // Drag handle centered
+                Box(
                     modifier = Modifier
-                        .fillMaxWidth(0.9f)
-                        .padding(bottom = 16.dp),
+                        .fillMaxWidth(),
+                    contentAlignment = Alignment.Center
+
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .width(40.dp)
+                            .height(4.dp)
+                            .background(
+                                color = Color.White.copy(alpha = 0.4f),
+                                shape = RoundedCornerShape(2.dp)
+                            )
+                    )
+                }
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                // Title row with close button
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Close button
-                    IconButton(
-                        onClick = {
-                            scope.launch {
-                                // Animate to full screen height for smooth exit
-                                offsetY.animateTo(
-                                    targetValue = screenHeightPx,
-                                    animationSpec = tween(
-                                        durationMillis = 350,
-                                        easing = FastOutSlowInEasing
-                                    )
-                                )
-                                onDismiss()
-                                offsetY.snapTo(0f) // Reset for next open
-                            }
-                        },
-                        modifier = Modifier
-                            .size(44.dp)
-                            .background(
-                                color = Color.Black.copy(alpha = 0.5f),
-                                shape = CircleShape
-                            )
-                            .border(0.7.dp, color = Color.DarkGray, shape = CircleShape)
-                    ) {
-                        Icon(
-                            painter = androidx.compose.ui.res.painterResource(
-                                id = com.example.musicality.R.drawable.keyboard_arrow_up_24px
-                            ),
-                            contentDescription = "Close Queue",
-                            tint = Color.White,
-                            modifier = Modifier
-                                .size(24.dp)
-                                .graphicsLayer { rotationZ = 180f } // Rotate to point down
-                        )
-                    }
+                    // Placeholder for symmetry
+                    Spacer(modifier = Modifier.size(44.dp))
                     
                     // Title
                     Text(
@@ -197,95 +102,126 @@ fun QueueSheet(
                         color = Color.White
                     )
                     
-                    // Placeholder for symmetry
-                    Spacer(modifier = Modifier.size(44.dp))
+                    // Close button
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier
+                            .size(44.dp)
+                            .background(
+                                color = Color.Black,
+                                shape = CircleShape
+                            )
+                            .border(0.7.dp, color = Color.DarkGray, shape = CircleShape)
+                    ) {
+                        Icon(
+                            painter = androidx.compose.ui.res.painterResource(id = R.drawable.arrow_back_ios_new_24px),
+                            contentDescription = "Close Queue",
+                            tint = Color.White,
+                            modifier = Modifier
+                                .size(24.dp)
+                                .graphicsLayer { rotationZ = 270f } // Rotate to point down
+                        )
+                    }
                 }
                 
-                // Queue content - no outer background, items have their own glassmorphic background
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(0.95f)
-                        .weight(1f)
-                ) {
-                    when (queueState) {
-                        is UiState.Loading -> {
-                            Box(
-                                modifier = Modifier.fillMaxSize(),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                CircularProgressIndicator(color = Color.White)
-                            }
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+        },
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        modifier = modifier.statusBarsPadding()
+    ) {
+        // Sheet content - respect safe areas
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight()
+                .padding(horizontal = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // Queue content - takes all remaining space
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f) // Fill remaining space
+            ) {
+                when (queueState) {
+                    is UiState.Loading -> {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator(color = Color.White)
                         }
-                        is UiState.Success -> {
-                            val songs = queueState.data
-                            if (songs.isEmpty()) {
-                                Box(
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = "No songs in queue",
-                                        color = Color.White.copy(alpha = 0.7f)
-                                    )
-                                }
-                            } else {
-                                LazyColumn(
-                                    modifier = Modifier
-                                        .fillMaxSize(),
-                                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                                    contentPadding = PaddingValues(vertical = 8.dp)
-                                ) {
-                                    items(
-                                        items = songs,
-                                        key = { it.videoId }
-                                    ) { song ->
-                                        QueueSongItem(
-                                            song = song,
-                                            onClick = { onSongClick(song) }
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                        is UiState.Error -> {
-                            Box(
-                                modifier = Modifier.fillMaxSize(),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Column(
-                                    horizontalAlignment = Alignment.CenterHorizontally
-                                ) {
-                                    Text(
-                                        text = "Failed to load queue",
-                                        color = Color.White,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Text(
-                                        text = queueState.message,
-                                        color = Color.White.copy(alpha = 0.7f),
-                                        fontSize = 12.sp
-                                    )
-                                }
-                            }
-                        }
-                        else -> {
-                            // Idle state
+                    }
+                    is UiState.Success -> {
+                        val songs = queueState.data
+                        if (songs.isEmpty()) {
                             Box(
                                 modifier = Modifier.fillMaxSize(),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
-                                    text = "Queue not loaded",
+                                    text = "No songs in queue",
                                     color = Color.White.copy(alpha = 0.7f)
+                                )
+                            }
+                        } else {
+                            LazyColumn(
+                                modifier = Modifier.fillMaxSize(),
+                                verticalArrangement = Arrangement.spacedBy(6.dp),
+                                contentPadding = PaddingValues(top = 8.dp, bottom = 32.dp)
+                            ) {
+                                items(
+                                    items = songs,
+                                    key = { it.videoId }
+                                ) { song ->
+                                    QueueSongItem(
+                                        song = song,
+                                        onClick = { onSongClick(song) }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    is UiState.Error -> {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = "Failed to load queue",
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = queueState.message,
+                                    color = Color.White.copy(alpha = 0.7f),
+                                    fontSize = 12.sp
                                 )
                             }
                         }
                     }
+                    else -> {
+                        // Idle state
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "Queue not loaded",
+                                color = Color.White.copy(alpha = 0.7f)
+                            )
+                        }
+                    }
                 }
-                
-                Spacer(modifier = Modifier.height(16.dp))
             }
+            
+            // Bottom safe area padding
+            Spacer(modifier = Modifier.navigationBarsPadding())
         }
     }
 }
@@ -305,8 +241,8 @@ fun QueueSongItem(
         modifier = modifier
             .fillMaxWidth()
             .clickable(onClick = onClick),
-        shape = RoundedCornerShape(8.dp), // Smaller corner radius
-        color = Color.White.copy(alpha = 0.15f) // Glassmorphic background
+        shape = RoundedCornerShape(8.dp),
+        color = Color.White.copy(alpha = 0.1f)
     ) {
         Row(
             modifier = Modifier
@@ -326,25 +262,27 @@ fun QueueSongItem(
             
             Spacer(modifier = Modifier.width(12.dp))
             
-            // Song info with marquee for long text
+            // Song info with ellipsis for long text
             Column(
                 modifier = Modifier.weight(1f)
             ) {
-                MarqueeText(
+                Text(
                     text = song.name,
                     style = MaterialTheme.typography.bodyLarge,
                     fontWeight = FontWeight.Medium,
                     color = Color.White,
-                    modifier = Modifier.fillMaxWidth(0.7f)
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                 )
                 
                 if (song.singer.isNotEmpty()) {
                     Spacer(modifier = Modifier.height(2.dp))
-                    MarqueeText(
+                    Text(
                         text = song.singer,
                         style = MaterialTheme.typography.bodySmall,
-                        color = Color.White.copy(alpha = 0.3f),
-                        modifier = Modifier.fillMaxWidth(fraction = 0.5f)
+                        color = Color.White.copy(alpha = 0.5f),
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                     )
                 }
             }

@@ -27,7 +27,6 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.compose.AsyncImage
 import com.example.musicality.R
 import com.example.musicality.domain.model.*
-import com.example.musicality.ui.components.MarqueeText
 import com.example.musicality.util.ImageUtils
 import com.example.musicality.util.UiState
 
@@ -375,11 +374,13 @@ private fun TopSongItem(
                 Row(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    MarqueeText(
+                    Text(
                         text = song.songName,
                         style = MaterialTheme.typography.bodyLarge,
                         fontWeight = FontWeight.Medium,
                         color = Color.White,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f, fill = false)
                     )
                     
@@ -469,12 +470,13 @@ private fun AlbumItem(
         Spacer(modifier = Modifier.height(8.dp))
         
         // Album name
-        MarqueeText(
+        Text(
             text = album.albumName,
             style = MaterialTheme.typography.bodyMedium,
             fontWeight = FontWeight.Medium,
             color = Color.White,
-            modifier = Modifier.fillMaxWidth(0.9f)
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
         )
         
         // Year
@@ -515,12 +517,13 @@ private fun PlaylistItem(
         Spacer(modifier = Modifier.height(8.dp))
         
         // Playlist name
-        MarqueeText(
+        Text(
             text = playlist.name,
             style = MaterialTheme.typography.bodyMedium,
             fontWeight = FontWeight.Medium,
             color = Color.White,
-            modifier = Modifier.fillMaxWidth(0.9f)
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
         )
         
         // Views (if available)

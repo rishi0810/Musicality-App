@@ -43,6 +43,7 @@ import com.example.musicality.ui.search.SearchScreen
 import com.example.musicality.ui.album.AlbumScreen
 import com.example.musicality.ui.playlist.PlaylistScreen
 import com.example.musicality.ui.artist.ArtistScreen
+import com.example.musicality.util.OnboardingPreferences
 import com.google.common.util.concurrent.MoreExecutors
 
 sealed class Screen(val route: String, val labelRes: Int, val icon: ImageVector) {
@@ -139,18 +140,20 @@ fun MusicalityApp(openPlayerOnStart: Boolean = false) {
     val queueState by playerViewModel.queueState.collectAsState()
     val isQueueSheetVisible by playerViewModel.isQueueSheetVisible.collectAsState()
     
-    // Handle back press: close queue sheet first, then expanded player, then navigate back
-    BackHandler(enabled = isQueueSheetVisible || isExpanded) {
-        when {
-            isQueueSheetVisible -> playerViewModel.setQueueSheetVisible(false)
-            isExpanded -> playerViewModel.setExpanded(false)
-        }
-    }
     
     // Track the drag offset from the expanded player
     // 0f = Fully expanded (top of screen)
     // Positive values = Dragging down
     var playerDragOffset by remember { mutableFloatStateOf(0f) }
+    
+    // Swipe-up tutorial hint state - shown only for first-time users
+    var showSwipeUpHint by remember {
+        mutableStateOf(!OnboardingPreferences.hasSwipeUpHintBeenShown(context))
+    }
+    
+    // Interactive swipe-up state for queue sheet
+    var isSwipingUpQueue by remember { mutableStateOf(false) }
+    var swipeUpProgress by remember { mutableFloatStateOf(0f) }
     
     Box(modifier = Modifier.fillMaxSize()) {
         // Calculate bottom padding for content
@@ -331,11 +334,41 @@ fun MusicalityApp(openPlayerOnStart: Boolean = false) {
                 currentPosition = currentPosition,
                 duration = duration,
                 onSeek = { fraction -> playerViewModel.seekToFraction(fraction) },
-                onOpenQueue = { playerViewModel.toggleQueueSheet() },
+                onOpenQueue = {
+                    // Dismiss hint when queue is opened (whether by swipe or button)
+                    if (showSwipeUpHint) {
+                        showSwipeUpHint = false
+                        OnboardingPreferences.markSwipeUpHintAsShown(context)
+                    }
+                    playerViewModel.toggleQueueSheet()
+                },
                 onNext = { playerViewModel.playNext() },
                 onPrevious = { playerViewModel.playPrevious() },
                 onViewArtist = { channelId ->
                     navController.navigate("artist/$channelId")
+                },
+                showSwipeUpHint = showSwipeUpHint,
+                onSwipeUpHintDismissed = {
+                    showSwipeUpHint = false
+                    OnboardingPreferences.markSwipeUpHintAsShown(context)
+                },
+                onSwipeUpProgress = { progress ->
+                    isSwipingUpQueue = true
+                    swipeUpProgress = progress
+                },
+                onSwipeUpComplete = {
+                    isSwipingUpQueue = false
+                    swipeUpProgress = 0f
+                    // Dismiss hint when queue is opened
+                    if (showSwipeUpHint) {
+                        showSwipeUpHint = false
+                        OnboardingPreferences.markSwipeUpHintAsShown(context)
+                    }
+                    playerViewModel.setQueueSheetVisible(true)
+                },
+                onSwipeUpCancel = {
+                    isSwipingUpQueue = false
+                    swipeUpProgress = 0f
                 },
                 modifier = Modifier
                     .fillMaxSize()
@@ -350,10 +383,21 @@ fun MusicalityApp(openPlayerOnStart: Boolean = false) {
                 isVisible = isQueueSheetVisible,
                 onDismiss = { playerViewModel.setQueueSheetVisible(false) },
                 onSongClick = { song -> playerViewModel.playFromQueue(song) },
+                dragProgress = swipeUpProgress,
+                isDragging = isSwipingUpQueue,
                 modifier = Modifier
                     .fillMaxSize()
                     .zIndex(3f) // On top of player
             )
+            
+            // BackHandler for expanded player - placed AFTER content so it takes precedence
+            // over navigation back handling when the player is expanded
+            BackHandler(enabled = isQueueSheetVisible || isExpanded) {
+                when {
+                    isQueueSheetVisible -> playerViewModel.setQueueSheetVisible(false)
+                    isExpanded -> playerViewModel.setExpanded(false)
+                }
+            }
         }
     }
 }

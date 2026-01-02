@@ -46,11 +46,11 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import coil3.compose.AsyncImage
 import com.example.musicality.domain.model.SongPlaybackInfo
-import com.example.musicality.ui.components.MarqueeText
 import com.example.musicality.util.UiState
 import kotlin.math.PI
 import kotlin.math.min
 import kotlin.math.sin
+import com.example.musicality.ui.components.SwipeUpTutorialOverlay
 
 /**
  * A squircle shape - a mathematical hybrid between a square and a circle.
@@ -140,6 +140,11 @@ fun CollapsiblePlayer(
     onNext: () -> Unit = {},
     onPrevious: () -> Unit = {},
     onViewArtist: (channelId: String) -> Unit = {},
+    showSwipeUpHint: Boolean = false,
+    onSwipeUpHintDismissed: () -> Unit = {},
+    onSwipeUpProgress: (Float) -> Unit = {},
+    onSwipeUpComplete: () -> Unit = {},
+    onSwipeUpCancel: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     when (playerState) {
@@ -167,6 +172,11 @@ fun CollapsiblePlayer(
                         onNext = onNext,
                         onPrevious = onPrevious,
                         onViewArtist = onViewArtist,
+                        showSwipeUpHint = showSwipeUpHint,
+                        onSwipeUpHintDismissed = onSwipeUpHintDismissed,
+                        onSwipeUpProgress = onSwipeUpProgress,
+                        onSwipeUpComplete = onSwipeUpComplete,
+                        onSwipeUpCancel = onSwipeUpCancel,
                         modifier = modifier
                     )
                 } else {
@@ -242,6 +252,11 @@ fun ExpandedPlayer(
     onNext: () -> Unit = {},
     onPrevious: () -> Unit = {},
     onViewArtist: (channelId: String) -> Unit = {},
+    showSwipeUpHint: Boolean = false,
+    onSwipeUpHintDismissed: () -> Unit = {},
+    onSwipeUpProgress: (Float) -> Unit = {},
+    onSwipeUpComplete: () -> Unit = {},
+    onSwipeUpCancel: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val scope = rememberCoroutineScope()
@@ -274,10 +289,18 @@ fun ExpandedPlayer(
     val squircleShape = SquircleShape(cornerRadius = 24.dp)
     val contentWidth = 0.9f // Increased to 90% width
     
+    // Calculate background alpha based on drag offset
+    // 1f when fully expanded (offsetY = 0), fading to 0f when dragged down
+    val backgroundAlpha by remember {
+        derivedStateOf {
+            (1f - (offsetY.value / screenHeightPx).coerceIn(0f, 1f))
+        }
+    }
+    
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(color = Color.Black)
+            .background(color = Color.Black.copy(alpha = backgroundAlpha))
     ) {
 
         // Dark overlay for better readability - also follows drag
@@ -285,7 +308,7 @@ fun ExpandedPlayer(
             modifier = Modifier
                 .fillMaxSize()
                 .offset { androidx.compose.ui.unit.IntOffset(0, offsetY.value.toInt()) } // Follow drag
-                .background(Color.Black.copy(alpha = 0.4f))
+                .background(Color.Black.copy(alpha = 0.4f * backgroundAlpha))
         )
         
         // Content container with gesture handling
@@ -296,38 +319,74 @@ fun ExpandedPlayer(
                 .pointerInput(Unit) {
                     awaitPointerEventScope {
                         while (true) {
-                            val pointerId = awaitFirstDown().id
+                            val down = awaitFirstDown()
+                            val pointerId = down.id
+                            val initialTouchY = down.position.y
+                            var totalDragY = 0f
+                            val maxSwipeDistance = size.height * 0.5f // Max distance for full swipe
+                            
+                            // Check if touch started in bottom 40% of screen
+                            val isInSwipeUpZone = initialTouchY > size.height * 0.6f
                             
                             drag(pointerId) { change ->
                                 val dragAmount = change.positionChange().y
-                                val newOffset = (offsetY.value + dragAmount).coerceAtLeast(0f)
+                                totalDragY += dragAmount
                                 
-                                scope.launch {
-                                    offsetY.snapTo(newOffset)
+                                // Upward swipes (negative Y) - report progress for queue sheet
+                                // Only process if touch started in bottom 40% zone
+                                if (totalDragY < 0 && isInSwipeUpZone) {
+                                    val progress = (-totalDragY / maxSwipeDistance).coerceIn(0f, 1f)
+                                    onSwipeUpProgress(progress)
+                                }
+                                
+                                // Downward drags for collapse (works from anywhere)
+                                if (dragAmount > 0 && totalDragY >= 0) {
+                                    val newOffset = (offsetY.value + dragAmount).coerceAtLeast(0f)
+                                    
+                                    scope.launch {
+                                        offsetY.snapTo(newOffset)
+                                    }
                                 }
                                 
                                 if (change.positionChange() != androidx.compose.ui.geometry.Offset.Zero) change.consume()
                             }
                             
                             val threshold = size.height * 0.3f
-                            if (offsetY.value > threshold) {
-                                // Animate to bottom before calling onDragDown
-                                scope.launch {
-                                    offsetY.animateTo(
-                                        targetValue = size.height.toFloat(),
-                                        animationSpec = tween(
-                                            durationMillis = 300,
-                                            easing = FastOutSlowInEasing
-                                        )
-                                    )
-                                    onDragDown()
+                            val swipeUpThreshold = -150f // Swipe up sensitivity
+                            
+                            when {
+                                // Swipe up detected - complete queue opening
+                                // Only trigger if touch started in bottom 40% zone
+                                totalDragY < swipeUpThreshold && isInSwipeUpZone -> {
+                                    onSwipeUpHintDismissed() // Dismiss hint when user swipes
+                                    onSwipeUpComplete()
                                 }
-                            } else {
-                                scope.launch {
-                                    offsetY.animateTo(
-                                        targetValue = 0f,
-                                        animationSpec = spring(stiffness = Spring.StiffnessLow)
-                                    )
+                                // Swipe up started but didn't meet threshold - cancel
+                                // Only process if touch was in the swipe-up zone
+                                totalDragY < 0 && isInSwipeUpZone -> {
+                                    onSwipeUpCancel()
+                                }
+                                // Drag down past threshold - collapse player
+                                offsetY.value > threshold -> {
+                                    scope.launch {
+                                        offsetY.animateTo(
+                                            targetValue = size.height.toFloat(),
+                                            animationSpec = tween(
+                                                durationMillis = 300,
+                                                easing = FastOutSlowInEasing
+                                            )
+                                        )
+                                        onDragDown()
+                                    }
+                                }
+                                // Snap back to expanded position
+                                else -> {
+                                    scope.launch {
+                                        offsetY.animateTo(
+                                            targetValue = 0f,
+                                            animationSpec = spring(stiffness = Spring.StiffnessLow)
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -527,13 +586,14 @@ fun ExpandedPlayer(
                             Column(
                                 modifier = Modifier.weight(1f)
                             ) {
-                                // Song title with marquee for long names
-                                MarqueeText(
+                                // Song title with ellipsis for long names
+                                Text(
                                     text = songInfo.title,
                                     style = MaterialTheme.typography.headlineSmall,
                                     fontWeight = FontWeight.Bold,
                                     color = Color.White,
-                                    modifier = Modifier.fillMaxWidth(0.7f)
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                                 
                                 Spacer(modifier = Modifier.height(4.dp))
@@ -700,6 +760,24 @@ fun ExpandedPlayer(
                     )
                 }
             }
+        }
+        
+        // Swipe-up tutorial overlay for first-time users
+        if (showSwipeUpHint) {
+            // Full-screen dark overlay
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.4f))
+            )
+            
+            // Tutorial content
+            SwipeUpTutorialOverlay(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 20.dp),
+                animationSize = 120
+            )
         }
     }
 }
@@ -891,7 +969,7 @@ fun CollapsedPlayer(
             .fillMaxWidth()
             .height(80.dp)
             .clickable(onClick = onClick),
-        color = MaterialTheme.colorScheme.surfaceVariant,
+        color = Color.White.copy(alpha = 0.1f),
         tonalElevation = 8.dp
     ) {
         Row(
@@ -919,6 +997,7 @@ fun CollapsedPlayer(
                 Text(
                     text = songInfo.title,
                     style = MaterialTheme.typography.titleMedium,
+                    color = Color.White,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis

@@ -31,7 +31,6 @@ import com.example.musicality.domain.model.AlbumDetail
 import com.example.musicality.domain.model.AlbumSong
 import com.example.musicality.domain.model.QueueSong
 import com.example.musicality.domain.model.RelatedAlbum
-import com.example.musicality.ui.components.MarqueeText
 import com.example.musicality.util.ImageUtils
 import com.example.musicality.util.UiState
 
@@ -411,12 +410,13 @@ private fun AlbumSongItem(
             Column(
                 modifier = Modifier.weight(1f)
             ) {
-                MarqueeText(
+                Text(
                     text = song.title,
                     style = MaterialTheme.typography.bodyLarge,
                     fontWeight = FontWeight.Medium,
                     color = Color.White,
-                    modifier = Modifier.fillMaxWidth(0.6f)
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
                 
                 if (song.viewCount.isNotBlank()) {
@@ -472,21 +472,23 @@ private fun RelatedAlbumItem(
         
         Spacer(modifier = Modifier.height(8.dp))
         
-        // Album name with marquee effect
-        MarqueeText(
+        // Album name with ellipsis
+        Text(
             text = album.albumName,
             style = MaterialTheme.typography.bodyMedium,
             fontWeight = FontWeight.Medium,
             color = Color.White,
-            modifier = Modifier.fillMaxWidth(0.7f)
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
         )
         
-        // Artist name with marquee effect
-        MarqueeText(
+        // Artist name with ellipsis
+        Text(
             text = album.albumArtist,
             style = MaterialTheme.typography.bodySmall,
             color = Color.White.copy(alpha = 0.6f),
-            modifier = Modifier.fillMaxWidth(0.6f)
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
         )
     }
 }
