@@ -1,13 +1,17 @@
 package com.example.musicality.ui.player
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import com.example.musicality.di.NetworkModule
+import com.example.musicality.domain.model.PlaybackContext
+import com.example.musicality.domain.model.PlaybackSource
 import com.example.musicality.domain.model.QueueSong
 import com.example.musicality.domain.model.SongPlaybackInfo
+import com.example.musicality.domain.repository.DownloadRepository
 import com.example.musicality.domain.repository.PlayerRepository
 import com.example.musicality.domain.repository.QueueRepository
 import com.example.musicality.util.UiState
@@ -20,6 +24,9 @@ class PlayerViewModel(
     private val repository: PlayerRepository = NetworkModule.providePlayerRepository(),
     private val queueRepository: QueueRepository = NetworkModule.provideQueueRepository()
 ) : ViewModel() {
+    
+    // Download repository - initialized lazily with context
+    private var downloadRepository: DownloadRepository? = null
 
     private val _playerState = MutableStateFlow<UiState<SongPlaybackInfo>>(UiState.Idle)
     val playerState: StateFlow<UiState<SongPlaybackInfo>> = _playerState.asStateFlow()
@@ -48,53 +55,72 @@ class PlayerViewModel(
     private val _isBuffering = MutableStateFlow(false)
     val isBuffering: StateFlow<Boolean> = _isBuffering.asStateFlow()
     
+    // Download state - true when current song is downloaded
+    private val _isDownloaded = MutableStateFlow(false)
+    val isDownloaded: StateFlow<Boolean> = _isDownloaded.asStateFlow()
+    
+    // Download in progress state
+    private val _isDownloading = MutableStateFlow(false)
+    val isDownloading: StateFlow<Boolean> = _isDownloading.asStateFlow()
+    
     // Store current videoId for queue fetching
     private var currentVideoId: String? = null
     
     // Track current position in queue for autoplay
     private var currentQueueIndex: Int = 0
+    
+    // Current playback context - tracks where the song is being played from
+    private var currentPlaybackContext: PlaybackContext = PlaybackContext()
 
     // Player instance (can be ExoPlayer directly or MediaController which implements Player)
     private var player: Player? = null
     private var progressJob: kotlinx.coroutines.Job? = null
 
     /**
-     * Load and play song - called when USER initiates playback (search result click)
+     * Load and play song from SEARCH - called when USER initiates playback from search result
      * This WILL fetch a new queue for the song
+     * Shows "NOW PLAYING" in the player header
      */
     fun playSong(videoId: String, thumbnailUrl: String) {
         currentVideoId = videoId
         currentQueueIndex = 0 // Reset queue index for new user-initiated playback
+        currentPlaybackContext = PlaybackContext(
+            source = PlaybackSource.SEARCH,
+            sourceName = ""
+        )
+        
         viewModelScope.launch {
             _playerState.value = UiState.Loading
             _isExpanded.value = true
             // Reset queue when playing new song from search
             _queueState.value = UiState.Idle
 
-            android.util.Log.d("PlayerViewModel", "Original thumbnail URL: $thumbnailUrl")
+            android.util.Log.d("PlayerViewModel", "Playing from SEARCH: $videoId")
 
             repository.getSongInfo(videoId).fold(
                 onSuccess = { songInfo ->
                     // Upscale the thumbnail URL from search results (w120-h120 to w544-h544)
                     val upscaledThumbnail = com.example.musicality.util.ImageUtils.upscaleThumbnail(thumbnailUrl)
                     
-                    android.util.Log.d("PlayerViewModel", "Upscaled thumbnail URL: $upscaledThumbnail")
-                    android.util.Log.d("PlayerViewModel", "API thumbnail URL: ${songInfo.thumbnailUrl}")
-                    
-                    // Replace the thumbnail URL with the upscaled version
-                    val updatedSongInfo = songInfo.copy(thumbnailUrl = upscaledThumbnail)
-                    
-                    android.util.Log.d("PlayerViewModel", "Final thumbnail URL used: ${updatedSongInfo.thumbnailUrl}")
+                    // Replace the thumbnail URL with the upscaled version and add context
+                    val updatedSongInfo = songInfo.copy(
+                        thumbnailUrl = upscaledThumbnail,
+                        playbackContext = currentPlaybackContext
+                    )
                     
                     _playerState.value = UiState.Success(updatedSongInfo)
                     preparePlayer(
                         url = songInfo.mainUrl,
                         title = updatedSongInfo.title,
                         artist = updatedSongInfo.author,
-                        artworkUrl = updatedSongInfo.thumbnailUrl
+                        artworkUrl = updatedSongInfo.thumbnailUrl,
+                        mimeType = songInfo.mimeType
                     )
                     
-                    // Fetch queue ONLY for user-initiated playback
+                    // Check download status
+                    checkDownloadStatus(videoId)
+                    
+                    // Fetch queue ONLY for user-initiated playback from search
                     fetchQueue(videoId)
                 },
                 onFailure = { exception ->
@@ -108,50 +134,66 @@ class PlayerViewModel(
     
     /**
      * Play album - sets album songs as queue without fetching related songs
-     * Supports shuffle mode to randomize playback order
+     * Shows "PLAYING FROM" + album name in the player header
      * 
      * @param albumSongs List of songs in the album (as QueueSong for compatibility)
+     * @param albumName Name of the album for display in "Playing From"
      * @param albumThumbnail Album artwork URL 
      * @param shuffle Whether to shuffle the songs
-     * @param startIndex Which song to start playing (0 = first, -1 = random if shuffle)
+     * @param startIndex Which song to start playing (default 0 = first)
      */
     fun playAlbum(
         albumSongs: List<QueueSong>,
+        albumName: String,
         albumThumbnail: String,
-        shuffle: Boolean = false
+        shuffle: Boolean = false,
+        startIndex: Int = 0
     ) {
         if (albumSongs.isEmpty()) return
+        
+        // Set playback context for album
+        currentPlaybackContext = PlaybackContext(
+            source = PlaybackSource.ALBUM,
+            sourceName = albumName
+        )
         
         // Create queue from album songs, optionally shuffled
         val queue = if (shuffle) albumSongs.shuffled() else albumSongs
         
         // Set the queue directly - NO API fetch
         _queueState.value = UiState.Success(queue)
-        currentQueueIndex = 0
+        currentQueueIndex = startIndex.coerceIn(0, queue.size - 1)
         
-        android.util.Log.d("PlayerViewModel", "Playing album with ${queue.size} songs, shuffle=$shuffle")
+        android.util.Log.d("PlayerViewModel", "Playing ALBUM: $albumName with ${queue.size} songs, shuffle=$shuffle, startIndex=$startIndex")
         
-        // Play the first song in the queue
-        val firstSong = queue.first()
-        currentVideoId = firstSong.videoId
+        // Play the selected song in the queue
+        val songToPlay = queue[currentQueueIndex]
+        currentVideoId = songToPlay.videoId
         
         viewModelScope.launch {
             _playerState.value = UiState.Loading
             _isExpanded.value = true
 
-            repository.getSongInfo(firstSong.videoId).fold(
+            repository.getSongInfo(songToPlay.videoId).fold(
                 onSuccess = { songInfo ->
                     // Use album thumbnail for consistency
-                    val thumbnailUrl = albumThumbnail.ifEmpty { firstSong.thumbnailUrl.ifEmpty { songInfo.thumbnailUrl } }
-                    val updatedSongInfo = songInfo.copy(thumbnailUrl = thumbnailUrl)
+                    val thumbnailUrl = albumThumbnail.ifEmpty { songToPlay.thumbnailUrl.ifEmpty { songInfo.thumbnailUrl } }
+                    val updatedSongInfo = songInfo.copy(
+                        thumbnailUrl = thumbnailUrl,
+                        playbackContext = currentPlaybackContext
+                    )
                     
                     _playerState.value = UiState.Success(updatedSongInfo)
                     preparePlayer(
                         url = songInfo.mainUrl,
                         title = updatedSongInfo.title,
                         artist = updatedSongInfo.author,
-                        artworkUrl = thumbnailUrl
+                        artworkUrl = thumbnailUrl,
+                        mimeType = songInfo.mimeType
                     )
+                    
+                    // Check download status
+                    checkDownloadStatus(songToPlay.videoId)
                     // NO queue fetch - we already set the album songs as queue
                 },
                 onFailure = { exception ->
@@ -164,8 +206,154 @@ class PlayerViewModel(
     }
     
     /**
+     * Play a specific song from an album - uses album as queue
+     * Shows "PLAYING FROM" + album name in the player header
+     * 
+     * @param videoId The video ID of the song to play
+     * @param albumSongs All songs in the album (will become the queue)
+     * @param albumName Name of the album for display
+     * @param albumThumbnail Album artwork URL
+     */
+    fun playSongFromAlbum(
+        videoId: String,
+        albumSongs: List<QueueSong>,
+        albumName: String,
+        albumThumbnail: String
+    ) {
+        if (albumSongs.isEmpty()) return
+        
+        // Find the index of the clicked song in the album
+        val clickedIndex = albumSongs.indexOfFirst { it.videoId == videoId }
+        if (clickedIndex == -1) {
+            // Song not found in album, play from search instead
+            android.util.Log.w("PlayerViewModel", "Song $videoId not found in album, falling back to search")
+            playSong(videoId, albumThumbnail)
+            return
+        }
+        
+        // Play album starting from the clicked song
+        playAlbum(
+            albumSongs = albumSongs,
+            albumName = albumName,
+            albumThumbnail = albumThumbnail,
+            shuffle = false,
+            startIndex = clickedIndex
+        )
+    }
+    
+    /**
+     * Play playlist - sets playlist songs as queue without fetching related songs
+     * Shows "PLAYING FROM" + playlist name in the player header
+     * 
+     * @param playlistSongs List of songs in the playlist (as QueueSong for compatibility)
+     * @param playlistName Name of the playlist for display in "Playing From"
+     * @param playlistThumbnail Playlist artwork URL 
+     * @param shuffle Whether to shuffle the songs
+     * @param startIndex Which song to start playing (default 0 = first)
+     */
+    fun playPlaylist(
+        playlistSongs: List<QueueSong>,
+        playlistName: String,
+        playlistThumbnail: String,
+        shuffle: Boolean = false,
+        startIndex: Int = 0
+    ) {
+        if (playlistSongs.isEmpty()) return
+        
+        // Set playback context for playlist
+        currentPlaybackContext = PlaybackContext(
+            source = PlaybackSource.PLAYLIST,
+            sourceName = playlistName
+        )
+        
+        // Create queue from playlist songs, optionally shuffled
+        val queue = if (shuffle) playlistSongs.shuffled() else playlistSongs
+        
+        // Set the queue directly - NO API fetch
+        _queueState.value = UiState.Success(queue)
+        currentQueueIndex = startIndex.coerceIn(0, queue.size - 1)
+        
+        android.util.Log.d("PlayerViewModel", "Playing PLAYLIST: $playlistName with ${queue.size} songs, shuffle=$shuffle, startIndex=$startIndex")
+        
+        // Play the selected song in the queue
+        val songToPlay = queue[currentQueueIndex]
+        currentVideoId = songToPlay.videoId
+        
+        viewModelScope.launch {
+            _playerState.value = UiState.Loading
+            _isExpanded.value = true
+
+            repository.getSongInfo(songToPlay.videoId).fold(
+                onSuccess = { songInfo ->
+                    // Use playlist thumbnail or song thumbnail
+                    val thumbnailUrl = songToPlay.thumbnailUrl.ifEmpty { playlistThumbnail.ifEmpty { songInfo.thumbnailUrl } }
+                    val updatedSongInfo = songInfo.copy(
+                        thumbnailUrl = thumbnailUrl,
+                        playbackContext = currentPlaybackContext
+                    )
+                    
+                    _playerState.value = UiState.Success(updatedSongInfo)
+                    preparePlayer(
+                        url = songInfo.mainUrl,
+                        title = updatedSongInfo.title,
+                        artist = updatedSongInfo.author,
+                        artworkUrl = thumbnailUrl,
+                        mimeType = songInfo.mimeType
+                    )
+                    
+                    // Check download status
+                    checkDownloadStatus(songToPlay.videoId)
+                    // NO queue fetch - we already set the playlist songs as queue
+                },
+                onFailure = { exception ->
+                    _playerState.value = UiState.Error(
+                        exception.message ?: "Failed to load song"
+                    )
+                }
+            )
+        }
+    }
+    
+    /**
+     * Play a specific song from a playlist - uses playlist as queue
+     * Shows "PLAYING FROM" + playlist name in the player header
+     * 
+     * @param videoId The video ID of the song to play
+     * @param playlistSongs All songs in the playlist (will become the queue)
+     * @param playlistName Name of the playlist for display
+     * @param playlistThumbnail Playlist artwork URL
+     */
+    fun playSongFromPlaylist(
+        videoId: String,
+        playlistSongs: List<QueueSong>,
+        playlistName: String,
+        playlistThumbnail: String
+    ) {
+        if (playlistSongs.isEmpty()) return
+        
+        // Find the index of the clicked song in the playlist
+        val clickedIndex = playlistSongs.indexOfFirst { it.videoId == videoId }
+        if (clickedIndex == -1) {
+            // Song not found in playlist, play from search instead
+            android.util.Log.w("PlayerViewModel", "Song $videoId not found in playlist, falling back to search")
+            playSong(videoId, playlistThumbnail)
+            return
+        }
+        
+        // Play playlist starting from the clicked song
+        playPlaylist(
+            playlistSongs = playlistSongs,
+            playlistName = playlistName,
+            playlistThumbnail = playlistThumbnail,
+            shuffle = false,
+            startIndex = clickedIndex
+        )
+    }
+    
+    /**
      * Internal method to play a song from the queue WITHOUT fetching a new queue
      * Used for autoplay and manual queue item selection
+     * Preserves the current playback context
      * 
      * IMPORTANT: Does NOT set Loading state to prevent UI re-render
      * The current song stays visible while the new one loads
@@ -184,7 +372,11 @@ class PlayerViewModel(
                 onSuccess = { songInfo ->
                     // Use thumbnail from queue song (already has good resolution)
                     val thumbnailUrl = queueSong.thumbnailUrl.ifEmpty { songInfo.thumbnailUrl }
-                    val updatedSongInfo = songInfo.copy(thumbnailUrl = thumbnailUrl)
+                    // Preserve playback context when playing from queue
+                    val updatedSongInfo = songInfo.copy(
+                        thumbnailUrl = thumbnailUrl,
+                        playbackContext = currentPlaybackContext
+                    )
                     
                     // Directly update to Success - smooth transition
                     _playerState.value = UiState.Success(updatedSongInfo)
@@ -192,8 +384,12 @@ class PlayerViewModel(
                         url = songInfo.mainUrl,
                         title = updatedSongInfo.title,
                         artist = updatedSongInfo.author,
-                        artworkUrl = thumbnailUrl
+                        artworkUrl = thumbnailUrl,
+                        mimeType = songInfo.mimeType
                     )
+                    
+                    // Check download status
+                    checkDownloadStatus(queueSong.videoId)
                     // NO queue fetch here - queue stays the same
                 },
                 onFailure = { exception ->
@@ -257,6 +453,7 @@ class PlayerViewModel(
     
     /**
      * Fetch related songs queue for the currently playing song
+     * Only used for songs played from search
      */
     private fun fetchQueue(videoId: String) {
         viewModelScope.launch {
@@ -322,7 +519,11 @@ class PlayerViewModel(
             override fun onPlaybackStateChanged(playbackState: Int) {
                 when (playbackState) {
                     Player.STATE_BUFFERING -> {
-                        _isBuffering.value = true
+                        // Only show buffering if we're not ready yet
+                        // This prevents the loader from staying visible during seeks
+                        if (playerInstance.playbackState != Player.STATE_READY) {
+                            _isBuffering.value = true
+                        }
                     }
                     Player.STATE_READY -> {
                         _isBuffering.value = false
@@ -362,28 +563,114 @@ class PlayerViewModel(
     
     /**
      * Seek to position
+     * Optimistically update the position to prevent UI snap-back
      */
     fun seekTo(position: Long) {
-        player?.seekTo(position)
-        _currentPosition.value = position
+        player?.let { p ->
+            p.seekTo(position)
+            // Optimistically update position immediately to prevent snap-back
+            _currentPosition.value = position
+        }
     }
     
     /**
      * Seek to fraction of duration (0.0 to 1.0)
      */
     fun seekToFraction(fraction: Float) {
-        val targetPosition = (fraction * _duration.value).toLong()
+        val duration = _duration.value
+        if (duration <= 0) return
+        
+        val targetPosition = (fraction * duration).toLong()
         seekTo(targetPosition)
     }
 
     /**
+     * Initialize download repository with context
+     * Must be called before download functionality can be used
+     */
+    fun initializeDownloadRepository(context: Context) {
+        if (downloadRepository == null) {
+            downloadRepository = NetworkModule.provideDownloadRepository(context)
+        }
+    }
+    
+    /**
+     * Check if current song is downloaded
+     */
+    private fun checkDownloadStatus(videoId: String) {
+        viewModelScope.launch {
+            val isDownloaded = downloadRepository?.isDownloaded(videoId) ?: false
+            _isDownloaded.value = isDownloaded
+        }
+    }
+    
+    /**
+     * Download current song
+     */
+    fun downloadCurrentSong() {
+        val songInfo = (_playerState.value as? UiState.Success)?.data ?: return
+        val repo = downloadRepository ?: run {
+            android.util.Log.e("PlayerViewModel", "DownloadRepository not initialized")
+            return
+        }
+        
+        viewModelScope.launch {
+            _isDownloading.value = true
+            android.util.Log.d("PlayerViewModel", "Starting download for: ${songInfo.title}")
+            
+            repo.downloadSong(
+                videoId = songInfo.videoId,
+                url = songInfo.mainUrl,
+                title = songInfo.title,
+                author = songInfo.author,
+                thumbnailUrl = songInfo.thumbnailUrl,
+                duration = songInfo.lengthSeconds,
+                channelId = songInfo.channelId,
+                mimeType = songInfo.mimeType
+            ).fold(
+                onSuccess = { downloadedSong ->
+                    android.util.Log.d("PlayerViewModel", "Download complete: ${downloadedSong.filePath}")
+                    _isDownloaded.value = true
+                    _isDownloading.value = false
+                },
+                onFailure = { exception ->
+                    android.util.Log.e("PlayerViewModel", "Download failed", exception)
+                    _isDownloading.value = false
+                }
+            )
+        }
+    }
+    
+    /**
+     * Delete downloaded song
+     */
+    fun deleteDownloadedSong() {
+        val songInfo = (_playerState.value as? UiState.Success)?.data ?: return
+        val repo = downloadRepository ?: return
+        
+        viewModelScope.launch {
+            repo.deleteDownloadedSong(songInfo.videoId).fold(
+                onSuccess = {
+                    android.util.Log.d("PlayerViewModel", "Deleted download: ${songInfo.title}")
+                    _isDownloaded.value = false
+                },
+                onFailure = { exception ->
+                    android.util.Log.e("PlayerViewModel", "Delete failed", exception)
+                }
+            )
+        }
+    }
+    
+    /**
      * Prepare player with audio URL and metadata for notification
+     * Let ExoPlayer auto-detect the stream format for better seeking support
      */
     private fun preparePlayer(
         url: String,
         title: String,
         artist: String,
-        artworkUrl: String
+        artworkUrl: String,
+        mimeType: String = "audio/webm"
     ) {
         player?.let { p ->
             // Build MediaMetadata for notification display
@@ -393,11 +680,15 @@ class PlayerViewModel(
                 .setArtworkUri(android.net.Uri.parse(artworkUrl))
                 .build()
             
-            // Build MediaItem with metadata
+            // Build MediaItem WITHOUT explicit MIME type
+            // Let ExoPlayer's DefaultExtractorsFactory auto-detect the container format
+            // This prevents seeking issues with YouTube Music streams that lack proper index seek points
             val mediaItem = MediaItem.Builder()
                 .setUri(url)
                 .setMediaMetadata(metadata)
                 .build()
+            
+            android.util.Log.d("PlayerViewModel", "Preparing player - url prefix: ${url.take(80)}...")
             
             p.setMediaItem(mediaItem)
             p.prepare()
@@ -444,6 +735,7 @@ class PlayerViewModel(
         _isQueueSheetVisible.value = false
         currentVideoId = null
         currentQueueIndex = 0
+        currentPlaybackContext = PlaybackContext()
     }
 
     override fun onCleared() {

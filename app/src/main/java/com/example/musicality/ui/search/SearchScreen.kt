@@ -25,6 +25,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.compose.AsyncImage
 import com.example.musicality.domain.model.SearchResult
+import com.example.musicality.ui.components.SkeletonSongItem
+import com.example.musicality.ui.components.SkeletonSuggestionsSection
 import com.example.musicality.util.UiState
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -35,6 +37,7 @@ fun SearchScreen(
     onAlbumClick: (albumId: String) -> Unit = { },
     onPlaylistClick: (playlistId: String) -> Unit = { },
     onArtistClick: (artistId: String) -> Unit = { },
+    onSearchResultsClick: (query: String) -> Unit = { },
     bottomPadding: androidx.compose.ui.unit.Dp = 0.dp
 ) {
     val searchQuery by viewModel.searchQuery.collectAsState()
@@ -51,6 +54,12 @@ fun SearchScreen(
             query = searchQuery,
             onQueryChange = { viewModel.updateSearchQuery(it) },
             onClear = { viewModel.clearSearch() },
+            onSearch = { 
+                // Navigate to search results page when user presses Enter/Go
+                if (searchQuery.isNotBlank()) {
+                    onSearchResultsClick(searchQuery)
+                }
+            },
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(12.dp)
@@ -63,11 +72,23 @@ fun SearchScreen(
             }
 
             is UiState.Loading -> {
-                Box(
+                // Shimmer skeleton loading - shows ghost items that mimic actual content
+                LazyColumn(
                     modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    CircularProgressIndicator()
+                    // Ghost Suggestions Section
+                    item {
+                        SkeletonSuggestionsSection(suggestionCount = 4)
+                    }
+                    
+                    // Ghost Results Section
+                    items(6) {
+                        SkeletonSongItem(
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
                 }
             }
 
@@ -78,6 +99,7 @@ fun SearchScreen(
                     onAlbumClick = onAlbumClick,
                     onPlaylistClick = onPlaylistClick,
                     onArtistClick = onArtistClick,
+                    onSuggestionClick = onSearchResultsClick,
                     modifier = Modifier.fillMaxSize()
                 )
             }
@@ -98,6 +120,7 @@ fun SearchBar(
     query: String,
     onQueryChange: (String) -> Unit,
     onClear: () -> Unit,
+    onSearch: () -> Unit = {}, // Called when user presses Enter/Go
     modifier: Modifier = Modifier
 ) {
     TextField(
@@ -141,7 +164,17 @@ fun SearchBar(
             unfocusedIndicatorColor = Color.Transparent,
             disabledIndicatorColor = Color.Transparent
         ),
-        singleLine = true
+        singleLine = true,
+        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+            imeAction = androidx.compose.ui.text.input.ImeAction.Search
+        ),
+        keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+            onSearch = {
+                if (query.isNotBlank()) {
+                    onSearch()
+                }
+            }
+        )
     )
 }
 
@@ -152,6 +185,7 @@ fun SearchResults(
     onAlbumClick: (albumId: String) -> Unit = { },
     onPlaylistClick: (playlistId: String) -> Unit = { },
     onArtistClick: (artistId: String) -> Unit = { },
+    onSuggestionClick: (query: String) -> Unit = { },
     modifier: Modifier = Modifier
 ) {
     LazyColumn(
@@ -162,7 +196,10 @@ fun SearchResults(
         // Suggestions Section
         if (searchResponse.suggestions.isNotEmpty()) {
             item {
-                SuggestionsSection(suggestions = searchResponse.suggestions)
+                SuggestionsSection(
+                    suggestions = searchResponse.suggestions,
+                    onSuggestionClick = onSuggestionClick
+                )
             }
         }
 
@@ -212,7 +249,10 @@ fun SearchResults(
 }
 
 @Composable
-fun SuggestionsSection(suggestions: List<String>) {
+fun SuggestionsSection(
+    suggestions: List<String>,
+    onSuggestionClick: (String) -> Unit = { }
+) {
     Column(
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
@@ -224,18 +264,24 @@ fun SuggestionsSection(suggestions: List<String>) {
         )
 
         suggestions.take(5).forEach { suggestion ->
-            SuggestionChip(suggestion = suggestion)
+            SuggestionChip(
+                suggestion = suggestion,
+                onClick = { onSuggestionClick(suggestion) }
+            )
         }
     }
 }
 
 @Composable
-fun SuggestionChip(suggestion: String) {
+fun SuggestionChip(
+    suggestion: String,
+    onClick: () -> Unit = { }
+) {
     Surface(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
-            .clickable { /* Handle suggestion click */ },
+            .clickable(onClick = onClick),
             color = Color.White.copy(alpha = 0.08f)
     ) {
         Row(

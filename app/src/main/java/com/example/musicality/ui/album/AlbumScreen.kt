@@ -31,6 +31,7 @@ import com.example.musicality.domain.model.AlbumDetail
 import com.example.musicality.domain.model.AlbumSong
 import com.example.musicality.domain.model.QueueSong
 import com.example.musicality.domain.model.RelatedAlbum
+import com.example.musicality.ui.components.SkeletonAlbumScreen
 import com.example.musicality.util.ImageUtils
 import com.example.musicality.util.UiState
 
@@ -43,8 +44,8 @@ fun AlbumScreen(
     albumId: String,
     viewModel: AlbumViewModel = viewModel(),
     onBackClick: () -> Unit = {},
-    onSongClick: (videoId: String, thumbnailUrl: String) -> Unit = { _, _ -> },
-    onPlayAlbum: (albumSongs: List<QueueSong>, albumThumbnail: String, shuffle: Boolean) -> Unit = { _, _, _ -> },
+    onSongClick: (videoId: String, albumSongs: List<QueueSong>, albumName: String, albumThumbnail: String) -> Unit = { _, _, _, _ -> },
+    onPlayAlbum: (albumSongs: List<QueueSong>, albumName: String, albumThumbnail: String, shuffle: Boolean) -> Unit = { _, _, _, _ -> },
     onAlbumClick: (albumId: String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -62,12 +63,13 @@ fun AlbumScreen(
     ) {
         when (val state = albumState) {
             is UiState.Loading -> {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CircularProgressIndicator(color = Color.White)
-                }
+                // Shimmer skeleton loading - mimics actual album layout
+                SkeletonAlbumScreen(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .statusBarsPadding()
+                        .navigationBarsPadding()
+                )
             }
             
             is UiState.Success -> {
@@ -88,13 +90,13 @@ fun AlbumScreen(
             }
             
             else -> {
-                // Idle state - show loading indicator
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CircularProgressIndicator(color = Color.White)
-                }
+                // Idle state - show shimmer skeleton
+                SkeletonAlbumScreen(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .statusBarsPadding()
+                        .navigationBarsPadding()
+                )
             }
         }
     }
@@ -104,8 +106,8 @@ fun AlbumScreen(
 private fun AlbumContent(
     albumDetail: AlbumDetail,
     onBackClick: () -> Unit,
-    onSongClick: (videoId: String, thumbnailUrl: String) -> Unit,
-    onPlayAlbum: (albumSongs: List<QueueSong>, albumThumbnail: String, shuffle: Boolean) -> Unit,
+    onSongClick: (videoId: String, albumSongs: List<QueueSong>, albumName: String, albumThumbnail: String) -> Unit,
+    onPlayAlbum: (albumSongs: List<QueueSong>, albumName: String, albumThumbnail: String, shuffle: Boolean) -> Unit,
     onAlbumClick: (albumId: String) -> Unit
 ) {
     // Track if album is currently playing
@@ -146,20 +148,23 @@ private fun AlbumContent(
                     // Play album and mark as playing
                     if (albumSongsAsQueue.isNotEmpty()) {
                         isAlbumPlaying = true
-                        onPlayAlbum(albumSongsAsQueue, albumDetail.albumThumbnail, isShuffleEnabled)
+                        onPlayAlbum(albumSongsAsQueue, albumDetail.albumName, albumDetail.albumThumbnail, isShuffleEnabled)
                     }
                 }
             )
         }
         
-        // Songs list
+        // Songs list - clicking a song uses album as queue
         items(
             items = albumDetail.songs,
             key = { it.videoId }
         ) { song ->
             AlbumSongItem(
                 song = song,
-                onClick = { onSongClick(song.videoId, albumDetail.albumThumbnail) }
+                onClick = { 
+                    // Pass album context so queue becomes the album
+                    onSongClick(song.videoId, albumSongsAsQueue, albumDetail.albumName, albumDetail.albumThumbnail) 
+                }
             )
         }
         

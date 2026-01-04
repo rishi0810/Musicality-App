@@ -27,6 +27,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.compose.AsyncImage
 import com.example.musicality.R
 import com.example.musicality.domain.model.*
+import com.example.musicality.ui.components.SkeletonArtistScreen
 import com.example.musicality.util.ImageUtils
 import com.example.musicality.util.UiState
 
@@ -63,12 +64,15 @@ fun ArtistScreen(
     ) {
         when (val state = uiState) {
             is UiState.Idle -> {
-                // Initial state
+                // Initial state - show shimmer skeleton for immediate feedback
+                SkeletonArtistScreen(
+                    modifier = Modifier.fillMaxSize()
+                )
             }
             is UiState.Loading -> {
-                CircularProgressIndicator(
-                    modifier = Modifier.align(Alignment.Center),
-                    color = Color.White
+                // Shimmer skeleton loading - mimics actual artist layout
+                SkeletonArtistScreen(
+                    modifier = Modifier.fillMaxSize()
                 )
             }
             is UiState.Success -> {

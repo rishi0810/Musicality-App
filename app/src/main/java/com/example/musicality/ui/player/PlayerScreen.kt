@@ -1,40 +1,40 @@
 package com.example.musicality.ui.player
 
 import android.content.Intent
-import kotlinx.coroutines.launch
+import android.graphics.Bitmap
+import android.graphics.drawable.BitmapDrawable
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.ui.input.pointer.positionChange
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Density
@@ -42,23 +42,44 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalDensity
+import androidx.palette.graphics.Palette
 import coil3.compose.AsyncImage
+import coil3.compose.AsyncImagePainter
+import coil3.compose.rememberAsyncImagePainter
+import coil3.request.ImageRequest
+import coil3.request.allowHardware
+import coil3.toBitmap
+import com.example.musicality.R
+import com.example.musicality.domain.model.PlaybackSource
 import com.example.musicality.domain.model.SongPlaybackInfo
-import com.example.musicality.util.UiState
-import kotlin.math.PI
-import kotlin.math.min
-import kotlin.math.sin
 import com.example.musicality.ui.components.SwipeUpTutorialOverlay
+import com.example.musicality.util.UiState
+import kotlinx.coroutines.launch
+import kotlin.math.min
 
-/**
- * A squircle shape - a mathematical hybrid between a square and a circle.
- * Uses Bezier curves to create smooth, organic corners like Apple's app icons.
- */
+// ============================================================================
+// COLOR CONSTANTS
+// ============================================================================
+
+private val PrimaryAccentColor = Color(0xFF607AFB) // Primary purple accent
+private val DefaultBackgroundDark = Color(0xFF0F1323) // Deep dark blue
+private val GlowColor = Color(0xFF7F13EC) // Purple glow
+private val TextSecondaryColor = Color.White.copy(alpha = 0.6f)
+private val TextMutedColor = Color.White.copy(alpha = 0.5f)
+private val ProgressTrackColor = Color.White.copy(alpha = 0.2f)
+private val ProgressBufferColor = Color.White.copy(alpha = 0.3f)
+private val QueueSheetBackground = Color(0xFF251A30)
+
+// Cached SquircleShape instance
+private val DefaultSquircleShape = SquircleShape(cornerRadius = 24.dp)
+
+// ============================================================================
+// SQUIRCLE SHAPE (Apple-style rounded corners)
+// ============================================================================
+
 class SquircleShape(private val cornerRadius: Dp = 24.dp) : Shape {
     override fun createOutline(
-        size: Size,
+        size: androidx.compose.ui.geometry.Size,
         layoutDirection: LayoutDirection,
         density: Density
     ): Outline {
@@ -66,61 +87,124 @@ class SquircleShape(private val cornerRadius: Dp = 24.dp) : Shape {
         val width = size.width
         val height = size.height
         
-        // Clamp radius to half of the smallest dimension
         val radius = min(radiusPx, min(width, height) / 2)
-        
-        // Smoothing factor for Bezier control points (0.55 is close to a circle, higher = more squircle)
         val smoothing = 0.6f
         val controlOffset = radius * (1 - smoothing)
         
         return Outline.Generic(
             Path().apply {
-                // Start from top-left corner, after the curve
                 moveTo(0f, radius)
-                
-                // Top-left corner (squircle curve using cubic Bezier)
-                cubicTo(
-                    0f, controlOffset,
-                    controlOffset, 0f,
-                    radius, 0f
-                )
-                
-                // Top edge
+                cubicTo(0f, controlOffset, controlOffset, 0f, radius, 0f)
                 lineTo(width - radius, 0f)
-                
-                // Top-right corner
-                cubicTo(
-                    width - controlOffset, 0f,
-                    width, controlOffset,
-                    width, radius
-                )
-                
-                // Right edge
+                cubicTo(width - controlOffset, 0f, width, controlOffset, width, radius)
                 lineTo(width, height - radius)
-                
-                // Bottom-right corner
-                cubicTo(
-                    width, height - controlOffset,
-                    width - controlOffset, height,
-                    width - radius, height
-                )
-                
-                // Bottom edge
+                cubicTo(width, height - controlOffset, width - controlOffset, height, width - radius, height)
                 lineTo(radius, height)
-                
-                // Bottom-left corner
-                cubicTo(
-                    controlOffset, height,
-                    0f, height - controlOffset,
-                    0f, height - radius
-                )
-                
-                // Left edge (implicit close)
+                cubicTo(controlOffset, height, 0f, height - controlOffset, 0f, height - radius)
                 close()
             }
         )
     }
 }
+
+// ============================================================================
+// COLOR EXTRACTION UTILITIES
+// ============================================================================
+
+/**
+ * Data class holding extracted palette colors for the player background
+ */
+data class PlayerColors(
+    val primaryColor: Color = DefaultBackgroundDark,   // Main color from image (for gradient top)
+    val secondaryColor: Color = DefaultBackgroundDark, // Secondary color (for gradient middle)
+    val accentColor: Color = PrimaryAccentColor        // Vibrant accent (for buttons, progress)
+)
+
+/**
+ * Darkens a color by a factor (0.0 = black, 1.0 = original)
+ */
+private fun darkenColor(color: Color, factor: Float = 0.6f): Color {
+    return Color(
+        red = (color.red * factor).coerceIn(0f, 1f),
+        green = (color.green * factor).coerceIn(0f, 1f),
+        blue = (color.blue * factor).coerceIn(0f, 1f),
+        alpha = color.alpha
+    )
+}
+
+/**
+ * Calculates the saturation of a color (0.0 = gray, 1.0 = fully saturated)
+ */
+private fun calculateSaturation(color: Color): Float {
+    val max = maxOf(color.red, color.green, color.blue)
+    val min = minOf(color.red, color.green, color.blue)
+    return if (max == 0f) 0f else (max - min) / max
+}
+
+/**
+ * Extracts colors from a bitmap using Android's Palette API
+ * Prioritizes visually prominent colors (dominant and vibrant)
+ */
+private fun extractColors(bitmap: Bitmap?): PlayerColors {
+    if (bitmap == null) return PlayerColors()
+    
+    // Generate palette with more color samples for accuracy
+    val palette = Palette.from(bitmap)
+        .maximumColorCount(16)
+        .generate()
+    
+    // Get all available swatches, sorted by population (most common first)
+    val dominantSwatch = palette.dominantSwatch
+    val vibrantSwatch = palette.vibrantSwatch
+    val darkVibrantSwatch = palette.darkVibrantSwatch
+    val lightVibrantSwatch = palette.lightVibrantSwatch
+    val mutedSwatch = palette.mutedSwatch
+    val darkMutedSwatch = palette.darkMutedSwatch
+    
+    // Primary color: Use DOMINANT color (most common in image)
+    // This should pick up the main visual color
+    val primaryColor = dominantSwatch?.rgb?.let { Color(it) } 
+        ?: darkMutedSwatch?.rgb?.let { Color(it) }
+        ?: DefaultBackgroundDark
+    
+    // Secondary color: Use dark vibrant or dark muted for a complementary darker tone
+    // Falls back to darkened dominant if not available
+    val secondaryColor = darkVibrantSwatch?.rgb?.let { Color(it) }
+        ?: darkMutedSwatch?.rgb?.let { Color(it) }
+        ?: darkenColor(primaryColor, 0.5f)
+    
+    // Accent color: Use VIBRANT for eye-catching UI elements (buttons, progress)
+    // Prioritize vibrant > light vibrant > dark vibrant > dominant
+    val accentColor = vibrantSwatch?.rgb?.let { Color(it) }
+        ?: lightVibrantSwatch?.rgb?.let { Color(it) }
+        ?: darkVibrantSwatch?.rgb?.let { Color(it) }
+        ?: dominantSwatch?.rgb?.let { Color(it) }
+        ?: PrimaryAccentColor
+    
+    // Check if primary color has enough saturation to be visually interesting
+    // If too gray/desaturated, try to use a more vibrant alternative
+    val finalPrimary = if (calculateSaturation(primaryColor) < 0.2f) {
+        // Primary is too gray, try vibrant colors instead
+        vibrantSwatch?.rgb?.let { Color(it) }
+            ?: darkVibrantSwatch?.rgb?.let { Color(it) }
+            ?: primaryColor
+    } else {
+        primaryColor
+    }
+    
+    android.util.Log.d("PlayerColors", "Extracted - Primary: $finalPrimary, Secondary: $secondaryColor, Accent: $accentColor")
+    android.util.Log.d("PlayerColors", "Swatches - Dominant: ${dominantSwatch?.rgb}, Vibrant: ${vibrantSwatch?.rgb}, DarkVibrant: ${darkVibrantSwatch?.rgb}")
+    
+    return PlayerColors(
+        primaryColor = finalPrimary,
+        secondaryColor = secondaryColor,
+        accentColor = accentColor
+    )
+}
+
+// ============================================================================
+// MAIN COLLAPSIBLE PLAYER
+// ============================================================================
 
 @Composable
 fun CollapsiblePlayer(
@@ -128,6 +212,9 @@ fun CollapsiblePlayer(
     isPlaying: Boolean,
     isExpanded: Boolean,
     isBuffering: Boolean = false,
+    isLiked: Boolean = false,
+    isDownloaded: Boolean = false,
+    isDownloading: Boolean = false,
     onTogglePlayPause: () -> Unit,
     onClose: () -> Unit,
     onToggleExpanded: () -> Unit,
@@ -140,6 +227,8 @@ fun CollapsiblePlayer(
     onNext: () -> Unit = {},
     onPrevious: () -> Unit = {},
     onViewArtist: (channelId: String) -> Unit = {},
+    onToggleLike: () -> Unit = {},
+    onDownload: () -> Unit = {},
     showSwipeUpHint: Boolean = false,
     onSwipeUpHintDismissed: () -> Unit = {},
     onSwipeUpProgress: (Float) -> Unit = {},
@@ -161,6 +250,9 @@ fun CollapsiblePlayer(
                         songInfo = songInfo,
                         isPlaying = isPlaying,
                         isBuffering = isBuffering,
+                        isLiked = isLiked,
+                        isDownloaded = isDownloaded,
+                        isDownloading = isDownloading,
                         onTogglePlayPause = onTogglePlayPause,
                         onClose = onClose,
                         onDragDown = onDragDown,
@@ -172,6 +264,8 @@ fun CollapsiblePlayer(
                         onNext = onNext,
                         onPrevious = onPrevious,
                         onViewArtist = onViewArtist,
+                        onToggleLike = onToggleLike,
+                        onDownload = onDownload,
                         showSwipeUpHint = showSwipeUpHint,
                         onSwipeUpHintDismissed = onSwipeUpHintDismissed,
                         onSwipeUpProgress = onSwipeUpProgress,
@@ -195,20 +289,23 @@ fun CollapsiblePlayer(
                 Box(
                     modifier = modifier
                         .fillMaxSize()
-                        .background(MaterialTheme.colorScheme.background),
+                        .background(DefaultBackgroundDark),
                     contentAlignment = Alignment.Center
                 ) {
-                    CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                    CircularProgressIndicator(color = PrimaryAccentColor)
                 }
             } else {
                 Box(
                     modifier = modifier
                         .fillMaxWidth()
                         .height(80.dp)
-                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                        .background(DefaultBackgroundDark),
                     contentAlignment = Alignment.Center
                 ) {
-                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    LinearProgressIndicator(
+                        modifier = Modifier.fillMaxWidth(),
+                        color = PrimaryAccentColor
+                    )
                 }
             }
         }
@@ -217,15 +314,18 @@ fun CollapsiblePlayer(
                 Box(
                     modifier = modifier
                         .fillMaxSize()
-                        .background(MaterialTheme.colorScheme.background)
+                        .background(DefaultBackgroundDark)
                         .padding(24.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(text = "Error loading song", style = MaterialTheme.typography.titleLarge)
-                        Text(text = playerState.message, style = MaterialTheme.typography.bodyMedium)
+                        Text(text = "Error loading song", style = MaterialTheme.typography.titleLarge, color = Color.White)
+                        Text(text = playerState.message, style = MaterialTheme.typography.bodyMedium, color = TextSecondaryColor)
                         Spacer(modifier = Modifier.height(16.dp))
-                        Button(onClick = onClose) {
+                        Button(
+                            onClick = onClose,
+                            colors = ButtonDefaults.buttonColors(containerColor = PrimaryAccentColor)
+                        ) {
                             Text("Close")
                         }
                     }
@@ -236,11 +336,18 @@ fun CollapsiblePlayer(
     }
 }
 
+// ============================================================================
+// EXPANDED PLAYER (NEW DESIGN)
+// ============================================================================
+
 @Composable
 fun ExpandedPlayer(
     songInfo: SongPlaybackInfo,
     isPlaying: Boolean,
     isBuffering: Boolean = false,
+    isLiked: Boolean = false,
+    isDownloaded: Boolean = false,
+    isDownloading: Boolean = false,
     onTogglePlayPause: () -> Unit,
     onClose: () -> Unit,
     onDragDown: () -> Unit,
@@ -252,6 +359,8 @@ fun ExpandedPlayer(
     onNext: () -> Unit = {},
     onPrevious: () -> Unit = {},
     onViewArtist: (channelId: String) -> Unit = {},
+    onToggleLike: () -> Unit = {},
+    onDownload: () -> Unit = {},
     showSwipeUpHint: Boolean = false,
     onSwipeUpHintDismissed: () -> Unit = {},
     onSwipeUpProgress: (Float) -> Unit = {},
@@ -260,14 +369,56 @@ fun ExpandedPlayer(
     modifier: Modifier = Modifier
 ) {
     val scope = rememberCoroutineScope()
-    
-    // Get screen height for smooth animation - calculate first before using
+    val context = LocalContext.current
     val configuration = LocalConfiguration.current
     val density = LocalDensity.current
     val screenHeightPx = with(density) { configuration.screenHeightDp.dp.toPx() }
     
     // Initialize off-screen to prevent flash
-    val offsetY = remember { androidx.compose.animation.core.Animatable(screenHeightPx) }
+    val offsetY = remember { Animatable(screenHeightPx) }
+    
+    // Extract colors from album art
+    var playerColors by remember { mutableStateOf(PlayerColors()) }
+    
+    // Load bitmap for color extraction
+    val imageRequest = remember(songInfo.thumbnailUrl) {
+        ImageRequest.Builder(context)
+            .data(songInfo.thumbnailUrl)
+            .allowHardware(false) // Required for Palette
+            .build()
+    }
+    
+    val painter = rememberAsyncImagePainter(imageRequest)
+    val painterState by painter.state.collectAsState()
+    
+    LaunchedEffect(painterState) {
+        when (val state = painterState) {
+            is AsyncImagePainter.State.Success -> {
+                val bitmap = state.result.image.toBitmap()
+                playerColors = extractColors(bitmap)
+            }
+            else -> { /* Loading, Error, or Empty */ }
+        }
+    }
+    
+    // Animate background color changes
+    val animatedPrimaryColor by animateColorAsState(
+        targetValue = playerColors.primaryColor,
+        animationSpec = tween(durationMillis = 800, easing = FastOutSlowInEasing),
+        label = "primaryColor"
+    )
+    
+    val animatedSecondaryColor by animateColorAsState(
+        targetValue = playerColors.secondaryColor,
+        animationSpec = tween(durationMillis = 800, easing = FastOutSlowInEasing),
+        label = "secondaryColor"
+    )
+    
+    val animatedAccentColor by animateColorAsState(
+        targetValue = playerColors.accentColor,
+        animationSpec = tween(durationMillis = 800, easing = FastOutSlowInEasing),
+        label = "accentColor"
+    )
     
     // Slide up animation when opening
     LaunchedEffect(Unit) {
@@ -285,30 +436,69 @@ fun ExpandedPlayer(
         onOffsetChanged(offsetY.value)
     }
     
-    // Common styling
-    val squircleShape = SquircleShape(cornerRadius = 24.dp)
-    val contentWidth = 0.9f // Increased to 90% width
-    
     // Calculate background alpha based on drag offset
-    // 1f when fully expanded (offsetY = 0), fading to 0f when dragged down
     val backgroundAlpha by remember {
         derivedStateOf {
             (1f - (offsetY.value / screenHeightPx).coerceIn(0f, 1f))
         }
     }
     
+    // Create gradient colors - use PRIMARY (dominant) at top, SECONDARY in middle
+    // This creates a gradient from the album's main color to a darker complementary color
+    val topGradientColor = darkenColor(animatedPrimaryColor, 0.6f)
+    val middleGradientColor = darkenColor(animatedSecondaryColor, 0.4f)
+    val bottomGradientColor = Color(0xFF0A0A12)
+    
+    // Gradient background based on extracted colors - FULLY OPAQUE
+    val gradientBackground = Brush.verticalGradient(
+        colors = listOf(
+            topGradientColor,
+            middleGradientColor,
+            bottomGradientColor
+        ),
+        startY = 0f,
+        endY = Float.POSITIVE_INFINITY
+    )
+    
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(color = Color.Black.copy(alpha = backgroundAlpha))
+            .statusBarsPadding()
+            .navigationBarsPadding()
     ) {
-
-        // Dark overlay for better readability - also follows drag
+        // SOLID BLACK BASE - ensures no transparency
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .offset { androidx.compose.ui.unit.IntOffset(0, offsetY.value.toInt()) } // Follow drag
-                .background(Color.Black.copy(alpha = 0.4f * backgroundAlpha))
+                .background(Color.Black)
+        )
+        
+        // Background with gradient (now on top of solid black)
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .offset { androidx.compose.ui.unit.IntOffset(0, offsetY.value.toInt()) }
+                .background(brush = gradientBackground)
+        )
+        
+        // Glow effect at top
+        Box(
+            modifier = Modifier
+                .offset { androidx.compose.ui.unit.IntOffset(0, offsetY.value.toInt()) }
+                .fillMaxWidth()
+                .height(300.dp)
+                .offset(y = (-50).dp)
+                .blur(100.dp)
+                .background(
+                    brush = Brush.radialGradient(
+                        colors = listOf(
+                            animatedAccentColor.copy(alpha = 0.5f),
+                            Color.Transparent
+                        ),
+                        center = Offset(0.5f, 0f),
+                        radius = 600f
+                    )
+                )
         )
         
         // Content container with gesture handling
@@ -323,50 +513,39 @@ fun ExpandedPlayer(
                             val pointerId = down.id
                             val initialTouchY = down.position.y
                             var totalDragY = 0f
-                            val maxSwipeDistance = size.height * 0.5f // Max distance for full swipe
-                            
-                            // Check if touch started in bottom 40% of screen
+                            val maxSwipeDistance = size.height * 0.5f
                             val isInSwipeUpZone = initialTouchY > size.height * 0.6f
                             
                             drag(pointerId) { change ->
                                 val dragAmount = change.positionChange().y
                                 totalDragY += dragAmount
                                 
-                                // Upward swipes (negative Y) - report progress for queue sheet
-                                // Only process if touch started in bottom 40% zone
                                 if (totalDragY < 0 && isInSwipeUpZone) {
                                     val progress = (-totalDragY / maxSwipeDistance).coerceIn(0f, 1f)
                                     onSwipeUpProgress(progress)
                                 }
                                 
-                                // Downward drags for collapse (works from anywhere)
                                 if (dragAmount > 0 && totalDragY >= 0) {
                                     val newOffset = (offsetY.value + dragAmount).coerceAtLeast(0f)
-                                    
                                     scope.launch {
                                         offsetY.snapTo(newOffset)
                                     }
                                 }
                                 
-                                if (change.positionChange() != androidx.compose.ui.geometry.Offset.Zero) change.consume()
+                                if (change.positionChange() != Offset.Zero) change.consume()
                             }
                             
                             val threshold = size.height * 0.3f
-                            val swipeUpThreshold = -150f // Swipe up sensitivity
+                            val swipeUpThreshold = -150f
                             
                             when {
-                                // Swipe up detected - complete queue opening
-                                // Only trigger if touch started in bottom 40% zone
                                 totalDragY < swipeUpThreshold && isInSwipeUpZone -> {
-                                    onSwipeUpHintDismissed() // Dismiss hint when user swipes
+                                    onSwipeUpHintDismissed()
                                     onSwipeUpComplete()
                                 }
-                                // Swipe up started but didn't meet threshold - cancel
-                                // Only process if touch was in the swipe-up zone
                                 totalDragY < 0 && isInSwipeUpZone -> {
                                     onSwipeUpCancel()
                                 }
-                                // Drag down past threshold - collapse player
                                 offsetY.value > threshold -> {
                                     scope.launch {
                                         offsetY.animateTo(
@@ -379,7 +558,6 @@ fun ExpandedPlayer(
                                         onDragDown()
                                     }
                                 }
-                                // Snap back to expanded position
                                 else -> {
                                     scope.launch {
                                         offsetY.animateTo(
@@ -396,74 +574,99 @@ fun ExpandedPlayer(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .statusBarsPadding()
-                    .navigationBarsPadding()
-                    .padding(vertical = 16.dp),
+                    .padding(horizontal = 24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Back button - top left (minimizes player), Menu button - top right
+                // ==================== HEADER ====================
                 var showMenu by remember { mutableStateOf(false) }
                 
                 Row(
                     modifier = Modifier
-                        .fillMaxWidth(contentWidth)
-                        .padding(bottom = 50.dp), // Increased from 16dp
-                    horizontalArrangement = Arrangement.SpaceBetween
+                        .fillMaxWidth()
+                        .padding(top = 12.dp, bottom = 16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     // Back button
                     IconButton(
                         onClick = {
-                            // Animate down smoothly before minimizing
                             scope.launch {
                                 offsetY.animateTo(
                                     targetValue = screenHeightPx,
-                                    animationSpec = tween(
-                                        durationMillis = 350,
-                                        easing = FastOutSlowInEasing
-                                    )
+                                    animationSpec = tween(350, easing = FastOutSlowInEasing)
                                 )
                                 onDragDown()
                             }
                         },
                         modifier = Modifier
-                            .size(44.dp)
+                            .size(40.dp)
                             .background(
-                                color = Color.Black.copy(alpha = 0.5f),
+                                color = Color.White.copy(alpha = 0.1f),
                                 shape = CircleShape
                             )
-                            .border(0.7.dp, color = Color.DarkGray, shape = CircleShape)
                     ) {
                         Icon(
-                            painter = androidx.compose.ui.res.painterResource(id = com.example.musicality.R.drawable.arrow_back_ios_new_24px),
-                            contentDescription = "Minimize",
+                            painter = androidx.compose.ui.res.painterResource(id = R.drawable.arrow_back_ios_new_24px),
+                            contentDescription = "Back",
                             tint = Color.White,
                             modifier = Modifier
-                                .size(20.dp)
-                                .padding(end = 2.dp) // Center the arrow icon
+                                .size(18.dp)
+                                .padding(end = 2.dp)
                         )
                     }
                     
-                    // Menu button with dropdown
+                    // Header label - changes based on playback source
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        // Determine header text based on playback context
+                        val (headerLabel, headerSubtitle) = when (songInfo.playbackContext.source) {
+                            PlaybackSource.ALBUM, PlaybackSource.PLAYLIST -> {
+                                "PLAYING FROM" to songInfo.playbackContext.sourceName.take(25) + 
+                                    if (songInfo.playbackContext.sourceName.length > 25) "..." else ""
+                            }
+                            PlaybackSource.SEARCH, PlaybackSource.QUEUE -> {
+                                "NOW PLAYING" to songInfo.title.take(25) + 
+                                    if (songInfo.title.length > 25) "..." else ""
+                            }
+                        }
+                        
+                        Text(
+                            text = headerLabel,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = animatedAccentColor,
+                            fontWeight = FontWeight.SemiBold,
+                            letterSpacing = 2.sp
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = headerSubtitle,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    
+                    // Menu button
                     Box {
                         IconButton(
                             onClick = { showMenu = true },
                             modifier = Modifier
-                                .size(44.dp)
+                                .size(40.dp)
                                 .background(
-                                    color = Color.Black.copy(alpha = 0.5f),
+                                    color = Color.Transparent,
                                     shape = CircleShape
                                 )
-                                .border(0.7.dp, color = Color.DarkGray, shape = CircleShape)
                         ) {
                             Icon(
-                                painter = androidx.compose.ui.res.painterResource(id = com.example.musicality.R.drawable.list_24px),
+                                painter = androidx.compose.ui.res.painterResource(id = R.drawable.list_24px),
                                 contentDescription = "Menu",
                                 tint = Color.White,
                                 modifier = Modifier.size(22.dp)
                             )
                         }
                         
-                        // Polished dropdown menu with elevation and icons
+                        // Dropdown menu
                         MaterialTheme(
                             shapes = MaterialTheme.shapes.copy(extraSmall = RoundedCornerShape(16.dp))
                         ) {
@@ -474,7 +677,7 @@ fun ExpandedPlayer(
                                 modifier = Modifier
                                     .width(200.dp)
                                     .background(
-                                        color = Color(0xFF2C2C2E), // Dark surface container
+                                        color = Color(0xFF2C2C2E),
                                         shape = RoundedCornerShape(16.dp)
                                     )
                             ) {
@@ -490,23 +693,19 @@ fun ExpandedPlayer(
                                     },
                                     leadingIcon = {
                                         Icon(
-                                            painter = androidx.compose.ui.res.painterResource(id = com.example.musicality.R.drawable.artist_24px),
+                                            painter = androidx.compose.ui.res.painterResource(id = R.drawable.artist_24px),
                                             contentDescription = null,
-                                            tint = if (songInfo.channelId.isNotBlank()) Color.White else Color.White.copy(alpha = 0.4f), // Green accent
+                                            tint = if (songInfo.channelId.isNotBlank()) Color.White else Color.White.copy(alpha = 0.4f),
                                             modifier = Modifier.size(22.dp)
                                         )
                                     },
                                     onClick = {
                                         showMenu = false
                                         if (songInfo.channelId.isNotBlank()) {
-                                            // Animate down before navigating
                                             scope.launch {
                                                 offsetY.animateTo(
                                                     targetValue = screenHeightPx,
-                                                    animationSpec = tween(
-                                                        durationMillis = 350,
-                                                        easing = FastOutSlowInEasing
-                                                    )
+                                                    animationSpec = tween(350, easing = FastOutSlowInEasing)
                                                 )
                                                 onDragDown()
                                                 onViewArtist(songInfo.channelId)
@@ -529,9 +728,9 @@ fun ExpandedPlayer(
                                     },
                                     leadingIcon = {
                                         Icon(
-                                            painter = androidx.compose.ui.res.painterResource(id = com.example.musicality.R.drawable.queue_music_24px),
+                                            painter = androidx.compose.ui.res.painterResource(id = R.drawable.queue_music_24px),
                                             contentDescription = null,
-                                            tint = Color.White, // Green accent
+                                            tint = Color.White,
                                             modifier = Modifier.size(22.dp)
                                         )
                                     },
@@ -546,276 +745,317 @@ fun ExpandedPlayer(
                     }
                 }
                 
-                // Album art - 85% screen width
-                AsyncImage(
-                    model = songInfo.thumbnailUrl,
-                    contentDescription = songInfo.title,
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                // ==================== ALBUM ART ====================
+                Box(
                     modifier = Modifier
-                        .fillMaxWidth(contentWidth)
+                        .fillMaxWidth()
                         .aspectRatio(1f)
-                        .clip(RoundedCornerShape(size = 15.dp))
-                        .border(0.7.dp, color = Color.DarkGray, shape = RoundedCornerShape(size = 15.dp)),
-                    contentScale = ContentScale.Crop
-
+                        .padding(horizontal = 8.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    // Glow behind album art
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(16.dp)
+                            .blur(40.dp)
+                            .background(
+                                color = animatedAccentColor.copy(alpha = 0.4f),
+                                shape = RoundedCornerShape(32.dp)
+                            )
+                    )
+                    
+                    // Album art image
+                    AsyncImage(
+                        model = songInfo.thumbnailUrl,
+                        contentDescription = songInfo.title,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(RoundedCornerShape(32.dp))
+                            .border(
+                                width = 1.dp,
+                                color = Color.White.copy(alpha = 0.1f),
+                                shape = RoundedCornerShape(32.dp)
+                            ),
+                        contentScale = ContentScale.Crop
+                    )
+                }
+                
+                Spacer(modifier = Modifier.height(32.dp))
+                
+                // ==================== SONG INFO ====================
+                Column(
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = songInfo.title,
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    
+                    Spacer(modifier = Modifier.height(4.dp))
+                    
+                    Text(
+                        text = songInfo.author,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = TextSecondaryColor,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                
+                Spacer(modifier = Modifier.height(24.dp))
+                
+                // ==================== PROGRESS BAR ====================
+                val progress = if (duration > 0) currentPosition.toFloat() / duration.toFloat() else 0f
+                
+                SimpleProgressBar(
+                    progress = progress,
+                    accentColor = animatedAccentColor,
+                    isBuffering = isBuffering,
+                    onSeek = onSeek,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(20.dp)
                 )
                 
-                Spacer(modifier = Modifier.height(24.dp)) // Fixed spacing instead of weight
+                Spacer(modifier = Modifier.height(8.dp))
                 
-                
-                // Song info card with glassmorphic effect
-                val context = LocalContext.current
-                
-                Surface(
-                    modifier = Modifier.fillMaxWidth(contentWidth),
-                    shape = squircleShape,
-                    color = Color.White.copy(alpha = 0.15f),
-                    tonalElevation = 0.dp
+                // Time labels
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(20.dp)
+                    Text(
+                        text = formatDurationMs(currentPosition),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextMutedColor,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Text(
+                        text = formatDurationMs(duration),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextMutedColor,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+                
+                Spacer(modifier = Modifier.height(32.dp))
+                
+                // ==================== PLAYBACK CONTROLS ====================
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Previous button
+                    IconButton(
+                        onClick = onPrevious,
+                        modifier = Modifier.size(60.dp)
                     ) {
-                        // Row for song title, artist, and share button
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.Top,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            // Song info column
-                            Column(
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                // Song title with ellipsis for long names
-                                Text(
-                                    text = songInfo.title,
-                                    style = MaterialTheme.typography.headlineSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                
-                                Spacer(modifier = Modifier.height(4.dp))
-                                
-                                // Artist
-                                Text(
-                                    text = songInfo.author,
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    color = Color.White.copy(alpha = 0.7f)
-                                )
-                            }
-                            
-                            Spacer(modifier = Modifier.width(12.dp))
-                            
-                            // Share button
-                            IconButton(
-                                onClick = {
-                                    val shareUrl = "https://music.youtube.com/watch?v=${songInfo.videoId}"
-                                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                                        type = "text/plain"
-                                        putExtra(Intent.EXTRA_SUBJECT, "${songInfo.title} - ${songInfo.author}")
-                                        putExtra(Intent.EXTRA_TEXT, "${songInfo.title} by ${songInfo.author}\n$shareUrl")
-                                    }
-                                    context.startActivity(Intent.createChooser(shareIntent, "Share song"))
-                                },
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .background(
-                                        color = Color.Black.copy(alpha = 0.3f),
-                                        shape = CircleShape
-                                    )
-                            ) {
-                                Icon(
-                                    painter = androidx.compose.ui.res.painterResource(id = com.example.musicality.R.drawable.forward_24px),
-                                    contentDescription = "Share",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(22.dp)
-                                )
-                            }
-                        }
-                        
-                        Spacer(modifier = Modifier.height(12.dp))
-                        
-                        // Wavy/squiggly progress bar with seek support
-                        val progress = if (duration > 0) currentPosition.toFloat() / duration.toFloat() else 0f
-                        WavyProgressBar(
-                            progress = progress,
-                            isPlaying = isPlaying,
-                            isBuffering = isBuffering,
-                            onSeek = onSeek,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(48.dp)
+                        Icon(
+                            painter = androidx.compose.ui.res.painterResource(id = R.drawable.skip_previous_24px),
+                            contentDescription = "Previous",
+                            tint = TextSecondaryColor,
+                            modifier = Modifier.size(40.dp)
                         )
-                        
-                        Spacer(modifier = Modifier.height(4.dp))
-                        
-                        // Time info
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(
-                                text = formatDurationMs(currentPosition),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Color.White.copy(alpha = 0.6f)
-                            )
-                            Text(
-                                text = formatDurationMs(duration),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Color.White.copy(alpha = 0.6f)
-                            )
-                        }
                     }
-                }
-
-                Spacer(modifier = Modifier.height(15.dp)) // Fixed spacing instead of weight
-
-                // Controls card with glassmorphic effect and squircle shape
-                Surface(
-                    modifier = Modifier.fillMaxWidth(contentWidth),
-                    shape = squircleShape,
-                    color = Color.White.copy(alpha = 0.15f),
-                    tonalElevation = 0.dp
-                ) {
-                    Row(
+                    
+                    Spacer(modifier = Modifier.width(24.dp))
+                    
+                    // Play/Pause button - large and prominent
+                    IconButton(
+                        onClick = onTogglePlayPause,
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 16.dp, horizontal = 24.dp),
-                        horizontalArrangement = Arrangement.SpaceEvenly,
-                        verticalAlignment = Alignment.CenterVertically
+                            .size(80.dp)
+                            .shadow(
+                                elevation = 16.dp,
+                                shape = CircleShape,
+                                ambientColor = animatedAccentColor,
+                                spotColor = animatedAccentColor
+                            )
+                            .background(
+                                color = animatedAccentColor,
+                                shape = CircleShape
+                            )
                     ) {
-                        // Previous button
-                        IconButton(
-                            onClick = onPrevious,
-                            modifier = Modifier
-                                .size(56.dp)
-                                .background(
-                                    color = Color.White,
-                                    shape = CircleShape
-                                )
-                        ) {
-                            Icon(
-                                painter = androidx.compose.ui.res.painterResource(id = com.example.musicality.R.drawable.skip_previous_24px),
-                                contentDescription = "Previous",
-                                modifier = Modifier.size(28.dp),
-                                tint = Color.Black
-                            )
-                        }
-                        
-                        // Play/Pause button - larger and highlighted
-                        IconButton(
-                            onClick = onTogglePlayPause,
-                            modifier = Modifier
-                                .size(72.dp)
-                                .background(
-                                    color = Color.White, // Yellow accent
-                                    shape = CircleShape
-                                )
-                        ) {
-                            Icon(
-                                painter = androidx.compose.ui.res.painterResource(
-                                    id = if (isPlaying) com.example.musicality.R.drawable.pause_circle_24px 
-                                         else com.example.musicality.R.drawable.play_circle_24px
-                                ),
-                                contentDescription = if (isPlaying) "Pause" else "Play",
-                                modifier = Modifier.size(40.dp),
-                                tint = Color.Black
-                            )
-                        }
-                        
-                        // Next button
-                        IconButton(
-                            onClick = onNext,
-                            modifier = Modifier
-                                .size(56.dp)
-                                .background(
-                                    color = Color.White, // Yellow accent
-                                    shape = CircleShape
-                                )
-                        ) {
-                            Icon(
-                                painter = androidx.compose.ui.res.painterResource(id = com.example.musicality.R.drawable.skip_next_24px),
-                                contentDescription = "Next",
-                                modifier = Modifier.size(28.dp),
-                                tint = Color.Black
-                            )
-                        }
+                        Icon(
+                            painter = androidx.compose.ui.res.painterResource(
+                                id = if (isPlaying) R.drawable.pause_24px else R.drawable.play_arrow_24px
+                            ),
+                            contentDescription = if (isPlaying) "Pause" else "Play",
+                            tint = Color.White,
+                            modifier = Modifier.size(44.dp)
+                        )
+                    }
+                    
+                    Spacer(modifier = Modifier.width(24.dp))
+                    
+                    // Next button
+                    IconButton(
+                        onClick = onNext,
+                        modifier = Modifier.size(60.dp)
+                    ) {
+                        Icon(
+                            painter = androidx.compose.ui.res.painterResource(id = R.drawable.skip_next_24px),
+                            contentDescription = "Next",
+                            tint = TextSecondaryColor,
+                            modifier = Modifier.size(40.dp)
+                        )
                     }
                 }
                 
-                Spacer(modifier = Modifier.height(20.dp))
+                Spacer(modifier = Modifier.height(32.dp))
                 
-                // Queue CTA button at bottom - tap to open queue
+                // ==================== ACTION BUTTONS ====================
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Like button
+                    IconButton(onClick = onToggleLike) {
+                        Icon(
+                            painter = androidx.compose.ui.res.painterResource(
+                                id = if (isLiked) R.drawable.favorite_filled_24px else R.drawable.favorite_24px
+                            ),
+                            contentDescription = if (isLiked) "Unlike" else "Like",
+                            tint = if (isLiked) Color(0xFFE91E63) else TextSecondaryColor,
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
+                    
+                    // Share button
+                    IconButton(
+                        onClick = {
+                            val shareUrl = "https://music.youtube.com/watch?v=${songInfo.videoId}"
+                            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                type = "text/plain"
+                                putExtra(Intent.EXTRA_SUBJECT, "${songInfo.title} - ${songInfo.author}")
+                                putExtra(Intent.EXTRA_TEXT, "${songInfo.title} by ${songInfo.author}\n$shareUrl")
+                            }
+                            context.startActivity(Intent.createChooser(shareIntent, "Share song"))
+                        }
+                    ) {
+                        Icon(
+                            painter = androidx.compose.ui.res.painterResource(id = R.drawable.forward_24px),
+                            contentDescription = "Share",
+                            tint = TextSecondaryColor,
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
+                    
+                    // Download button
+                    Box {
+                        IconButton(
+                            onClick = { if (!isDownloading) onDownload() },
+                            enabled = !isDownloading
+                        ) {
+                            if (isDownloading) {
+                                // Show loading indicator while downloading
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(24.dp),
+                                    color = animatedAccentColor,
+                                    strokeWidth = 2.dp
+                                )
+                            } else {
+                                Icon(
+                                    painter = androidx.compose.ui.res.painterResource(
+                                        id = if (isDownloaded) R.drawable.download_filled_24px else R.drawable.download_24px
+                                    ),
+                                    contentDescription = if (isDownloaded) "Downloaded" else "Download",
+                                    tint = if (isDownloaded) animatedAccentColor else TextSecondaryColor,
+                                    modifier = Modifier.size(28.dp)
+                                )
+                            }
+                        }
+                        // Downloaded indicator dot
+                        if (isDownloaded && !isDownloading) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .offset(x = (-4).dp, y = 4.dp)
+                                    .size(6.dp)
+                                    .background(animatedAccentColor, CircleShape)
+                            )
+                        }
+                    }
+                    
+                    // Queue button
+                    IconButton(onClick = onOpenQueue) {
+                        Icon(
+                            painter = androidx.compose.ui.res.painterResource(id = R.drawable.queue_music_24px),
+                            contentDescription = "Queue",
+                            tint = TextSecondaryColor,
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
+                }
+                
+                Spacer(modifier = Modifier.weight(1f))
+                
+                // ==================== QUEUE CTA (KEEP EXISTING UP ARROW) ====================
                 IconButton(
                     onClick = onOpenQueue,
                     modifier = Modifier.size(40.dp)
                 ) {
                     Icon(
-                        painter = androidx.compose.ui.res.painterResource(id = com.example.musicality.R.drawable.keyboard_arrow_up_24px),
+                        painter = androidx.compose.ui.res.painterResource(id = R.drawable.keyboard_arrow_up_24px),
                         contentDescription = "Open Queue",
                         tint = Color.White.copy(alpha = 0.7f),
                         modifier = Modifier.size(32.dp)
                     )
                 }
+                
+                Spacer(modifier = Modifier.height(8.dp))
             }
         }
         
         // Swipe-up tutorial overlay for first-time users
         if (showSwipeUpHint) {
-            // Full-screen dark overlay
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(Color.Black.copy(alpha = 0.4f))
             )
             
-            // Tutorial content
             SwipeUpTutorialOverlay(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(bottom = 20.dp),
-                animationSize = 120
+                animationSize = 160, // Bigger animation
+                displayDurationMs = 5000L, // 5 seconds
+                onAutoDismiss = {
+                    // Auto-dismiss after 5 seconds and mark as shown
+                    onSwipeUpHintDismissed()
+                }
             )
         }
     }
 }
 
-/**
- * Wavy/Squiggly progress bar for visualizing playback with seek support
- * Uses Canvas to draw an animated sine wave that transitions to a straight line
- * When isBuffering is true, shows an oscillating loader instead of progress
- */
+// ============================================================================
+// SIMPLE PROGRESS BAR (Replaces wavy progress bar)
+// ============================================================================
+
 @Composable
-fun WavyProgressBar(
+fun SimpleProgressBar(
     progress: Float,
-    isPlaying: Boolean = true,
+    accentColor: Color,
     isBuffering: Boolean = false,
     onSeek: (Float) -> Unit = {},
-    modifier: Modifier = Modifier,
-    waveFrequency: Float = 0.08f // Number of squiggles
+    modifier: Modifier = Modifier
 ) {
-    val activeColor = Color.White // Yellow for played portion
-    val inactiveColor = Color.White.copy(alpha = 0.4f)
+    val infiniteTransition = rememberInfiniteTransition(label = "buffer")
     
-    // Animate the wave "phase" so it looks like it's moving only when playing
-    val infiniteTransition = rememberInfiniteTransition(label = "wave")
-    val animatedPhase by if (isPlaying && !isBuffering) {
-        infiniteTransition.animateFloat(
-            initialValue = 0f,
-            targetValue = 2 * PI.toFloat(),
-            animationSpec = infiniteRepeatable(
-                animation = tween(1500, easing = LinearEasing),
-                repeatMode = RepeatMode.Restart
-            ),
-            label = "phase"
-        )
-    } else {
-        remember { mutableFloatStateOf(0f) }
-    }
-    
-    // Oscillating loader animation - moves from 0 to 1 and back
+    // Loader animation for buffering state
     val loaderPosition by infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
@@ -826,125 +1066,83 @@ fun WavyProgressBar(
         label = "loader"
     )
     
-    // Animate amplitude based on playing state
-    val targetAmplitude = if (isPlaying && !isBuffering) 8f else 0f
-    val animatedAmplitude by animateFloatAsState(
-        targetValue = targetAmplitude,
-        animationSpec = tween(300, easing = FastOutSlowInEasing),
-        label = "amplitude"
-    )
-    
-    val phase = if (isPlaying && !isBuffering) animatedPhase else 0f
-    
-    // Reuse Path objects to avoid allocation in onDraw
-    val wavyPath = remember { Path() }
-    val straightPath = remember { Path() }
-    
-    Canvas(
+    // Larger touch area (24dp) for easier seeking, while visual bar is only 3dp
+    // IMPORTANT: Seeking is ALWAYS enabled, even during buffering
+    // This prevents the infinite loader issue where failed seeks would permanently disable seeking
+    BoxWithConstraints(
         modifier = modifier
-            .pointerInput(isBuffering) {
-                // Disable seek when buffering
-                if (!isBuffering) {
-                    awaitPointerEventScope {
-                        while (true) {
-                            val down = awaitFirstDown()
-                            val componentWidth = size.width
-                            if (componentWidth > 0) {
-                                val seekFraction = down.position.x / componentWidth
-                                onSeek(seekFraction.coerceIn(0f, 1f))
-                                
-                                drag(down.id) { change ->
-                                    val newFraction = change.position.x / componentWidth
-                                    onSeek(newFraction.coerceIn(0f, 1f))
-                                    change.consume()
-                                }
-                            }
-                        }
-                    }
+            .fillMaxWidth()
+            .height(24.dp) // Touch area height
+            .pointerInput(Unit) {
+                // Tap to seek - ALWAYS enabled
+                detectTapGestures { offset ->
+                    val fraction = offset.x / size.width
+                    onSeek(fraction.coerceIn(0f, 1f))
                 }
             }
+            .pointerInput(Unit) {
+                // Drag to seek - ALWAYS enabled
+                detectHorizontalDragGestures { change, _ ->
+                    val fraction = change.position.x / size.width
+                    onSeek(fraction.coerceIn(0f, 1f))
+                    change.consume()
+                }
+            },
+        contentAlignment = Alignment.Center
     ) {
-        val width = size.width
-        val centerY = size.height / 2
-        val strokeWidth = 4.dp.toPx()
+        val widthDp = maxWidth
+        
+        // Background track - thin bar centered in the touch area
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(3.dp)
+                .clip(RoundedCornerShape(50))
+                .background(ProgressTrackColor)
+        )
         
         if (isBuffering) {
-            // Draw oscillating loader
-            // Background line
-            drawLine(
-                color = inactiveColor,
-                start = Offset(0f, centerY),
-                end = Offset(width, centerY),
-                strokeWidth = strokeWidth,
-                cap = StrokeCap.Round
-            )
+            // Buffering indicator - animated segment
+            // Shows visual feedback but doesn't block interaction
+            val segmentWidthFraction = 0.2f
+            val offsetFraction = loaderPosition * (1f - segmentWidthFraction)
             
-            // Animated filled segment (20% of width)
-            val segmentWidth = width * 0.2f
-            val segmentStart = loaderPosition * (width - segmentWidth)
-            val segmentEnd = segmentStart + segmentWidth
-            
-            drawLine(
-                color = activeColor,
-                start = Offset(segmentStart, centerY),
-                end = Offset(segmentEnd, centerY),
-                strokeWidth = strokeWidth,
-                cap = StrokeCap.Round
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(segmentWidthFraction)
+                    .height(3.dp)
+                    .align(Alignment.CenterStart)
+                    .offset(x = widthDp * offsetFraction)
+                    .clip(RoundedCornerShape(50))
+                    .background(accentColor.copy(alpha = 0.7f)) // Slightly transparent during buffering
             )
         } else {
-            // Normal progress bar with wave
-            val progressX = width * progress
-            
-            // Reset and rebuild paths
-            wavyPath.reset()
-            wavyPath.moveTo(0f, centerY)
-            
-            // Optimize drawing loop
-            val step = 2
-            val endX = progressX.toInt()
-            
-            if (animatedAmplitude > 0.1f) {
-                for (x in 0..endX step step) {
-                    val relativeX = x.toFloat()
-                    val angle = relativeX * waveFrequency + phase
-                    val y = centerY + sin(angle) * animatedAmplitude
-                    wavyPath.lineTo(relativeX, y)
-                }
-            } else {
-                wavyPath.lineTo(progressX, centerY)
-            }
-            
-            // Draw the played path
-            drawPath(
-                path = wavyPath,
-                color = activeColor,
-                style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
+            // Buffer progress (slightly ahead of current position)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth((progress * 1.3f).coerceIn(0f, 1f))
+                    .height(3.dp)
+                    .align(Alignment.CenterStart)
+                    .clip(RoundedCornerShape(50))
+                    .background(ProgressBufferColor)
             )
             
-            // Straight path for unplayed
-            straightPath.reset()
-            straightPath.moveTo(progressX, centerY)
-            straightPath.lineTo(width, centerY)
-            
-            drawPath(
-                path = straightPath,
-                color = inactiveColor,
-                style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
-            )
-            
-            // Draw thumb
-            val thumbWidth = 6.dp.toPx()
-            val thumbHeight = 20.dp.toPx()
-            
-            drawRoundRect(
-                color = Color.White,
-                topLeft = Offset(progressX - thumbWidth / 2, centerY - thumbHeight / 2),
-                size = Size(thumbWidth, thumbHeight),
-                cornerRadius = CornerRadius(thumbWidth / 2, thumbWidth / 2)
+            // Current progress
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(progress.coerceIn(0f, 1f))
+                    .height(3.dp)
+                    .align(Alignment.CenterStart)
+                    .clip(RoundedCornerShape(50))
+                    .background(accentColor)
             )
         }
     }
 }
+
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
 
 /**
  * Format milliseconds to mm:ss
@@ -955,6 +1153,10 @@ private fun formatDurationMs(ms: Long): String {
     val remainingSeconds = totalSeconds % 60
     return "${minutes}:${remainingSeconds.toString().padStart(2, '0')}"
 }
+
+// ============================================================================
+// COLLAPSED PLAYER (MINI PLAYER)
+// ============================================================================
 
 @Composable
 fun CollapsedPlayer(
@@ -1006,7 +1208,7 @@ fun CollapsedPlayer(
                 Text(
                     text = songInfo.author,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = TextSecondaryColor,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -1019,8 +1221,7 @@ fun CollapsedPlayer(
             ) {
                 Icon(
                     painter = androidx.compose.ui.res.painterResource(
-                        id = if (isPlaying) com.example.musicality.R.drawable.pause_circle_24px 
-                             else com.example.musicality.R.drawable.play_circle_24px
+                        id = if (isPlaying) R.drawable.pause_circle_24px else R.drawable.play_circle_24px
                     ),
                     contentDescription = if (isPlaying) "Pause" else "Play",
                     modifier = Modifier.size(32.dp),

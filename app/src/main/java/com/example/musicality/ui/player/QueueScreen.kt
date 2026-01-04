@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.example.musicality.R
 import com.example.musicality.domain.model.QueueSong
+import com.example.musicality.ui.components.SkeletonPlaylistSongItem
 import com.example.musicality.util.UiState
 
 /**
@@ -146,11 +147,15 @@ fun QueueSheet(
             ) {
                 when (queueState) {
                     is UiState.Loading -> {
-                        Box(
+                        // Shimmer skeleton loading - shows ghost items that mimic queue songs
+                        LazyColumn(
                             modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                            contentPadding = PaddingValues(top = 8.dp, bottom = 32.dp)
                         ) {
-                            CircularProgressIndicator(color = Color.White)
+                            items(6) {
+                                SkeletonPlaylistSongItem()
+                            }
                         }
                     }
                     is UiState.Success -> {

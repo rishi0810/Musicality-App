@@ -1,11 +1,8 @@
 package com.example.musicality.ui
 
 import android.content.ComponentName
+import androidx.annotation.DrawableRes
 import androidx.compose.foundation.layout.*
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Notifications
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -15,10 +12,10 @@ import androidx.compose.runtime.*
 import androidx.activity.compose.BackHandler
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
@@ -35,27 +32,52 @@ import androidx.navigation.compose.rememberNavController
 import com.example.musicality.R
 import com.example.musicality.service.MusicService
 import com.example.musicality.ui.home.HomeScreen
-import com.example.musicality.ui.notifications.NotificationsScreen
+import com.example.musicality.ui.library.LibraryScreen
 import com.example.musicality.ui.player.CollapsiblePlayer
+import com.example.musicality.ui.player.LikedSongsManager
 import com.example.musicality.ui.player.PlayerViewModel
 import com.example.musicality.ui.player.QueueSheet
 import com.example.musicality.ui.search.SearchScreen
+import com.example.musicality.ui.search.SearchResultsScreen
 import com.example.musicality.ui.album.AlbumScreen
 import com.example.musicality.ui.playlist.PlaylistScreen
 import com.example.musicality.ui.artist.ArtistScreen
 import com.example.musicality.util.OnboardingPreferences
 import com.google.common.util.concurrent.MoreExecutors
 
-sealed class Screen(val route: String, val labelRes: Int, val icon: ImageVector) {
-    object Home : Screen("home", R.string.title_home, Icons.Default.Home)
-    object Search : Screen("search", R.string.title_search, Icons.Default.Search)
-    object Notifications : Screen("notifications", R.string.title_notifications, Icons.Default.Notifications)
+/**
+ * Screen definition with drawable icons for filled and unfilled states
+ */
+sealed class Screen(
+    val route: String,
+    val labelRes: Int,
+    @DrawableRes val iconUnfilled: Int,
+    @DrawableRes val iconFilled: Int
+) {
+    object Home : Screen(
+        "home",
+        R.string.title_home,
+        R.drawable.home_24px,
+        R.drawable.home_filled_24px
+    )
+    object Search : Screen(
+        "search",
+        R.string.title_search,
+        R.drawable.search_24px,
+        R.drawable.search_24px
+    )
+    object Library : Screen(
+        "library",
+        R.string.title_library,
+        R.drawable.library_music_24px,
+        R.drawable.library_music_filled_24px
+    )
 }
 
 val items = listOf(
     Screen.Home,
     Screen.Search,
-    Screen.Notifications,
+    Screen.Library,
 )
 
 @androidx.annotation.OptIn(UnstableApi::class)
@@ -64,6 +86,11 @@ fun MusicalityApp(openPlayerOnStart: Boolean = false) {
     val navController = rememberNavController()
     val playerViewModel: PlayerViewModel = viewModel()
     val context = LocalContext.current
+    
+    // Initialize download repository
+    LaunchedEffect(Unit) {
+        playerViewModel.initializeDownloadRepository(context)
+    }
     
     // Connect to MusicService using MediaController
     var mediaController by remember { mutableStateOf<MediaController?>(null) }
@@ -133,6 +160,8 @@ fun MusicalityApp(openPlayerOnStart: Boolean = false) {
     val isPlaying by playerViewModel.isPlaying.collectAsState()
     val isExpanded by playerViewModel.isExpanded.collectAsState()
     val isBuffering by playerViewModel.isBuffering.collectAsState()
+    val isDownloaded by playerViewModel.isDownloaded.collectAsState()
+    val isDownloading by playerViewModel.isDownloading.collectAsState()
     val currentPosition by playerViewModel.currentPosition.collectAsState()
     val duration by playerViewModel.duration.collectAsState()
     
@@ -154,6 +183,17 @@ fun MusicalityApp(openPlayerOnStart: Boolean = false) {
     // Interactive swipe-up state for queue sheet
     var isSwipingUpQueue by remember { mutableStateOf(false) }
     var swipeUpProgress by remember { mutableFloatStateOf(0f) }
+    
+    // Liked songs state
+    val likedSongsManager = remember { LikedSongsManager.getInstance(context) }
+    val currentVideoId = (playerState as? com.example.musicality.util.UiState.Success)?.data?.videoId
+    val isCurrentSongLiked by remember(currentVideoId) {
+        if (currentVideoId != null) {
+            likedSongsManager.isSongLiked(currentVideoId)
+        } else {
+            kotlinx.coroutines.flow.flowOf(false)
+        }
+    }.collectAsState(initial = false)
     
     Box(modifier = Modifier.fillMaxSize()) {
         // Calculate bottom padding for content
@@ -190,11 +230,23 @@ fun MusicalityApp(openPlayerOnStart: Boolean = false) {
                             onArtistClick = { artistId ->
                                 navController.navigate("artist/$artistId")
                             },
+                            onSearchResultsClick = { query ->
+                                navController.navigate("searchResults/${java.net.URLEncoder.encode(query, "UTF-8")}")
+                            },
                             bottomPadding = bottomContentPadding
                         )
                     }
-                    composable(Screen.Notifications.route) { 
-                        NotificationsScreen(bottomPadding = bottomContentPadding) 
+                    composable(Screen.Library.route) { 
+                        LibraryScreen(
+                            bottomPadding = bottomContentPadding,
+                            onSongClick = { videoId, allSongs, albumName, thumbnail ->
+                                // Play song from liked songs
+                                playerViewModel.playSongFromPlaylist(videoId, allSongs, albumName, thumbnail)
+                            },
+                            onPlayLikedSongs = { songs, shuffle ->
+                                playerViewModel.playPlaylist(songs, "Liked Songs", "", shuffle)
+                            }
+                        )
                     }
                     // Album detail screen
                     composable("album/{albumId}") { backStackEntry ->
@@ -202,11 +254,12 @@ fun MusicalityApp(openPlayerOnStart: Boolean = false) {
                         AlbumScreen(
                             albumId = albumId,
                             onBackClick = { navController.popBackStack() },
-                            onSongClick = { videoId, thumbnailUrl ->
-                                playerViewModel.playSong(videoId, thumbnailUrl)
+                            onSongClick = { videoId, albumSongs, albumName, albumThumbnail ->
+                                // Play song from album - sets album as queue
+                                playerViewModel.playSongFromAlbum(videoId, albumSongs, albumName, albumThumbnail)
                             },
-                            onPlayAlbum = { albumSongs, albumThumbnail, shuffle ->
-                                playerViewModel.playAlbum(albumSongs, albumThumbnail, shuffle)
+                            onPlayAlbum = { albumSongs, albumName, albumThumbnail, shuffle ->
+                                playerViewModel.playAlbum(albumSongs, albumName, albumThumbnail, shuffle)
                             },
                             onAlbumClick = { newAlbumId ->
                                 navController.navigate("album/$newAlbumId")
@@ -219,11 +272,12 @@ fun MusicalityApp(openPlayerOnStart: Boolean = false) {
                         PlaylistScreen(
                             playlistId = playlistId,
                             onBackClick = { navController.popBackStack() },
-                            onSongClick = { videoId, thumbnailUrl ->
-                                playerViewModel.playSong(videoId, thumbnailUrl)
+                            onSongClick = { videoId, playlistSongs, playlistName, thumbnail ->
+                                // Play song from playlist - sets playlist as queue
+                                playerViewModel.playSongFromPlaylist(videoId, playlistSongs, playlistName, thumbnail)
                             },
-                            onPlayPlaylist = { playlistSongs, playlistThumbnail, shuffle ->
-                                playerViewModel.playAlbum(playlistSongs, playlistThumbnail, shuffle)
+                            onPlayPlaylist = { playlistSongs, playlistName, playlistThumbnail, shuffle ->
+                                playerViewModel.playPlaylist(playlistSongs, playlistName, playlistThumbnail, shuffle)
                             }
                         )
                     }
@@ -245,6 +299,31 @@ fun MusicalityApp(openPlayerOnStart: Boolean = false) {
                             onArtistClick = { newArtistId ->
                                 navController.navigate("artist/$newArtistId")
                             }
+                        )
+                    }
+                    // Search Results screen
+                    composable("searchResults/{query}") { backStackEntry ->
+                        val query = backStackEntry.arguments?.getString("query") ?: ""
+                        val decodedQuery = java.net.URLDecoder.decode(query, "UTF-8")
+                        SearchResultsScreen(
+                            query = decodedQuery,
+                            onSongClick = { videoId, thumbnailUrl ->
+                                playerViewModel.playSong(videoId, thumbnailUrl)
+                            },
+                            onVideoClick = { videoId, thumbnailUrl ->
+                                playerViewModel.playSong(videoId, thumbnailUrl)
+                            },
+                            onAlbumClick = { albumId ->
+                                navController.navigate("album/$albumId")
+                            },
+                            onArtistClick = { artistId ->
+                                navController.navigate("artist/$artistId")
+                            },
+                            onPlaylistClick = { playlistId ->
+                                navController.navigate("playlist/$playlistId")
+                            },
+                            onBackClick = { navController.popBackStack() },
+                            bottomPadding = bottomContentPadding
                         )
                     }
                 }
@@ -294,10 +373,18 @@ fun MusicalityApp(openPlayerOnStart: Boolean = false) {
                         val navBackStackEntry by navController.currentBackStackEntryAsState()
                         val currentDestination = navBackStackEntry?.destination
                         items.forEach { screen ->
+                            val isSelected = currentDestination?.hierarchy?.any { it.route == screen.route } == true
                             NavigationBarItem(
-                                icon = { Icon(screen.icon, contentDescription = null) },
+                                icon = { 
+                                    Icon(
+                                        painter = painterResource(
+                                            id = if (isSelected) screen.iconFilled else screen.iconUnfilled
+                                        ), 
+                                        contentDescription = null
+                                    ) 
+                                },
                                 label = { Text(stringResource(screen.labelRes)) },
-                                selected = currentDestination?.hierarchy?.any { it.route == screen.route } == true,
+                                selected = isSelected,
                                 onClick = {
                                     navController.navigate(screen.route) {
                                         popUpTo(navController.graph.findStartDestination().id) {
@@ -321,6 +408,9 @@ fun MusicalityApp(openPlayerOnStart: Boolean = false) {
                 isPlaying = isPlaying,
                 isExpanded = true,
                 isBuffering = isBuffering,
+                isLiked = isCurrentSongLiked,
+                isDownloaded = isDownloaded,
+                isDownloading = isDownloading,
                 onTogglePlayPause = { playerViewModel.togglePlayPause() },
                 onClose = { playerViewModel.closePlayer() },
                 onToggleExpanded = { playerViewModel.toggleExpanded() },
@@ -346,6 +436,14 @@ fun MusicalityApp(openPlayerOnStart: Boolean = false) {
                 onPrevious = { playerViewModel.playPrevious() },
                 onViewArtist = { channelId ->
                     navController.navigate("artist/$channelId")
+                },
+                onToggleLike = {
+                    (playerState as? com.example.musicality.util.UiState.Success)?.data?.let { songInfo ->
+                        likedSongsManager.toggleLike(songInfo)
+                    }
+                },
+                onDownload = {
+                    playerViewModel.downloadCurrentSong()
                 },
                 showSwipeUpHint = showSwipeUpHint,
                 onSwipeUpHintDismissed = {

@@ -27,5 +27,32 @@ data class SearchClientDto(
     val clientName: String = "WEB_REMIX",
     
     @Json(name = "clientVersion")
-    val clientVersion: String = "1.20251208.03.00"
+    val clientVersion: String = "1.20251229.03.00"
+)
+
+/**
+ * Request body for full YouTube Music search API (with type filtering)
+ */
+@JsonClass(generateAdapter = true)
+data class FullSearchRequestDto(
+    @Json(name = "query")
+    val query: String,
+    
+    @Json(name = "params")
+    val params: String,
+    
+    @Json(name = "context")
+    val context: SearchContextDto,
+    
+    @Json(name = "inlineSettingStatus")
+    val inlineSettingStatus: String = "INLINE_SETTING_STATUS_ON"
+)
+
+/**
+ * Request body for search pagination (continuation)
+ */
+@JsonClass(generateAdapter = true)
+data class SearchPaginationRequestDto(
+    @Json(name = "context")
+    val context: SearchContextDto
 )

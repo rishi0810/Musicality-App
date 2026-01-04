@@ -57,21 +57,31 @@ class MusicService : MediaSessionService() {
         
         // Wrap the player to enable next/previous commands in notification
         val wrappedPlayer = object : ForwardingPlayer(player!!) {
-            override fun getAvailableCommands(): Player.Commands {
-                return super.getAvailableCommands().buildUpon()
+            // Cache the commands to avoid rebuilding on every call
+            // IMPORTANT: Must include COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM for seeking to work!
+            private val cachedCommands by lazy {
+                super.getAvailableCommands().buildUpon()
                     .add(Player.COMMAND_SEEK_TO_NEXT)
                     .add(Player.COMMAND_SEEK_TO_PREVIOUS)
                     .add(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
                     .add(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
+                    .add(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM) // Required for progress bar seeking!
+                    .add(Player.COMMAND_SEEK_BACK)
+                    .add(Player.COMMAND_SEEK_FORWARD)
                     .build()
             }
+            
+            override fun getAvailableCommands(): Player.Commands = cachedCommands
             
             override fun isCommandAvailable(command: Int): Boolean {
                 return when (command) {
                     Player.COMMAND_SEEK_TO_NEXT,
                     Player.COMMAND_SEEK_TO_PREVIOUS,
                     Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM,
-                    Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM -> true
+                    Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM,
+                    Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM,
+                    Player.COMMAND_SEEK_BACK,
+                    Player.COMMAND_SEEK_FORWARD -> true
                     else -> super.isCommandAvailable(command)
                 }
             }
@@ -79,6 +89,15 @@ class MusicService : MediaSessionService() {
             override fun hasNextMediaItem(): Boolean = true
             
             override fun hasPreviousMediaItem(): Boolean = true
+            
+            // Explicitly forward seekTo to ensure it reaches the actual player
+            override fun seekTo(positionMs: Long) {
+                super.seekTo(positionMs)
+            }
+            
+            override fun seekTo(mediaItemIndex: Int, positionMs: Long) {
+                super.seekTo(mediaItemIndex, positionMs)
+            }
             
             override fun seekToNext() {
                 // Send broadcast to app to play next

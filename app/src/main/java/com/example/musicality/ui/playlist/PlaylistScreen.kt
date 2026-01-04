@@ -27,6 +27,7 @@ import com.example.musicality.R
 import com.example.musicality.domain.model.PlaylistDetail
 import com.example.musicality.domain.model.PlaylistSong
 import com.example.musicality.domain.model.QueueSong
+import com.example.musicality.ui.components.SkeletonPlaylistScreen
 import com.example.musicality.util.UiState
 
 /**
@@ -42,8 +43,8 @@ fun PlaylistScreen(
     playlistId: String,
     viewModel: PlaylistViewModel = viewModel(),
     onBackClick: () -> Unit,
-    onSongClick: (videoId: String, thumbnail: String) -> Unit,
-    onPlayPlaylist: (songs: List<QueueSong>, thumbnail: String, shuffle: Boolean) -> Unit
+    onSongClick: (videoId: String, playlistSongs: List<QueueSong>, playlistName: String, thumbnail: String) -> Unit,
+    onPlayPlaylist: (songs: List<QueueSong>, playlistName: String, thumbnail: String, shuffle: Boolean) -> Unit
 ) {
     val uiState by viewModel.uiState.collectAsState()
     
@@ -59,12 +60,15 @@ fun PlaylistScreen(
     ) {
         when (val state = uiState) {
             is UiState.Idle -> {
-                // Initial state
+                // Initial state - show shimmer skeleton
+                SkeletonPlaylistScreen(
+                    modifier = Modifier.fillMaxSize()
+                )
             }
             is UiState.Loading -> {
-                CircularProgressIndicator(
-                    modifier = Modifier.align(Alignment.Center),
-                    color = Color.White
+                // Shimmer skeleton loading - mimics actual playlist layout
+                SkeletonPlaylistScreen(
+                    modifier = Modifier.fillMaxSize()
                 )
             }
             is UiState.Success -> {
@@ -89,8 +93,8 @@ fun PlaylistScreen(
 private fun PlaylistContent(
     playlistDetail: PlaylistDetail,
     onBackClick: () -> Unit,
-    onSongClick: (videoId: String, thumbnail: String) -> Unit,
-    onPlayPlaylist: (songs: List<QueueSong>, thumbnail: String, shuffle: Boolean) -> Unit
+    onSongClick: (videoId: String, playlistSongs: List<QueueSong>, playlistName: String, thumbnail: String) -> Unit,
+    onPlayPlaylist: (songs: List<QueueSong>, playlistName: String, thumbnail: String, shuffle: Boolean) -> Unit
 ) {
     var isPlaying by remember { mutableStateOf(false) }
     var isShuffleEnabled by remember { mutableStateOf(false) }
@@ -122,20 +126,23 @@ private fun PlaylistContent(
                 onPlayClick = {
                     isPlaying = !isPlaying
                     if (isPlaying) {
-                        onPlayPlaylist(queueSongs, playlistDetail.thumbnailImg, isShuffleEnabled)
+                        onPlayPlaylist(queueSongs, playlistDetail.playlistName, playlistDetail.thumbnailImg, isShuffleEnabled)
                     }
                 }
             )
         }
         
-        // Songs list
+        // Songs list - clicking a song uses playlist as queue
         items(
             items = playlistDetail.songs,
             key = { "${it.videoId}_${playlistDetail.songs.indexOf(it)}" }
         ) { song ->
             PlaylistSongItem(
                 song = song,
-                onClick = { onSongClick(song.videoId, song.thumbnail) }
+                onClick = { 
+                    // Pass playlist context so queue becomes the playlist
+                    onSongClick(song.videoId, queueSongs, playlistDetail.playlistName, song.thumbnail) 
+                }
             )
         }
         
