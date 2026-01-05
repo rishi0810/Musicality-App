@@ -577,6 +577,7 @@ fun ExpandedPlayer(
                     .padding(horizontal = 24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
+                Spacer(Modifier.height(12.dp))
                 // ==================== HEADER ====================
                 var showMenu by remember { mutableStateOf(false) }
                 
@@ -610,7 +611,7 @@ fun ExpandedPlayer(
                             contentDescription = "Back",
                             tint = Color.White,
                             modifier = Modifier
-                                .size(18.dp)
+                                .size(24.dp)
                                 .padding(end = 2.dp)
                         )
                     }
@@ -654,7 +655,7 @@ fun ExpandedPlayer(
                             modifier = Modifier
                                 .size(40.dp)
                                 .background(
-                                    color = Color.Transparent,
+                                    color = Color.White.copy(alpha = 0.1f),
                                     shape = CircleShape
                                 )
                         ) {
@@ -777,7 +778,7 @@ fun ExpandedPlayer(
                             .border(
                                 width = 1.dp,
                                 color = Color.White.copy(alpha = 0.1f),
-                                shape = RoundedCornerShape(32.dp)
+                                shape = RoundedCornerShape(16.dp)
                             ),
                         contentScale = ContentScale.Crop
                     )
@@ -845,7 +846,7 @@ fun ExpandedPlayer(
                     )
                 }
                 
-                Spacer(modifier = Modifier.height(32.dp))
+                Spacer(modifier = Modifier.height(25.dp))
                 
                 // ==================== PLAYBACK CONTROLS ====================
                 Row(
@@ -861,14 +862,14 @@ fun ExpandedPlayer(
                         Icon(
                             painter = androidx.compose.ui.res.painterResource(id = R.drawable.skip_previous_24px),
                             contentDescription = "Previous",
-                            tint = TextSecondaryColor,
+                            tint = Color.White,
                             modifier = Modifier.size(40.dp)
                         )
                     }
                     
                     Spacer(modifier = Modifier.width(24.dp))
                     
-                    // Play/Pause button - large and prominent
+                    // Play/Pause button - large and prominent with white background
                     IconButton(
                         onClick = onTogglePlayPause,
                         modifier = Modifier
@@ -876,11 +877,11 @@ fun ExpandedPlayer(
                             .shadow(
                                 elevation = 16.dp,
                                 shape = CircleShape,
-                                ambientColor = animatedAccentColor,
-                                spotColor = animatedAccentColor
+                                ambientColor = Color.White,
+                                spotColor = Color.White
                             )
                             .background(
-                                color = animatedAccentColor,
+                                color = Color.White,
                                 shape = CircleShape
                             )
                     ) {
@@ -889,7 +890,7 @@ fun ExpandedPlayer(
                                 id = if (isPlaying) R.drawable.pause_24px else R.drawable.play_arrow_24px
                             ),
                             contentDescription = if (isPlaying) "Pause" else "Play",
-                            tint = Color.White,
+                            tint = Color.Black,
                             modifier = Modifier.size(44.dp)
                         )
                     }
@@ -904,7 +905,7 @@ fun ExpandedPlayer(
                         Icon(
                             painter = androidx.compose.ui.res.painterResource(id = R.drawable.skip_next_24px),
                             contentDescription = "Next",
-                            tint = TextSecondaryColor,
+                            tint = Color.White,
                             modifier = Modifier.size(40.dp)
                         )
                     }
@@ -927,7 +928,7 @@ fun ExpandedPlayer(
                                 id = if (isLiked) R.drawable.favorite_filled_24px else R.drawable.favorite_24px
                             ),
                             contentDescription = if (isLiked) "Unlike" else "Like",
-                            tint = if (isLiked) Color(0xFFE91E63) else TextSecondaryColor,
+                            tint = if (isLiked) Color.White else TextSecondaryColor,
                             modifier = Modifier.size(28.dp)
                         )
                     }
@@ -962,16 +963,16 @@ fun ExpandedPlayer(
                                 // Show loading indicator while downloading
                                 CircularProgressIndicator(
                                     modifier = Modifier.size(24.dp),
-                                    color = animatedAccentColor,
+                                    color = Color.White,
                                     strokeWidth = 2.dp
                                 )
                             } else {
                                 Icon(
                                     painter = androidx.compose.ui.res.painterResource(
-                                        id = if (isDownloaded) R.drawable.download_filled_24px else R.drawable.download_24px
+                                        id = if (isDownloaded) R.drawable.download_for_filled_24px else R.drawable.download_for_24px
                                     ),
                                     contentDescription = if (isDownloaded) "Downloaded" else "Download",
-                                    tint = if (isDownloaded) animatedAccentColor else TextSecondaryColor,
+                                    tint = if (isDownloaded) Color.White else TextSecondaryColor,
                                     modifier = Modifier.size(28.dp)
                                 )
                             }
@@ -983,7 +984,7 @@ fun ExpandedPlayer(
                                     .align(Alignment.TopEnd)
                                     .offset(x = (-4).dp, y = 4.dp)
                                     .size(6.dp)
-                                    .background(animatedAccentColor, CircleShape)
+                                    .background(Color.White, CircleShape)
                             )
                         }
                     }

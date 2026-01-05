@@ -1,5 +1,9 @@
 package com.example.musicality.ui.album
 
+import android.graphics.Bitmap
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -18,6 +22,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -25,7 +30,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.palette.graphics.Palette
 import coil3.compose.AsyncImage
+import coil3.compose.AsyncImagePainter
+import coil3.compose.rememberAsyncImagePainter
+import coil3.request.ImageRequest
+import coil3.request.allowHardware
+import coil3.toBitmap
 import com.example.musicality.R
 import com.example.musicality.domain.model.AlbumDetail
 import com.example.musicality.domain.model.AlbumSong
@@ -34,6 +45,78 @@ import com.example.musicality.domain.model.RelatedAlbum
 import com.example.musicality.ui.components.SkeletonAlbumScreen
 import com.example.musicality.util.ImageUtils
 import com.example.musicality.util.UiState
+
+// ============================================================================
+// COLOR CONSTANTS & UTILITIES (Same as PlayerScreen)
+// ============================================================================
+
+private val DefaultBackgroundDark = Color(0xFF0F1323)
+
+/**
+ * Data class holding extracted palette colors for the background gradient
+ */
+private data class ScreenColors(
+    val primaryColor: Color = DefaultBackgroundDark,
+    val secondaryColor: Color = DefaultBackgroundDark
+)
+
+/**
+ * Darkens a color by a factor (0.0 = black, 1.0 = original)
+ */
+private fun darkenColor(color: Color, factor: Float = 0.6f): Color {
+    return Color(
+        red = (color.red * factor).coerceIn(0f, 1f),
+        green = (color.green * factor).coerceIn(0f, 1f),
+        blue = (color.blue * factor).coerceIn(0f, 1f),
+        alpha = color.alpha
+    )
+}
+
+/**
+ * Calculates the saturation of a color
+ */
+private fun calculateSaturation(color: Color): Float {
+    val max = maxOf(color.red, color.green, color.blue)
+    val min = minOf(color.red, color.green, color.blue)
+    return if (max == 0f) 0f else (max - min) / max
+}
+
+/**
+ * Extracts colors from a bitmap using Android's Palette API
+ */
+private fun extractColors(bitmap: Bitmap?): ScreenColors {
+    if (bitmap == null) return ScreenColors()
+    
+    val palette = Palette.from(bitmap)
+        .maximumColorCount(16)
+        .generate()
+    
+    val dominantSwatch = palette.dominantSwatch
+    val vibrantSwatch = palette.vibrantSwatch
+    val darkVibrantSwatch = palette.darkVibrantSwatch
+    val darkMutedSwatch = palette.darkMutedSwatch
+    
+    val primaryColor = dominantSwatch?.rgb?.let { Color(it) } 
+        ?: darkMutedSwatch?.rgb?.let { Color(it) }
+        ?: DefaultBackgroundDark
+    
+    val secondaryColor = darkVibrantSwatch?.rgb?.let { Color(it) }
+        ?: darkMutedSwatch?.rgb?.let { Color(it) }
+        ?: darkenColor(primaryColor, 0.5f)
+    
+    val finalPrimary = if (calculateSaturation(primaryColor) < 0.2f) {
+        vibrantSwatch?.rgb?.let { Color(it) }
+            ?: darkVibrantSwatch?.rgb?.let { Color(it) }
+            ?: primaryColor
+    } else {
+        primaryColor
+    }
+    
+    return ScreenColors(
+        primaryColor = finalPrimary,
+        secondaryColor = secondaryColor
+    )
+}
 
 /**
  * Album detail screen with full-width album art, back button overlay,
@@ -110,10 +193,65 @@ private fun AlbumContent(
     onPlayAlbum: (albumSongs: List<QueueSong>, albumName: String, albumThumbnail: String, shuffle: Boolean) -> Unit,
     onAlbumClick: (albumId: String) -> Unit
 ) {
+    val context = LocalContext.current
+    
     // Track if album is currently playing
     var isAlbumPlaying by remember { mutableStateOf(false) }
     // Track shuffle state
     var isShuffleEnabled by remember { mutableStateOf(false) }
+    
+    // Extract colors from album art
+    var screenColors by remember { mutableStateOf(ScreenColors()) }
+    
+    // Load bitmap for color extraction
+    val imageRequest = remember(albumDetail.albumThumbnail) {
+        ImageRequest.Builder(context)
+            .data(albumDetail.albumThumbnail)
+            .allowHardware(false) // Required for Palette
+            .build()
+    }
+    
+    val painter = rememberAsyncImagePainter(imageRequest)
+    val painterState by painter.state.collectAsState()
+    
+    LaunchedEffect(painterState) {
+        when (val state = painterState) {
+            is AsyncImagePainter.State.Success -> {
+                val bitmap = state.result.image.toBitmap()
+                screenColors = extractColors(bitmap)
+            }
+            else -> { /* Loading, Error, or Empty */ }
+        }
+    }
+    
+    // Animate background color changes
+    val animatedPrimaryColor by animateColorAsState(
+        targetValue = screenColors.primaryColor,
+        animationSpec = tween(durationMillis = 800, easing = FastOutSlowInEasing),
+        label = "primaryColor"
+    )
+    
+    val animatedSecondaryColor by animateColorAsState(
+        targetValue = screenColors.secondaryColor,
+        animationSpec = tween(durationMillis = 800, easing = FastOutSlowInEasing),
+        label = "secondaryColor"
+    )
+    
+    // Create gradient colors - same as PlayerScreen
+    val topGradientColor = darkenColor(animatedPrimaryColor, 0.6f)
+    val middleGradientColor = darkenColor(animatedSecondaryColor, 0.4f)
+    val bottomGradientColor = Color(0xFF0A0A12)
+    
+    // Gradient background
+    val gradientBackground = Brush.verticalGradient(
+        colors = listOf(
+            topGradientColor,
+            middleGradientColor,
+            bottomGradientColor
+        ),
+        startY = 0f,
+        endY = Float.POSITIVE_INFINITY
+    )
     
     // Convert AlbumSong to QueueSong for player compatibility
     val albumSongsAsQueue = remember(albumDetail.songs) {
@@ -128,80 +266,93 @@ private fun AlbumContent(
         }
     }
     
-    LazyColumn(
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .statusBarsPadding()
-            .navigationBarsPadding()
+            .background(Color.Black) // Solid black base
     ) {
-        // Album Header with art and info
-        item {
-            AlbumHeader(
-                albumDetail = albumDetail,
-                onBackClick = onBackClick,
-                isPlaying = isAlbumPlaying,
-                isShuffleEnabled = isShuffleEnabled,
-                onShuffleClick = {
-                    isShuffleEnabled = !isShuffleEnabled
-                },
-                onPlayClick = {
-                    // Play album and mark as playing
-                    if (albumSongsAsQueue.isNotEmpty()) {
-                        isAlbumPlaying = true
-                        onPlayAlbum(albumSongsAsQueue, albumDetail.albumName, albumDetail.albumThumbnail, isShuffleEnabled)
-                    }
-                }
-            )
-        }
+        // Gradient overlay
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(brush = gradientBackground)
+        )
         
-        // Songs list - clicking a song uses album as queue
-        items(
-            items = albumDetail.songs,
-            key = { it.videoId }
-        ) { song ->
-            AlbumSongItem(
-                song = song,
-                onClick = { 
-                    // Pass album context so queue becomes the album
-                    onSongClick(song.videoId, albumSongsAsQueue, albumDetail.albumName, albumDetail.albumThumbnail) 
-                }
-            )
-        }
-        
-        // Explore More section
-        if (albumDetail.moreAlbums.isNotEmpty()) {
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .navigationBarsPadding()
+        ) {
+            // Album Header with art and info
             item {
-                Spacer(modifier = Modifier.height(24.dp))
-                
-                Text(
-                    text = "Explore More",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White,
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
+                AlbumHeader(
+                    albumDetail = albumDetail,
+                    onBackClick = onBackClick,
+                    isPlaying = isAlbumPlaying,
+                    isShuffleEnabled = isShuffleEnabled,
+                    onShuffleClick = {
+                        isShuffleEnabled = !isShuffleEnabled
+                    },
+                    onPlayClick = {
+                        // Play album and mark as playing
+                        if (albumSongsAsQueue.isNotEmpty()) {
+                            isAlbumPlaying = true
+                            onPlayAlbum(albumSongsAsQueue, albumDetail.albumName, albumDetail.albumThumbnail, isShuffleEnabled)
+                        }
+                    }
                 )
-                
-                LazyRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    items(
-                        items = albumDetail.moreAlbums,
-                        key = { it.albumId }
-                    ) { album ->
-                        RelatedAlbumItem(
-                            album = album,
-                            onClick = { onAlbumClick(album.albumId) }
-                        )
+            }
+            
+            // Songs list - clicking a song uses album as queue
+            items(
+                items = albumDetail.songs,
+                key = { it.videoId }
+            ) { song ->
+                AlbumSongItem(
+                    song = song,
+                    onClick = { 
+                        // Pass album context so queue becomes the album
+                        onSongClick(song.videoId, albumSongsAsQueue, albumDetail.albumName, albumDetail.albumThumbnail) 
+                    }
+                )
+            }
+            
+            // Explore More section
+            if (albumDetail.moreAlbums.isNotEmpty()) {
+                item {
+                    Spacer(modifier = Modifier.height(24.dp))
+                    
+                    Text(
+                        text = "Explore More",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
+                    )
+                    
+                    LazyRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        items(
+                            items = albumDetail.moreAlbums,
+                            key = { it.albumId }
+                        ) { album ->
+                            RelatedAlbumItem(
+                                album = album,
+                                onClick = { onAlbumClick(album.albumId) }
+                            )
+                        }
                     }
                 }
             }
-        }
-        
-        // Bottom padding for player
-        item {
-            Spacer(modifier = Modifier.height(160.dp))
+            
+            // Bottom padding for player
+            item {
+                Spacer(modifier = Modifier.height(160.dp))
+            }
         }
     }
 }

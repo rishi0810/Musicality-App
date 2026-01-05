@@ -2,6 +2,11 @@ package com.example.musicality.ui
 
 import android.content.ComponentName
 import androidx.annotation.DrawableRes
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
@@ -12,6 +17,7 @@ import androidx.compose.runtime.*
 import androidx.activity.compose.BackHandler
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -23,6 +29,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
+import androidx.navigation.NavDestination
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
@@ -79,6 +86,18 @@ val items = listOf(
     Screen.Search,
     Screen.Library,
 )
+
+/**
+ * Helper function to determine the order of routes for directional transitions
+ */
+private fun NavDestination?.routeOrder(): Int {
+    return when (this?.route) {
+        Screen.Home.route -> 0
+        Screen.Search.route -> 1
+        Screen.Library.route -> 2
+        else -> 99 // Detail screens - always slide from right
+    }
+}
 
 @androidx.annotation.OptIn(UnstableApi::class)
 @Composable
@@ -210,8 +229,50 @@ fun MusicalityApp(openPlayerOnStart: Boolean = false) {
                     .padding(innerPadding)
             ) {
                 NavHost(
-                    navController,
-                    startDestination = Screen.Home.route
+                    navController = navController,
+                    startDestination = Screen.Home.route,
+                    enterTransition = {
+                        val fromOrder = initialState.destination.routeOrder()
+                        val toOrder = targetState.destination.routeOrder()
+                        if (fromOrder < toOrder) {
+                            slideIntoContainer(
+                                AnimatedContentTransitionScope.SlideDirection.Left,
+                                animationSpec = tween(300)
+                            )
+                        } else {
+                            slideIntoContainer(
+                                AnimatedContentTransitionScope.SlideDirection.Right,
+                                animationSpec = tween(300)
+                            )
+                        }
+                    },
+                    exitTransition = {
+                        val fromOrder = initialState.destination.routeOrder()
+                        val toOrder = targetState.destination.routeOrder()
+                        if (fromOrder < toOrder) {
+                            slideOutOfContainer(
+                                AnimatedContentTransitionScope.SlideDirection.Left,
+                                animationSpec = tween(300)
+                            )
+                        } else {
+                            slideOutOfContainer(
+                                AnimatedContentTransitionScope.SlideDirection.Right,
+                                animationSpec = tween(300)
+                            )
+                        }
+                    },
+                    popEnterTransition = {
+                        slideIntoContainer(
+                            AnimatedContentTransitionScope.SlideDirection.Right,
+                            animationSpec = tween(300)
+                        )
+                    },
+                    popExitTransition = {
+                        slideOutOfContainer(
+                            AnimatedContentTransitionScope.SlideDirection.Right,
+                            animationSpec = tween(300)
+                        )
+                    }
                 ) {
                     composable(Screen.Home.route) { 
                         HomeScreen(bottomPadding = bottomContentPadding) 
@@ -240,11 +301,14 @@ fun MusicalityApp(openPlayerOnStart: Boolean = false) {
                         LibraryScreen(
                             bottomPadding = bottomContentPadding,
                             onSongClick = { videoId, allSongs, albumName, thumbnail ->
-                                // Play song from liked songs
+                                // Play song from liked or downloaded songs
                                 playerViewModel.playSongFromPlaylist(videoId, allSongs, albumName, thumbnail)
                             },
                             onPlayLikedSongs = { songs, shuffle ->
                                 playerViewModel.playPlaylist(songs, "Liked Songs", "", shuffle)
+                            },
+                            onPlayDownloadedSongs = { songs, shuffle ->
+                                playerViewModel.playPlaylist(songs, "Downloaded Songs", "", shuffle)
                             }
                         )
                     }
@@ -310,8 +374,8 @@ fun MusicalityApp(openPlayerOnStart: Boolean = false) {
                             onSongClick = { videoId, thumbnailUrl ->
                                 playerViewModel.playSong(videoId, thumbnailUrl)
                             },
-                            onVideoClick = { videoId, thumbnailUrl ->
-                                playerViewModel.playSong(videoId, thumbnailUrl)
+                            onVideoClick = { videoId, thumbnailUrl, channelId ->
+                                playerViewModel.playVideo(videoId, thumbnailUrl, channelId)
                             },
                             onAlbumClick = { albumId ->
                                 navController.navigate("album/$albumId")
@@ -374,13 +438,25 @@ fun MusicalityApp(openPlayerOnStart: Boolean = false) {
                         val currentDestination = navBackStackEntry?.destination
                         items.forEach { screen ->
                             val isSelected = currentDestination?.hierarchy?.any { it.route == screen.route } == true
+                            
+                            // Scale animation for selected icon
+                            val scale by animateFloatAsState(
+                                targetValue = if (isSelected) 1.1f else 1.0f,
+                                animationSpec = spring(
+                                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                                    stiffness = Spring.StiffnessLow
+                                ),
+                                label = "navIconScale"
+                            )
+                            
                             NavigationBarItem(
                                 icon = { 
                                     Icon(
                                         painter = painterResource(
                                             id = if (isSelected) screen.iconFilled else screen.iconUnfilled
                                         ), 
-                                        contentDescription = null
+                                        contentDescription = null,
+                                        modifier = Modifier.scale(scale)
                                     ) 
                                 },
                                 label = { Text(stringResource(screen.labelRes)) },

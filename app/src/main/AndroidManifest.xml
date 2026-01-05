@@ -39,6 +39,16 @@
             </intent-filter>
         </service>
 
+        <!-- Download service for background song downloads -->
+        <service
+            android:name=".service.AudioDownloadService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync">
+            <intent-filter>
+                <action android:name="androidx.media3.exoplayer.downloadService.action.RESTART" />
+            </intent-filter>
+        </service>
+
     </application>
 
 </manifest>

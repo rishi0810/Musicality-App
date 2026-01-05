@@ -66,6 +66,7 @@ coil-network = { group = "io.coil-kt.coil3", name = "coil-network-okhttp", versi
 media3-exoplayer = { group = "androidx.media3", name = "media3-exoplayer", version.ref = "media3" }
 media3-ui = { group = "androidx.media3", name = "media3-ui", version.ref = "media3" }
 media3-session = { group = "androidx.media3", name = "media3-session", version.ref = "media3" }
+media3-datasource = { group = "androidx.media3", name = "media3-datasource", version.ref = "media3" }
 
 # Animation
 lottie-compose = { group = "com.airbnb.android", name = "lottie-compose", version.ref = "lottie" }

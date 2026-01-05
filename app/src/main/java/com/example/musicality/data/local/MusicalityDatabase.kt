@@ -9,14 +9,23 @@ import androidx.room.RoomDatabase
  * Room database for the Musicality app
  */
 @Database(
-    entities = [LikedSongEntity::class, DownloadedSongEntity::class],
-    version = 2,
+    entities = [
+        LikedSongEntity::class,
+        DownloadedSongEntity::class,
+        SavedAlbumEntity::class,
+        SavedArtistEntity::class,
+        SavedPlaylistEntity::class
+    ],
+    version = 4,
     exportSchema = false
 )
 abstract class MusicalityDatabase : RoomDatabase() {
     
     abstract fun likedSongDao(): LikedSongDao
     abstract fun downloadedSongDao(): DownloadedSongDao
+    abstract fun savedAlbumDao(): SavedAlbumDao
+    abstract fun savedArtistDao(): SavedArtistDao
+    abstract fun savedPlaylistDao(): SavedPlaylistDao
     
     companion object {
         @Volatile
@@ -37,4 +46,5 @@ abstract class MusicalityDatabase : RoomDatabase() {
         }
     }
 }
+
 

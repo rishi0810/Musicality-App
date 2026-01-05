@@ -226,21 +226,93 @@ private fun parseVideoResult(renderer: Map<*, *>): TypedSearchResult.Video? {
     // Extract thumbnail
     val thumbnailUrl = extractThumbnail(renderer)
 
-    // Extract channel, views, duration from second flex column
+    // Extract second flex column data (views, duration, and metadata for channel parsing)
     val secondColumn = flexColumns?.getOrNull(1) as? Map<*, *>
     val secondColumnRenderer = secondColumn?.get("musicResponsiveListItemFlexColumnRenderer") as? Map<*, *>
     val secondText = secondColumnRenderer?.get("text") as? Map<*, *>
     val secondColumnRuns = secondText?.get("runs") as? List<*>
 
-    val channelName = (secondColumnRuns?.getOrNull(0) as? Map<*, *>)?.get("text") as? String ?: ""
+    // Extract views and duration from standard positions
     val views = (secondColumnRuns?.getOrNull(2) as? Map<*, *>)?.get("text") as? String ?: ""
     val duration = (secondColumnRuns?.getOrNull(4) as? Map<*, *>)?.get("text") as? String ?: ""
+    
+    // === CHANNEL ID EXTRACTION ===
+    var channelId = ""
+    
+    // Method 1: Extract channelId from menu items ("Go to artist" button) - most reliable for ID
+    // NOTE: The menu text is just the button label "Go to Artist", NOT the artist name
+    val menu = renderer["menu"] as? Map<*, *>
+    val menuRenderer = menu?.get("menuRenderer") as? Map<*, *>
+    val menuItems = menuRenderer?.get("items") as? List<*>
+    
+    if (menuItems != null) {
+        for (menuItem in menuItems) {
+            val menuItemMap = menuItem as? Map<*, *> ?: continue
+            val menuNavItemRenderer = menuItemMap["menuNavigationItemRenderer"] as? Map<*, *> ?: continue
+            
+            // Check if this is the "ARTIST" menu item
+            val icon = menuNavItemRenderer["icon"] as? Map<*, *>
+            val iconType = icon?.get("iconType") as? String
+            
+            if (iconType == "ARTIST") {
+                // Extract channelId from the navigation endpoint
+                val navEndpoint = menuNavItemRenderer["navigationEndpoint"] as? Map<*, *>
+                val browseEndpoint = navEndpoint?.get("browseEndpoint") as? Map<*, *>
+                channelId = browseEndpoint?.get("browseId") as? String ?: ""
+                break
+            }
+        }
+    }
+    
+    // Method 2 (Fallback for channelId): Extract from metadata column runs
+    if (channelId.isBlank() && secondColumnRuns != null) {
+        for (run in secondColumnRuns) {
+            val runMap = run as? Map<*, *> ?: continue
+            val navEndpoint = runMap["navigationEndpoint"] as? Map<*, *> ?: continue
+            val browseEndpoint = navEndpoint["browseEndpoint"] as? Map<*, *> ?: continue
+            val browseId = browseEndpoint["browseId"] as? String
+            if (browseId != null) {
+                channelId = browseId
+                break
+            }
+        }
+    }
+    
+    // === CHANNEL NAME EXTRACTION (from metadata column only) ===
+    var channelName = ""
+    
+    if (secondColumnRuns != null) {
+        // For standard videos: artist is runs[0].text
+        // For podcast/lyrics videos: the first run might be a date, look for run with navigationEndpoint
+        
+        // First, try to find a run with a navigationEndpoint (handles podcast/lyrics case)
+        var foundRunWithNav = false
+        for (run in secondColumnRuns) {
+            val runMap = run as? Map<*, *> ?: continue
+            val navEndpoint = runMap["navigationEndpoint"] as? Map<*, *> ?: continue
+            val browseEndpoint = navEndpoint["browseEndpoint"] as? Map<*, *> ?: continue
+            val browseId = browseEndpoint["browseId"] as? String
+            
+            if (browseId != null) {
+                // This is the artist run - use its text as channel name
+                channelName = runMap["text"] as? String ?: ""
+                foundRunWithNav = true
+                break
+            }
+        }
+        
+        // If no run with navigationEndpoint found, use the first run (standard video case)
+        if (!foundRunWithNav) {
+            channelName = (secondColumnRuns.getOrNull(0) as? Map<*, *>)?.get("text") as? String ?: ""
+        }
+    }
 
     return TypedSearchResult.Video(
         id = videoId,
         name = name,
         thumbnailUrl = thumbnailUrl,
         channelName = channelName,
+        channelId = channelId,
         views = views,
         duration = duration
     )

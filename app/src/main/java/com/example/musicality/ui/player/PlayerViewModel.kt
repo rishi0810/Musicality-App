@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
+import com.example.musicality.di.DatabaseModule
 import com.example.musicality.di.NetworkModule
 import com.example.musicality.domain.model.PlaybackContext
 import com.example.musicality.domain.model.PlaybackSource
@@ -80,6 +81,8 @@ class PlayerViewModel(
      * Load and play song from SEARCH - called when USER initiates playback from search result
      * This WILL fetch a new queue for the song
      * Shows "NOW PLAYING" in the player header
+     * 
+     * If the song is downloaded, plays from local file instead of streaming
      */
     fun playSong(videoId: String, thumbnailUrl: String) {
         currentVideoId = videoId
@@ -96,45 +99,196 @@ class PlayerViewModel(
             _queueState.value = UiState.Idle
 
             android.util.Log.d("PlayerViewModel", "Playing from SEARCH: $videoId")
+            
+            // Check if song is downloaded - play from local file if available
+            val downloadedSong = downloadRepository?.getDownloadedSong(videoId)
+            
+            if (downloadedSong != null && java.io.File(downloadedSong.filePath).exists()) {
+                // PLAY FROM LOCAL FILE - no network needed for audio
+                android.util.Log.d("PlayerViewModel", "Playing from downloaded file: ${downloadedSong.filePath}")
+                
+                val thumbnailSource = downloadedSong.thumbnailFilePath ?: downloadedSong.thumbnailUrl
+                
+                val offlineSongInfo = SongPlaybackInfo(
+                    videoId = videoId,
+                    title = downloadedSong.title,
+                    author = downloadedSong.author,
+                    thumbnailUrl = thumbnailSource,
+                    mainUrl = downloadedSong.filePath, // Local file path
+                    lengthSeconds = downloadedSong.duration,
+                    viewCount = "", // Not stored for downloaded songs
+                    channelId = downloadedSong.channelId,
+                    mimeType = downloadedSong.mimeType,
+                    playbackContext = currentPlaybackContext
+                )
+                
+                _playerState.value = UiState.Success(offlineSongInfo)
+                preparePlayer(
+                    url = downloadedSong.filePath,
+                    title = downloadedSong.title,
+                    artist = downloadedSong.author,
+                    artworkUrl = thumbnailSource,
+                    mimeType = downloadedSong.mimeType
+                )
+                
+                _isDownloaded.value = true
+                
+                // Still fetch queue for related songs (requires network)
+                fetchQueue(videoId)
+            } else {
+                // STREAM FROM NETWORK
+                repository.getSongInfo(videoId).fold(
+                    onSuccess = { songInfo ->
+                        // Upscale the thumbnail URL from search results (w120-h120 to w544-h544)
+                        val upscaledThumbnail = com.example.musicality.util.ImageUtils.upscaleThumbnail(thumbnailUrl)
+                        
+                        // Replace the thumbnail URL with the upscaled version and add context
+                        val updatedSongInfo = songInfo.copy(
+                            thumbnailUrl = upscaledThumbnail,
+                            playbackContext = currentPlaybackContext
+                        )
+                        
+                        _playerState.value = UiState.Success(updatedSongInfo)
+                        preparePlayer(
+                            url = songInfo.mainUrl,
+                            title = updatedSongInfo.title,
+                            artist = updatedSongInfo.author,
+                            artworkUrl = updatedSongInfo.thumbnailUrl,
+                            mimeType = songInfo.mimeType
+                        )
+                        
+                        // Check download status
+                        checkDownloadStatus(videoId)
+                        
+                        // Fetch queue ONLY for user-initiated playback from search
+                        fetchQueue(videoId)
+                    },
+                    onFailure = { exception ->
+                        _playerState.value = UiState.Error(
+                            exception.message ?: "Failed to load song"
+                        )
+                    }
+                )
+            }
+        }
+    }
+    
+    /**
+     * Load and play video from VIDEO SEARCH RESULTS - uses pre-extracted channelId from search
+     * This is used when a video item from the Videos section of search is clicked.
+     * The channelId comes from the search results, NOT the player API.
+     * 
+     * IMPORTANT: This is different from playSong() which extracts channelId from player API.
+     * For video search results, the channelId is extracted from the search results themselves.
+     * 
+     * Shows "NOW PLAYING" in the player header
+     * 
+     * @param videoId The video ID to play
+     * @param thumbnailUrl The thumbnail URL for the video
+     * @param channelId The artist channelId pre-extracted from video search results
+     */
+    fun playVideo(videoId: String, thumbnailUrl: String, channelId: String) {
+        currentVideoId = videoId
+        currentQueueIndex = 0 // Reset queue index for new user-initiated playback
+        currentPlaybackContext = PlaybackContext(
+            source = PlaybackSource.SEARCH,
+            sourceName = ""
+        )
+        
+        viewModelScope.launch {
+            _playerState.value = UiState.Loading
+            _isExpanded.value = true
+            // Reset queue when playing new video from search
+            _queueState.value = UiState.Idle
 
-            repository.getSongInfo(videoId).fold(
-                onSuccess = { songInfo ->
-                    // Upscale the thumbnail URL from search results (w120-h120 to w544-h544)
-                    val upscaledThumbnail = com.example.musicality.util.ImageUtils.upscaleThumbnail(thumbnailUrl)
-                    
-                    // Replace the thumbnail URL with the upscaled version and add context
-                    val updatedSongInfo = songInfo.copy(
-                        thumbnailUrl = upscaledThumbnail,
-                        playbackContext = currentPlaybackContext
-                    )
-                    
-                    _playerState.value = UiState.Success(updatedSongInfo)
-                    preparePlayer(
-                        url = songInfo.mainUrl,
-                        title = updatedSongInfo.title,
-                        artist = updatedSongInfo.author,
-                        artworkUrl = updatedSongInfo.thumbnailUrl,
-                        mimeType = songInfo.mimeType
-                    )
-                    
-                    // Check download status
-                    checkDownloadStatus(videoId)
-                    
-                    // Fetch queue ONLY for user-initiated playback from search
-                    fetchQueue(videoId)
-                },
-                onFailure = { exception ->
-                    _playerState.value = UiState.Error(
-                        exception.message ?: "Failed to load song"
-                    )
-                }
-            )
+            android.util.Log.d("PlayerViewModel", "Playing VIDEO from SEARCH: $videoId with channelId: $channelId")
+            
+            // Check if video is downloaded - play from local file if available
+            val downloadedSong = downloadRepository?.getDownloadedSong(videoId)
+            
+            if (downloadedSong != null && java.io.File(downloadedSong.filePath).exists()) {
+                // PLAY FROM LOCAL FILE - no network needed for audio
+                android.util.Log.d("PlayerViewModel", "Playing video from downloaded file: ${downloadedSong.filePath}")
+                
+                val thumbnailSource = downloadedSong.thumbnailFilePath ?: downloadedSong.thumbnailUrl
+                
+                // Use the channelId from search results, or fall back to downloaded song's channelId
+                val effectiveChannelId = channelId.ifBlank { downloadedSong.channelId }
+                
+                val offlineSongInfo = SongPlaybackInfo(
+                    videoId = videoId,
+                    title = downloadedSong.title,
+                    author = downloadedSong.author,
+                    thumbnailUrl = thumbnailSource,
+                    mainUrl = downloadedSong.filePath, // Local file path
+                    lengthSeconds = downloadedSong.duration,
+                    viewCount = "", // Not stored for downloaded songs
+                    channelId = effectiveChannelId,
+                    mimeType = downloadedSong.mimeType,
+                    playbackContext = currentPlaybackContext
+                )
+                
+                _playerState.value = UiState.Success(offlineSongInfo)
+                preparePlayer(
+                    url = downloadedSong.filePath,
+                    title = downloadedSong.title,
+                    artist = downloadedSong.author,
+                    artworkUrl = thumbnailSource,
+                    mimeType = downloadedSong.mimeType
+                )
+                
+                _isDownloaded.value = true
+                
+                // Still fetch queue for related songs (requires network)
+                fetchQueue(videoId)
+            } else {
+                // STREAM FROM NETWORK
+                repository.getSongInfo(videoId).fold(
+                    onSuccess = { songInfo ->
+                        // Upscale the thumbnail URL from search results (w120-h120 to w544-h544)
+                        val upscaledThumbnail = com.example.musicality.util.ImageUtils.upscaleThumbnail(thumbnailUrl)
+                        
+                        // OVERRIDE the channelId from player API with the one from search results
+                        // This is the key difference from playSong() - we use the pre-extracted channelId
+                        val effectiveChannelId = channelId.ifBlank { songInfo.channelId }
+                        
+                        // Replace the thumbnail URL with the upscaled version, add context, and use search channelId
+                        val updatedSongInfo = songInfo.copy(
+                            thumbnailUrl = upscaledThumbnail,
+                            channelId = effectiveChannelId,
+                            playbackContext = currentPlaybackContext
+                        )
+                        
+                        _playerState.value = UiState.Success(updatedSongInfo)
+                        preparePlayer(
+                            url = songInfo.mainUrl,
+                            title = updatedSongInfo.title,
+                            artist = updatedSongInfo.author,
+                            artworkUrl = updatedSongInfo.thumbnailUrl,
+                            mimeType = songInfo.mimeType
+                        )
+                        
+                        // Check download status
+                        checkDownloadStatus(videoId)
+                        
+                        // Fetch queue ONLY for user-initiated playback from search
+                        fetchQueue(videoId)
+                    },
+                    onFailure = { exception ->
+                        _playerState.value = UiState.Error(
+                            exception.message ?: "Failed to load video"
+                        )
+                    }
+                )
+            }
         }
     }
     
     /**
      * Play album - sets album songs as queue without fetching related songs
      * Shows "PLAYING FROM" + album name in the player header
+     * 
+     * If the song is downloaded, plays from local file instead of streaming
      * 
      * @param albumSongs List of songs in the album (as QueueSong for compatibility)
      * @param albumName Name of the album for display in "Playing From"
@@ -173,35 +327,70 @@ class PlayerViewModel(
         viewModelScope.launch {
             _playerState.value = UiState.Loading
             _isExpanded.value = true
-
-            repository.getSongInfo(songToPlay.videoId).fold(
-                onSuccess = { songInfo ->
-                    // Use album thumbnail for consistency
-                    val thumbnailUrl = albumThumbnail.ifEmpty { songToPlay.thumbnailUrl.ifEmpty { songInfo.thumbnailUrl } }
-                    val updatedSongInfo = songInfo.copy(
-                        thumbnailUrl = thumbnailUrl,
-                        playbackContext = currentPlaybackContext
-                    )
-                    
-                    _playerState.value = UiState.Success(updatedSongInfo)
-                    preparePlayer(
-                        url = songInfo.mainUrl,
-                        title = updatedSongInfo.title,
-                        artist = updatedSongInfo.author,
-                        artworkUrl = thumbnailUrl,
-                        mimeType = songInfo.mimeType
-                    )
-                    
-                    // Check download status
-                    checkDownloadStatus(songToPlay.videoId)
-                    // NO queue fetch - we already set the album songs as queue
-                },
-                onFailure = { exception ->
-                    _playerState.value = UiState.Error(
-                        exception.message ?: "Failed to load song"
-                    )
-                }
-            )
+            
+            // Check if song is downloaded - play from local file if available
+            val downloadedSong = downloadRepository?.getDownloadedSong(songToPlay.videoId)
+            
+            if (downloadedSong != null && java.io.File(downloadedSong.filePath).exists()) {
+                // PLAY FROM LOCAL FILE - no network needed
+                android.util.Log.d("PlayerViewModel", "Playing album song from downloaded file: ${downloadedSong.filePath}")
+                
+                val thumbnailSource = albumThumbnail.ifEmpty { downloadedSong.thumbnailFilePath ?: downloadedSong.thumbnailUrl }
+                
+                val offlineSongInfo = SongPlaybackInfo(
+                    videoId = songToPlay.videoId,
+                    title = downloadedSong.title,
+                    author = downloadedSong.author,
+                    thumbnailUrl = thumbnailSource,
+                    mainUrl = downloadedSong.filePath,
+                    lengthSeconds = downloadedSong.duration,
+                    viewCount = "", // Not stored for downloaded songs
+                    channelId = downloadedSong.channelId,
+                    mimeType = downloadedSong.mimeType,
+                    playbackContext = currentPlaybackContext
+                )
+                
+                _playerState.value = UiState.Success(offlineSongInfo)
+                preparePlayer(
+                    url = downloadedSong.filePath,
+                    title = downloadedSong.title,
+                    artist = downloadedSong.author,
+                    artworkUrl = thumbnailSource,
+                    mimeType = downloadedSong.mimeType
+                )
+                
+                _isDownloaded.value = true
+            } else {
+                // STREAM FROM NETWORK
+                repository.getSongInfo(songToPlay.videoId).fold(
+                    onSuccess = { songInfo ->
+                        // Use album thumbnail for consistency
+                        val thumbnailUrl = albumThumbnail.ifEmpty { songToPlay.thumbnailUrl.ifEmpty { songInfo.thumbnailUrl } }
+                        val updatedSongInfo = songInfo.copy(
+                            thumbnailUrl = thumbnailUrl,
+                            playbackContext = currentPlaybackContext
+                        )
+                        
+                        _playerState.value = UiState.Success(updatedSongInfo)
+                        preparePlayer(
+                            url = songInfo.mainUrl,
+                            title = updatedSongInfo.title,
+                            artist = updatedSongInfo.author,
+                            artworkUrl = thumbnailUrl,
+                            mimeType = songInfo.mimeType
+                        )
+                        
+                        // Check download status
+                        checkDownloadStatus(songToPlay.videoId)
+                        // NO queue fetch - we already set the album songs as queue
+                    },
+                    onFailure = { exception ->
+                        _playerState.value = UiState.Error(
+                            exception.message ?: "Failed to load song"
+                        )
+                    }
+                )
+            }
         }
     }
     
@@ -282,35 +471,72 @@ class PlayerViewModel(
         viewModelScope.launch {
             _playerState.value = UiState.Loading
             _isExpanded.value = true
-
-            repository.getSongInfo(songToPlay.videoId).fold(
-                onSuccess = { songInfo ->
-                    // Use playlist thumbnail or song thumbnail
-                    val thumbnailUrl = songToPlay.thumbnailUrl.ifEmpty { playlistThumbnail.ifEmpty { songInfo.thumbnailUrl } }
-                    val updatedSongInfo = songInfo.copy(
-                        thumbnailUrl = thumbnailUrl,
-                        playbackContext = currentPlaybackContext
-                    )
-                    
-                    _playerState.value = UiState.Success(updatedSongInfo)
-                    preparePlayer(
-                        url = songInfo.mainUrl,
-                        title = updatedSongInfo.title,
-                        artist = updatedSongInfo.author,
-                        artworkUrl = thumbnailUrl,
-                        mimeType = songInfo.mimeType
-                    )
-                    
-                    // Check download status
-                    checkDownloadStatus(songToPlay.videoId)
-                    // NO queue fetch - we already set the playlist songs as queue
-                },
-                onFailure = { exception ->
-                    _playerState.value = UiState.Error(
-                        exception.message ?: "Failed to load song"
-                    )
+            
+            // Check if song is downloaded - play from local file if available
+            val downloadedSong = downloadRepository?.getDownloadedSong(songToPlay.videoId)
+            
+            if (downloadedSong != null && java.io.File(downloadedSong.filePath).exists()) {
+                // PLAY FROM LOCAL FILE - no network needed
+                android.util.Log.d("PlayerViewModel", "Playing playlist song from downloaded file: ${downloadedSong.filePath}")
+                
+                val thumbnailSource = songToPlay.thumbnailUrl.ifEmpty { 
+                    playlistThumbnail.ifEmpty { downloadedSong.thumbnailFilePath ?: downloadedSong.thumbnailUrl } 
                 }
-            )
+                
+                val offlineSongInfo = SongPlaybackInfo(
+                    videoId = songToPlay.videoId,
+                    title = downloadedSong.title,
+                    author = downloadedSong.author,
+                    thumbnailUrl = thumbnailSource,
+                    mainUrl = downloadedSong.filePath,
+                    lengthSeconds = downloadedSong.duration,
+                    viewCount = "", // Not stored for downloaded songs
+                    channelId = downloadedSong.channelId,
+                    mimeType = downloadedSong.mimeType,
+                    playbackContext = currentPlaybackContext
+                )
+                
+                _playerState.value = UiState.Success(offlineSongInfo)
+                preparePlayer(
+                    url = downloadedSong.filePath,
+                    title = downloadedSong.title,
+                    artist = downloadedSong.author,
+                    artworkUrl = thumbnailSource,
+                    mimeType = downloadedSong.mimeType
+                )
+                
+                _isDownloaded.value = true
+            } else {
+                // STREAM FROM NETWORK
+                repository.getSongInfo(songToPlay.videoId).fold(
+                    onSuccess = { songInfo ->
+                        // Use playlist thumbnail or song thumbnail
+                        val thumbnailUrl = songToPlay.thumbnailUrl.ifEmpty { playlistThumbnail.ifEmpty { songInfo.thumbnailUrl } }
+                        val updatedSongInfo = songInfo.copy(
+                            thumbnailUrl = thumbnailUrl,
+                            playbackContext = currentPlaybackContext
+                        )
+                        
+                        _playerState.value = UiState.Success(updatedSongInfo)
+                        preparePlayer(
+                            url = songInfo.mainUrl,
+                            title = updatedSongInfo.title,
+                            artist = updatedSongInfo.author,
+                            artworkUrl = thumbnailUrl,
+                            mimeType = songInfo.mimeType
+                        )
+                        
+                        // Check download status
+                        checkDownloadStatus(songToPlay.videoId)
+                        // NO queue fetch - we already set the playlist songs as queue
+                    },
+                    onFailure = { exception ->
+                        _playerState.value = UiState.Error(
+                            exception.message ?: "Failed to load song"
+                        )
+                    }
+                )
+            }
         }
     }
     
@@ -357,6 +583,8 @@ class PlayerViewModel(
      * 
      * IMPORTANT: Does NOT set Loading state to prevent UI re-render
      * The current song stays visible while the new one loads
+     * 
+     * If the song is downloaded, plays from local file instead of streaming
      */
     private fun playSongFromQueueInternal(queueSong: QueueSong, queueIndex: Int) {
         currentVideoId = queueSong.videoId
@@ -367,37 +595,72 @@ class PlayerViewModel(
         viewModelScope.launch {
             // DO NOT set Loading state here - keeps current UI stable
             // DO NOT reset queue here - we're playing from existing queue
-
-            repository.getSongInfo(queueSong.videoId).fold(
-                onSuccess = { songInfo ->
-                    // Use thumbnail from queue song (already has good resolution)
-                    val thumbnailUrl = queueSong.thumbnailUrl.ifEmpty { songInfo.thumbnailUrl }
-                    // Preserve playback context when playing from queue
-                    val updatedSongInfo = songInfo.copy(
-                        thumbnailUrl = thumbnailUrl,
-                        playbackContext = currentPlaybackContext
-                    )
-                    
-                    // Directly update to Success - smooth transition
-                    _playerState.value = UiState.Success(updatedSongInfo)
-                    preparePlayer(
-                        url = songInfo.mainUrl,
-                        title = updatedSongInfo.title,
-                        artist = updatedSongInfo.author,
-                        artworkUrl = thumbnailUrl,
-                        mimeType = songInfo.mimeType
-                    )
-                    
-                    // Check download status
-                    checkDownloadStatus(queueSong.videoId)
-                    // NO queue fetch here - queue stays the same
-                },
-                onFailure = { exception ->
-                    _playerState.value = UiState.Error(
-                        exception.message ?: "Failed to load song"
-                    )
-                }
-            )
+            
+            // Check if song is downloaded - play from local file if available
+            val downloadedSong = downloadRepository?.getDownloadedSong(queueSong.videoId)
+            
+            if (downloadedSong != null && java.io.File(downloadedSong.filePath).exists()) {
+                // PLAY FROM LOCAL FILE - no network needed
+                android.util.Log.d("PlayerViewModel", "Playing from downloaded file: ${downloadedSong.filePath}")
+                
+                val thumbnailUrl = downloadedSong.thumbnailFilePath ?: downloadedSong.thumbnailUrl
+                
+                val offlineSongInfo = SongPlaybackInfo(
+                    videoId = queueSong.videoId,
+                    title = downloadedSong.title,
+                    author = downloadedSong.author,
+                    thumbnailUrl = thumbnailUrl,
+                    mainUrl = downloadedSong.filePath, // Local file path
+                    lengthSeconds = downloadedSong.duration,
+                    viewCount = "", // Not stored for downloaded songs
+                    channelId = downloadedSong.channelId,
+                    mimeType = downloadedSong.mimeType,
+                    playbackContext = currentPlaybackContext
+                )
+                
+                _playerState.value = UiState.Success(offlineSongInfo)
+                preparePlayer(
+                    url = downloadedSong.filePath,
+                    title = downloadedSong.title,
+                    artist = downloadedSong.author,
+                    artworkUrl = thumbnailUrl,
+                    mimeType = downloadedSong.mimeType
+                )
+                
+                _isDownloaded.value = true
+            } else {
+                // STREAM FROM NETWORK
+                repository.getSongInfo(queueSong.videoId).fold(
+                    onSuccess = { songInfo ->
+                        // Use thumbnail from queue song (already has good resolution)
+                        val thumbnailUrl = queueSong.thumbnailUrl.ifEmpty { songInfo.thumbnailUrl }
+                        // Preserve playback context when playing from queue
+                        val updatedSongInfo = songInfo.copy(
+                            thumbnailUrl = thumbnailUrl,
+                            playbackContext = currentPlaybackContext
+                        )
+                        
+                        // Directly update to Success - smooth transition
+                        _playerState.value = UiState.Success(updatedSongInfo)
+                        preparePlayer(
+                            url = songInfo.mainUrl,
+                            title = updatedSongInfo.title,
+                            artist = updatedSongInfo.author,
+                            artworkUrl = thumbnailUrl,
+                            mimeType = songInfo.mimeType
+                        )
+                        
+                        // Check download status
+                        checkDownloadStatus(queueSong.videoId)
+                        // NO queue fetch here - queue stays the same
+                    },
+                    onFailure = { exception ->
+                        _playerState.value = UiState.Error(
+                            exception.message ?: "Failed to load song"
+                        )
+                    }
+                )
+            }
         }
     }
     
@@ -590,7 +853,7 @@ class PlayerViewModel(
      */
     fun initializeDownloadRepository(context: Context) {
         if (downloadRepository == null) {
-            downloadRepository = NetworkModule.provideDownloadRepository(context)
+            downloadRepository = DatabaseModule.provideDownloadRepository(context)
         }
     }
     
@@ -673,22 +936,41 @@ class PlayerViewModel(
         mimeType: String = "audio/webm"
     ) {
         player?.let { p ->
+            // Build artwork URI - handle both local files and URLs
+            val artworkUri = if (artworkUrl.startsWith("/")) {
+                // Local file path - convert to file:// URI
+                android.net.Uri.fromFile(java.io.File(artworkUrl))
+            } else {
+                // Remote URL
+                android.net.Uri.parse(artworkUrl)
+            }
+            
             // Build MediaMetadata for notification display
             val metadata = MediaMetadata.Builder()
                 .setTitle(title)
                 .setArtist(artist)
-                .setArtworkUri(android.net.Uri.parse(artworkUrl))
+                .setArtworkUri(artworkUri)
                 .build()
+            
+            // Build audio URI - handle both local files and URLs
+            val audioUri = if (url.startsWith("/")) {
+                // Local file path - convert to file:// URI
+                android.net.Uri.fromFile(java.io.File(url))
+            } else {
+                // Remote URL
+                android.net.Uri.parse(url)
+            }
             
             // Build MediaItem WITHOUT explicit MIME type
             // Let ExoPlayer's DefaultExtractorsFactory auto-detect the container format
             // This prevents seeking issues with YouTube Music streams that lack proper index seek points
             val mediaItem = MediaItem.Builder()
-                .setUri(url)
+                .setUri(audioUri)
                 .setMediaMetadata(metadata)
                 .build()
             
-            android.util.Log.d("PlayerViewModel", "Preparing player - url prefix: ${url.take(80)}...")
+            val isLocalFile = url.startsWith("/")
+            android.util.Log.d("PlayerViewModel", "Preparing player - ${if (isLocalFile) "LOCAL FILE" else "STREAM"}: ${url.take(80)}...")
             
             p.setMediaItem(mediaItem)
             p.prepare()

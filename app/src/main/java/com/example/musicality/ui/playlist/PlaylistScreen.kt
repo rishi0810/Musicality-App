@@ -1,5 +1,9 @@
 package com.example.musicality.ui.playlist
 
+import android.graphics.Bitmap
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -13,8 +17,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -22,13 +28,91 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.palette.graphics.Palette
 import coil3.compose.AsyncImage
+import coil3.compose.AsyncImagePainter
+import coil3.compose.rememberAsyncImagePainter
+import coil3.request.ImageRequest
+import coil3.request.allowHardware
+import coil3.toBitmap
 import com.example.musicality.R
 import com.example.musicality.domain.model.PlaylistDetail
 import com.example.musicality.domain.model.PlaylistSong
 import com.example.musicality.domain.model.QueueSong
 import com.example.musicality.ui.components.SkeletonPlaylistScreen
 import com.example.musicality.util.UiState
+
+// ============================================================================
+// COLOR CONSTANTS & UTILITIES (Same as PlayerScreen)
+// ============================================================================
+
+private val DefaultBackgroundDark = Color(0xFF0F1323)
+
+/**
+ * Data class holding extracted palette colors for the background gradient
+ */
+private data class ScreenColors(
+    val primaryColor: Color = DefaultBackgroundDark,
+    val secondaryColor: Color = DefaultBackgroundDark
+)
+
+/**
+ * Darkens a color by a factor (0.0 = black, 1.0 = original)
+ */
+private fun darkenColor(color: Color, factor: Float = 0.6f): Color {
+    return Color(
+        red = (color.red * factor).coerceIn(0f, 1f),
+        green = (color.green * factor).coerceIn(0f, 1f),
+        blue = (color.blue * factor).coerceIn(0f, 1f),
+        alpha = color.alpha
+    )
+}
+
+/**
+ * Calculates the saturation of a color
+ */
+private fun calculateSaturation(color: Color): Float {
+    val max = maxOf(color.red, color.green, color.blue)
+    val min = minOf(color.red, color.green, color.blue)
+    return if (max == 0f) 0f else (max - min) / max
+}
+
+/**
+ * Extracts colors from a bitmap using Android's Palette API
+ */
+private fun extractColors(bitmap: Bitmap?): ScreenColors {
+    if (bitmap == null) return ScreenColors()
+    
+    val palette = Palette.from(bitmap)
+        .maximumColorCount(16)
+        .generate()
+    
+    val dominantSwatch = palette.dominantSwatch
+    val vibrantSwatch = palette.vibrantSwatch
+    val darkVibrantSwatch = palette.darkVibrantSwatch
+    val darkMutedSwatch = palette.darkMutedSwatch
+    
+    val primaryColor = dominantSwatch?.rgb?.let { Color(it) } 
+        ?: darkMutedSwatch?.rgb?.let { Color(it) }
+        ?: DefaultBackgroundDark
+    
+    val secondaryColor = darkVibrantSwatch?.rgb?.let { Color(it) }
+        ?: darkMutedSwatch?.rgb?.let { Color(it) }
+        ?: darkenColor(primaryColor, 0.5f)
+    
+    val finalPrimary = if (calculateSaturation(primaryColor) < 0.2f) {
+        vibrantSwatch?.rgb?.let { Color(it) }
+            ?: darkVibrantSwatch?.rgb?.let { Color(it) }
+            ?: primaryColor
+    } else {
+        primaryColor
+    }
+    
+    return ScreenColors(
+        primaryColor = finalPrimary,
+        secondaryColor = secondaryColor
+    )
+}
 
 /**
  * Playlist detail screen with similar UI to Album page
@@ -96,8 +180,63 @@ private fun PlaylistContent(
     onSongClick: (videoId: String, playlistSongs: List<QueueSong>, playlistName: String, thumbnail: String) -> Unit,
     onPlayPlaylist: (songs: List<QueueSong>, playlistName: String, thumbnail: String, shuffle: Boolean) -> Unit
 ) {
+    val context = LocalContext.current
+    
     var isPlaying by remember { mutableStateOf(false) }
     var isShuffleEnabled by remember { mutableStateOf(false) }
+    
+    // Extract colors from playlist art
+    var screenColors by remember { mutableStateOf(ScreenColors()) }
+    
+    // Load bitmap for color extraction
+    val imageRequest = remember(playlistDetail.thumbnailImg) {
+        ImageRequest.Builder(context)
+            .data(playlistDetail.thumbnailImg)
+            .allowHardware(false) // Required for Palette
+            .build()
+    }
+    
+    val painter = rememberAsyncImagePainter(imageRequest)
+    val painterState by painter.state.collectAsState()
+    
+    LaunchedEffect(painterState) {
+        when (val state = painterState) {
+            is AsyncImagePainter.State.Success -> {
+                val bitmap = state.result.image.toBitmap()
+                screenColors = extractColors(bitmap)
+            }
+            else -> { /* Loading, Error, or Empty */ }
+        }
+    }
+    
+    // Animate background color changes
+    val animatedPrimaryColor by animateColorAsState(
+        targetValue = screenColors.primaryColor,
+        animationSpec = tween(durationMillis = 800, easing = FastOutSlowInEasing),
+        label = "primaryColor"
+    )
+    
+    val animatedSecondaryColor by animateColorAsState(
+        targetValue = screenColors.secondaryColor,
+        animationSpec = tween(durationMillis = 800, easing = FastOutSlowInEasing),
+        label = "secondaryColor"
+    )
+    
+    // Create gradient colors - same as PlayerScreen
+    val topGradientColor = darkenColor(animatedPrimaryColor, 0.6f)
+    val middleGradientColor = darkenColor(animatedSecondaryColor, 0.4f)
+    val bottomGradientColor = Color(0xFF0A0A12)
+    
+    // Gradient background
+    val gradientBackground = Brush.verticalGradient(
+        colors = listOf(
+            topGradientColor,
+            middleGradientColor,
+            bottomGradientColor
+        ),
+        startY = 0f,
+        endY = Float.POSITIVE_INFINITY
+    )
     
     // Convert playlist songs to queue songs
     val queueSongs = remember(playlistDetail.songs) {
@@ -112,43 +251,56 @@ private fun PlaylistContent(
         }
     }
     
-    LazyColumn(
-        modifier = Modifier.fillMaxSize()
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black) // Solid black base
     ) {
-        // Header section
-        item {
-            PlaylistHeader(
-                playlistDetail = playlistDetail,
-                onBackClick = onBackClick,
-                isPlaying = isPlaying,
-                isShuffleEnabled = isShuffleEnabled,
-                onShuffleClick = { isShuffleEnabled = !isShuffleEnabled },
-                onPlayClick = {
-                    isPlaying = !isPlaying
-                    if (isPlaying) {
-                        onPlayPlaylist(queueSongs, playlistDetail.playlistName, playlistDetail.thumbnailImg, isShuffleEnabled)
+        // Gradient overlay
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(brush = gradientBackground)
+        )
+        
+        LazyColumn(
+            modifier = Modifier.fillMaxSize()
+        ) {
+            // Header section
+            item {
+                PlaylistHeader(
+                    playlistDetail = playlistDetail,
+                    onBackClick = onBackClick,
+                    isPlaying = isPlaying,
+                    isShuffleEnabled = isShuffleEnabled,
+                    onShuffleClick = { isShuffleEnabled = !isShuffleEnabled },
+                    onPlayClick = {
+                        isPlaying = !isPlaying
+                        if (isPlaying) {
+                            onPlayPlaylist(queueSongs, playlistDetail.playlistName, playlistDetail.thumbnailImg, isShuffleEnabled)
+                        }
                     }
-                }
-            )
-        }
-        
-        // Songs list - clicking a song uses playlist as queue
-        items(
-            items = playlistDetail.songs,
-            key = { "${it.videoId}_${playlistDetail.songs.indexOf(it)}" }
-        ) { song ->
-            PlaylistSongItem(
-                song = song,
-                onClick = { 
-                    // Pass playlist context so queue becomes the playlist
-                    onSongClick(song.videoId, queueSongs, playlistDetail.playlistName, song.thumbnail) 
-                }
-            )
-        }
-        
-        // Bottom padding for player
-        item {
-            Spacer(modifier = Modifier.height(160.dp))
+                )
+            }
+            
+            // Songs list - clicking a song uses playlist as queue
+            items(
+                items = playlistDetail.songs,
+                key = { "${it.videoId}_${playlistDetail.songs.indexOf(it)}" }
+            ) { song ->
+                PlaylistSongItem(
+                    song = song,
+                    onClick = { 
+                        // Pass playlist context so queue becomes the playlist
+                        onSongClick(song.videoId, queueSongs, playlistDetail.playlistName, song.thumbnail) 
+                    }
+                )
+            }
+            
+            // Bottom padding for player
+            item {
+                Spacer(modifier = Modifier.height(160.dp))
+            }
         }
     }
 }

@@ -8,7 +8,10 @@ import androidx.room.Query
 import kotlinx.coroutines.flow.Flow
 
 /**
- * Data Access Object for downloaded songs
+ * Data Access Object for downloaded songs.
+ * 
+ * Provides CRUD operations for downloaded song metadata
+ * and queries for checking download status.
  */
 @Dao
 interface DownloadedSongDao {
@@ -62,14 +65,26 @@ interface DownloadedSongDao {
     suspend fun getDownloadedSong(videoId: String): DownloadedSongEntity?
     
     /**
-     * Get file path for a downloaded song
+     * Get file path for a downloaded song (audio file)
      */
     @Query("SELECT filePath FROM downloaded_songs WHERE videoId = :videoId")
     suspend fun getFilePath(videoId: String): String?
+    
+    /**
+     * Get thumbnail file path for a downloaded song
+     */
+    @Query("SELECT thumbnailFilePath FROM downloaded_songs WHERE videoId = :videoId")
+    suspend fun getThumbnailFilePath(videoId: String): String?
     
     /**
      * Get total downloaded songs count
      */
     @Query("SELECT COUNT(*) FROM downloaded_songs")
     fun getDownloadedSongsCount(): Flow<Int>
+    
+    /**
+     * Get total storage used by downloaded songs (audio + thumbnails)
+     */
+    @Query("SELECT COALESCE(SUM(fileSize + thumbnailFileSize), 0) FROM downloaded_songs")
+    fun getTotalStorageUsed(): Flow<Long>
 }

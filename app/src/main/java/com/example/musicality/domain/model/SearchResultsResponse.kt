@@ -49,6 +49,7 @@ sealed class TypedSearchResult {
         override val name: String,
         override val thumbnailUrl: String,
         val channelName: String,
+        val channelId: String,  // browseId for artist navigation
         val views: String,
         val duration: String
     ) : TypedSearchResult()

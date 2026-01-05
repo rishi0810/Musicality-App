@@ -52,7 +52,7 @@ fun SearchResultsScreen(
     query: String,
     viewModel: SearchResultsViewModel = viewModel(),
     onSongClick: (videoId: String, thumbnailUrl: String) -> Unit = { _, _ -> },
-    onVideoClick: (videoId: String, thumbnailUrl: String) -> Unit = { _, _ -> },
+    onVideoClick: (videoId: String, thumbnailUrl: String, channelId: String) -> Unit = { _, _, _ -> },
     onAlbumClick: (albumId: String) -> Unit = {},
     onArtistClick: (artistId: String) -> Unit = {},
     onPlaylistClick: (playlistId: String) -> Unit = {},
@@ -131,7 +131,7 @@ fun SearchResultsScreen(
                     },
                     onVideoClick = { video ->
                         keyboardController?.hide()
-                        onVideoClick(video.id, video.thumbnailUrl)
+                        onVideoClick(video.id, video.thumbnailUrl, video.channelId)
                     },
                     onAlbumClick = { album ->
                         keyboardController?.hide()

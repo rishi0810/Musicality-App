@@ -1,11 +1,7 @@
 package com.example.musicality.di
 
-import android.content.Context
-import com.example.musicality.data.local.MusicalityDatabase
 import com.example.musicality.data.remote.TodoApiService
-import com.example.musicality.data.repository.DownloadRepositoryImpl
 import com.example.musicality.data.repository.TodoRepositoryImpl
-import com.example.musicality.domain.repository.DownloadRepository
 import com.example.musicality.domain.repository.TodoRepository
 import com.example.musicality.util.NetworkConstants
 import com.squareup.moshi.Moshi
@@ -35,18 +31,6 @@ object NetworkModule {
             .connectTimeout(NetworkConstants.CONNECT_TIMEOUT, TimeUnit.SECONDS)
             .readTimeout(NetworkConstants.READ_TIMEOUT, TimeUnit.SECONDS)
             .writeTimeout(NetworkConstants.WRITE_TIMEOUT, TimeUnit.SECONDS)
-            .build()
-    }
-    
-    /**
-     * Provides OkHttpClient optimized for large file downloads
-     * Has longer timeouts and no logging to improve performance
-     */
-    private fun provideDownloadOkHttpClient(): OkHttpClient {
-        return OkHttpClient.Builder()
-            .connectTimeout(30, TimeUnit.SECONDS)
-            .readTimeout(5, TimeUnit.MINUTES)
-            .writeTimeout(5, TimeUnit.MINUTES)
             .build()
     }
     
@@ -178,19 +162,4 @@ object NetworkModule {
     fun provideArtistRepository(): com.example.musicality.domain.repository.ArtistRepository {
         return com.example.musicality.data.repository.ArtistRepositoryImpl(provideArtistApiService())
     }
-    
-    /**
-     * Provides DownloadRepository instance
-     * Requires Context for file storage and database access
-     */
-    fun provideDownloadRepository(context: Context): DownloadRepository {
-        val database = MusicalityDatabase.getDatabase(context)
-        return DownloadRepositoryImpl(
-            context = context,
-            downloadedSongDao = database.downloadedSongDao(),
-            okHttpClient = provideDownloadOkHttpClient()
-        )
-    }
 }
-
-
