@@ -1,12 +1,12 @@
 package com.example.musicality.ui.library
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.*
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -14,26 +14,21 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import coil3.compose.AsyncImage
-import coil3.request.ImageRequest
 import com.example.musicality.R
 import com.example.musicality.data.local.MusicalityDatabase
-import com.example.musicality.data.local.SavedAlbumEntity
-import com.example.musicality.data.local.SavedArtistEntity
-import com.example.musicality.data.local.SavedPlaylistEntity
 import com.example.musicality.di.DatabaseModule
 import com.example.musicality.domain.model.QueueSong
+import com.example.musicality.ui.components.IconCard
+import com.example.musicality.ui.components.SectionHeader
 import com.example.musicality.ui.components.SquircleShape12
+import com.example.musicality.ui.components.ThumbnailCard
 
 // Color constants - minimal black/white theme
 private val BackgroundColor = Color.Black
@@ -90,7 +85,7 @@ fun LibraryScreen(
         
         // ==================== YOU SECTION ====================
         item {
-            SectionHeader(title = "You")
+            SectionHeader(title = "You", textColor = TextPrimary)
         }
         
         item {
@@ -101,7 +96,7 @@ fun LibraryScreen(
             ) {
                 // Downloads Card
                 item {
-                    YouCard(
+                    IconCard(
                         title = "Downloads",
                         subtitle = "$downloadedSongsCount Songs",
                         iconRes = R.drawable.download_for_filled_24px,
@@ -110,13 +105,16 @@ fun LibraryScreen(
                                 val queue = viewModel.getDownloadedSongsAsQueue()
                                 onPlayDownloadedSongs(queue, false)
                             }
-                        }
+                        },
+                        surfaceColor = SurfaceColor,
+                        textColor = TextPrimary,
+                        subtitleColor = TextMuted
                     )
                 }
                 
                 // Liked Songs Card
                 item {
-                    YouCard(
+                    IconCard(
                         title = "Liked Songs",
                         subtitle = "$likedSongsCount Songs",
                         iconRes = R.drawable.favorite_filled_24px,
@@ -125,7 +123,10 @@ fun LibraryScreen(
                                 val queue = viewModel.getLikedSongsAsQueue()
                                 onPlayLikedSongs(queue, false)
                             }
-                        }
+                        },
+                        surfaceColor = SurfaceColor,
+                        textColor = TextPrimary,
+                        subtitleColor = TextMuted
                     )
                 }
                 
@@ -139,7 +140,7 @@ fun LibraryScreen(
         // ==================== ALBUMS SECTION ====================
         if (savedAlbums.isNotEmpty()) {
             item {
-                SectionHeader(title = "Albums")
+                SectionHeader(title = "Albums", textColor = TextPrimary)
             }
             
             item {
@@ -149,11 +150,14 @@ fun LibraryScreen(
                     modifier = Modifier.padding(bottom = 24.dp)
                 ) {
                     items(savedAlbums, key = { it.albumId }) { album ->
-                        ContentCard(
+                        ThumbnailCard(
                             title = album.name,
                             subtitle = album.songCount,
                             thumbnailUrl = album.thumbnailUrl,
-                            onClick = { onAlbumClick(album.albumId) }
+                            onClick = { onAlbumClick(album.albumId) },
+                            surfaceColor = SurfaceColor,
+                            textColor = TextPrimary,
+                            subtitleColor = TextMuted
                         )
                     }
                 }
@@ -163,7 +167,7 @@ fun LibraryScreen(
         // ==================== ARTISTS SECTION ====================
         if (savedArtists.isNotEmpty()) {
             item {
-                SectionHeader(title = "Artists")
+                SectionHeader(title = "Artists", textColor = TextPrimary)
             }
             
             item {
@@ -173,11 +177,14 @@ fun LibraryScreen(
                     modifier = Modifier.padding(bottom = 24.dp)
                 ) {
                     items(savedArtists, key = { it.artistId }) { artist ->
-                        ContentCard(
+                        ThumbnailCard(
                             title = artist.name,
                             subtitle = artist.monthlyListeners,
                             thumbnailUrl = artist.thumbnailUrl,
-                            onClick = { onArtistClick(artist.artistId) }
+                            onClick = { onArtistClick(artist.artistId) },
+                            surfaceColor = SurfaceColor,
+                            textColor = TextPrimary,
+                            subtitleColor = TextMuted
                         )
                     }
                 }
@@ -187,7 +194,7 @@ fun LibraryScreen(
         // ==================== PLAYLISTS SECTION ====================
         if (savedPlaylists.isNotEmpty()) {
             item {
-                SectionHeader(title = "Playlists")
+                SectionHeader(title = "Playlists", textColor = TextPrimary)
             }
             
             item {
@@ -197,11 +204,14 @@ fun LibraryScreen(
                     modifier = Modifier.padding(bottom = 24.dp)
                 ) {
                     items(savedPlaylists, key = { it.playlistId }) { playlist ->
-                        ContentCard(
+                        ThumbnailCard(
                             title = playlist.name,
                             subtitle = "${playlist.trackCount} Tracks",
                             thumbnailUrl = playlist.thumbnailUrl,
-                            onClick = { onPlaylistClick(playlist.playlistId) }
+                            onClick = { onPlaylistClick(playlist.playlistId) },
+                            surfaceColor = SurfaceColor,
+                            textColor = TextPrimary,
+                            subtitleColor = TextMuted
                         )
                     }
                 }
@@ -212,66 +222,6 @@ fun LibraryScreen(
         item {
             Spacer(modifier = Modifier.height(100.dp))
         }
-    }
-}
-
-@Composable
-private fun SectionHeader(title: String) {
-    Text(
-        text = title,
-        fontSize = 20.sp,
-        fontWeight = FontWeight.Bold,
-        color = TextPrimary,
-        modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)
-    )
-}
-
-@Composable
-private fun YouCard(
-    title: String,
-    subtitle: String,
-    iconRes: Int,
-    onClick: () -> Unit
-) {
-    Column(
-        modifier = Modifier
-            .width(140.dp)
-            .clickable(onClick = onClick),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Box(
-            modifier = Modifier
-                .size(140.dp)
-                .clip(SquircleShape12)
-                .background(SurfaceColor),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                painter = painterResource(id = iconRes),
-                contentDescription = title,
-                tint = TextPrimary,
-                modifier = Modifier.size(48.dp)
-            )
-        }
-        
-        Spacer(modifier = Modifier.height(8.dp))
-        
-        Text(
-            text = title,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = TextPrimary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-        
-        Text(
-            text = subtitle,
-            fontSize = 12.sp,
-            color = TextMuted,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
     }
 }
 
@@ -304,58 +254,6 @@ private fun AddPlaylistCard() {
             fontWeight = FontWeight.SemiBold,
             color = TextMuted,
             maxLines = 1
-        )
-    }
-}
-
-@Composable
-private fun ContentCard(
-    title: String,
-    subtitle: String,
-    thumbnailUrl: String,
-    onClick: () -> Unit
-) {
-    val context = LocalContext.current
-    
-    Column(
-        modifier = Modifier
-            .width(140.dp)
-            .clickable(onClick = onClick),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Box(
-            modifier = Modifier
-                .size(140.dp)
-                .clip(SquircleShape12)
-                .background(SurfaceColor)
-        ) {
-            AsyncImage(
-                model = ImageRequest.Builder(context)
-                    .data(thumbnailUrl)
-                    .build(),
-                contentDescription = title,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop
-            )
-        }
-        
-        Spacer(modifier = Modifier.height(8.dp))
-        
-        Text(
-            text = title,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = TextPrimary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-        
-        Text(
-            text = subtitle,
-            fontSize = 12.sp,
-            color = TextMuted,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
         )
     }
 }
