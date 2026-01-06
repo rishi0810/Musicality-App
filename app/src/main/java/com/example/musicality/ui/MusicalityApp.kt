@@ -40,6 +40,9 @@ import com.example.musicality.R
 import com.example.musicality.service.MusicService
 import com.example.musicality.ui.home.HomeScreen
 import com.example.musicality.ui.library.LibraryScreen
+import com.example.musicality.ui.library.SavedAlbumsScreen
+import com.example.musicality.ui.library.SavedArtistsScreen
+import com.example.musicality.ui.library.SavedPlaylistsScreen
 import com.example.musicality.ui.player.CollapsiblePlayer
 import com.example.musicality.ui.player.LikedSongsManager
 import com.example.musicality.ui.player.PlayerViewModel
@@ -309,6 +312,24 @@ fun MusicalityApp(openPlayerOnStart: Boolean = false) {
                             },
                             onPlayDownloadedSongs = { songs, shuffle ->
                                 playerViewModel.playPlaylist(songs, "Downloaded Songs", "", shuffle)
+                            },
+                            onAlbumClick = { albumId ->
+                                navController.navigate("album/$albumId")
+                            },
+                            onArtistClick = { artistId ->
+                                navController.navigate("artist/$artistId")
+                            },
+                            onPlaylistClick = { playlistId ->
+                                navController.navigate("playlist/$playlistId")
+                            },
+                            onSeeAllAlbums = {
+                                navController.navigate("savedAlbums")
+                            },
+                            onSeeAllArtists = {
+                                navController.navigate("savedArtists")
+                            },
+                            onSeeAllPlaylists = {
+                                navController.navigate("savedPlaylists")
                             }
                         )
                     }
@@ -388,6 +409,33 @@ fun MusicalityApp(openPlayerOnStart: Boolean = false) {
                             },
                             onBackClick = { navController.popBackStack() },
                             bottomPadding = bottomContentPadding
+                        )
+                    }
+                    // Saved Albums screen
+                    composable("savedAlbums") {
+                        SavedAlbumsScreen(
+                            onBackClick = { navController.popBackStack() },
+                            onAlbumClick = { albumId ->
+                                navController.navigate("album/$albumId")
+                            }
+                        )
+                    }
+                    // Saved Artists screen
+                    composable("savedArtists") {
+                        SavedArtistsScreen(
+                            onBackClick = { navController.popBackStack() },
+                            onArtistClick = { artistId ->
+                                navController.navigate("artist/$artistId")
+                            }
+                        )
+                    }
+                    // Saved Playlists screen
+                    composable("savedPlaylists") {
+                        SavedPlaylistsScreen(
+                            onBackClick = { navController.popBackStack() },
+                            onPlaylistClick = { playlistId ->
+                                navController.navigate("playlist/$playlistId")
+                            }
                         )
                     }
                 }

@@ -27,15 +27,14 @@ import com.example.musicality.di.DatabaseModule
 import com.example.musicality.domain.model.QueueSong
 import com.example.musicality.ui.components.IconCard
 import com.example.musicality.ui.components.SectionHeader
+import com.example.musicality.ui.components.SectionHeaderWithAction
 import com.example.musicality.ui.components.SquircleShape12
 import com.example.musicality.ui.components.ThumbnailCard
 
 // Color constants - minimal black/white theme
 private val BackgroundColor = Color.Black
 private val SurfaceColor = Color(0xFF121212)
-private val TextPrimary = Color.White
-private val TextMuted = Color.White.copy(alpha = 0.1f)
-
+private val TextPrimary = Color.White.copy(alpha = 0.8f)
 @Composable
 fun LibraryScreen(
     bottomPadding: Dp = 0.dp,
@@ -44,7 +43,10 @@ fun LibraryScreen(
     onPlayDownloadedSongs: (songs: List<QueueSong>, shuffle: Boolean) -> Unit = { _, _ -> },
     onAlbumClick: (albumId: String) -> Unit = {},
     onArtistClick: (artistId: String) -> Unit = {},
-    onPlaylistClick: (playlistId: String) -> Unit = {}
+    onPlaylistClick: (playlistId: String) -> Unit = {},
+    onSeeAllAlbums: () -> Unit = {},
+    onSeeAllArtists: () -> Unit = {},
+    onSeeAllPlaylists: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val database = MusicalityDatabase.getDatabase(context)
@@ -108,7 +110,7 @@ fun LibraryScreen(
                         },
                         surfaceColor = SurfaceColor,
                         textColor = TextPrimary,
-                        subtitleColor = TextMuted
+                        subtitleColor = Color.White.copy(alpha = 0.8f)
                     )
                 }
                 
@@ -126,7 +128,7 @@ fun LibraryScreen(
                         },
                         surfaceColor = SurfaceColor,
                         textColor = TextPrimary,
-                        subtitleColor = TextMuted
+                        subtitleColor = Color.White.copy(alpha = 0.8f)
                     )
                 }
                 
@@ -140,7 +142,12 @@ fun LibraryScreen(
         // ==================== ALBUMS SECTION ====================
         if (savedAlbums.isNotEmpty()) {
             item {
-                SectionHeader(title = "Albums", textColor = TextPrimary)
+                SectionHeaderWithAction(
+                    title = "Saved Albums",
+                    onSeeAllClick = onSeeAllAlbums,
+                    showSeeAll = savedAlbums.size > 5,
+                    textColor = TextPrimary
+                )
             }
             
             item {
@@ -149,7 +156,7 @@ fun LibraryScreen(
                     contentPadding = PaddingValues(horizontal = 20.dp),
                     modifier = Modifier.padding(bottom = 24.dp)
                 ) {
-                    items(savedAlbums, key = { it.albumId }) { album ->
+                    items(viewModel.getAlbumsPreview(), key = { it.albumId }) { album ->
                         ThumbnailCard(
                             title = album.name,
                             subtitle = album.songCount,
@@ -157,7 +164,7 @@ fun LibraryScreen(
                             onClick = { onAlbumClick(album.albumId) },
                             surfaceColor = SurfaceColor,
                             textColor = TextPrimary,
-                            subtitleColor = TextMuted
+                            subtitleColor = Color.White.copy(alpha = 0.8f)
                         )
                     }
                 }
@@ -167,7 +174,12 @@ fun LibraryScreen(
         // ==================== ARTISTS SECTION ====================
         if (savedArtists.isNotEmpty()) {
             item {
-                SectionHeader(title = "Artists", textColor = TextPrimary)
+                SectionHeaderWithAction(
+                    title = "Saved Artists",
+                    onSeeAllClick = onSeeAllArtists,
+                    showSeeAll = savedArtists.size > 5,
+                    textColor = TextPrimary
+                )
             }
             
             item {
@@ -176,7 +188,7 @@ fun LibraryScreen(
                     contentPadding = PaddingValues(horizontal = 20.dp),
                     modifier = Modifier.padding(bottom = 24.dp)
                 ) {
-                    items(savedArtists, key = { it.artistId }) { artist ->
+                    items(viewModel.getArtistsPreview(), key = { it.artistId }) { artist ->
                         ThumbnailCard(
                             title = artist.name,
                             subtitle = artist.monthlyListeners,
@@ -184,7 +196,7 @@ fun LibraryScreen(
                             onClick = { onArtistClick(artist.artistId) },
                             surfaceColor = SurfaceColor,
                             textColor = TextPrimary,
-                            subtitleColor = TextMuted
+                            subtitleColor = Color.White.copy(alpha = 0.8f)
                         )
                     }
                 }
@@ -194,7 +206,12 @@ fun LibraryScreen(
         // ==================== PLAYLISTS SECTION ====================
         if (savedPlaylists.isNotEmpty()) {
             item {
-                SectionHeader(title = "Playlists", textColor = TextPrimary)
+                SectionHeaderWithAction(
+                    title = "Saved Playlists",
+                    onSeeAllClick = onSeeAllPlaylists,
+                    showSeeAll = savedPlaylists.size > 5,
+                    textColor = TextPrimary
+                )
             }
             
             item {
@@ -203,7 +220,7 @@ fun LibraryScreen(
                     contentPadding = PaddingValues(horizontal = 20.dp),
                     modifier = Modifier.padding(bottom = 24.dp)
                 ) {
-                    items(savedPlaylists, key = { it.playlistId }) { playlist ->
+                    items(viewModel.getPlaylistsPreview(), key = { it.playlistId }) { playlist ->
                         ThumbnailCard(
                             title = playlist.name,
                             subtitle = "${playlist.trackCount} Tracks",
@@ -211,7 +228,7 @@ fun LibraryScreen(
                             onClick = { onPlaylistClick(playlist.playlistId) },
                             surfaceColor = SurfaceColor,
                             textColor = TextPrimary,
-                            subtitleColor = TextMuted
+                            subtitleColor = Color.White.copy(alpha = 0.8f)
                         )
                     }
                 }
@@ -241,7 +258,7 @@ private fun AddPlaylistCard() {
             Icon(
                 painter = painterResource(id = R.drawable.download_for_24px),
                 contentDescription = "Add Playlist",
-                tint = TextMuted,
+                tint = Color.White.copy(alpha = 0.8f),
                 modifier = Modifier.size(48.dp)
             )
         }
@@ -252,7 +269,7 @@ private fun AddPlaylistCard() {
             text = "Add Playlist",
             fontSize = 14.sp,
             fontWeight = FontWeight.SemiBold,
-            color = TextMuted,
+            color = Color.White.copy(alpha = 0.8f),
             maxLines = 1
         )
     }

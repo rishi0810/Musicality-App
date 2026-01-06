@@ -635,7 +635,7 @@ fun ExpandedPlayer(
                         Text(
                             text = headerLabel,
                             style = MaterialTheme.typography.labelSmall,
-                            color = animatedAccentColor,
+                            color = Color.White,
                             fontWeight = FontWeight.SemiBold,
                             letterSpacing = 2.sp
                         )

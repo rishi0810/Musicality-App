@@ -64,6 +64,11 @@ class LibraryViewModel(
     val savedPlaylists: StateFlow<List<SavedPlaylistEntity>> = savedPlaylistDao.getAllSavedPlaylists()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     
+    // ==================== PREVIEW LISTS (Top 5 for Library screen) ====================
+    fun getAlbumsPreview(): List<SavedAlbumEntity> = savedAlbums.value.take(5)
+    fun getArtistsPreview(): List<SavedArtistEntity> = savedArtists.value.take(5)
+    fun getPlaylistsPreview(): List<SavedPlaylistEntity> = savedPlaylists.value.take(5)
+    
     // ==================== QUEUE CONVERSION ====================
     fun getLikedSongsAsQueue(): List<QueueSong> {
         return likedSongs.value.map { likedSong ->

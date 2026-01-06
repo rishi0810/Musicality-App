@@ -125,12 +125,17 @@ private fun extractColors(bitmap: Bitmap?): ScreenColors {
 @Composable
 fun PlaylistScreen(
     playlistId: String,
-    viewModel: PlaylistViewModel = viewModel(),
     onBackClick: () -> Unit,
     onSongClick: (videoId: String, playlistSongs: List<QueueSong>, playlistName: String, thumbnail: String) -> Unit,
     onPlayPlaylist: (songs: List<QueueSong>, playlistName: String, thumbnail: String, shuffle: Boolean) -> Unit
 ) {
+    val context = LocalContext.current
+    val viewModel: PlaylistViewModel = viewModel(
+        factory = PlaylistViewModel.Factory(context)
+    )
+    
     val uiState by viewModel.uiState.collectAsState()
+    val isPlaylistSaved by viewModel.isPlaylistSaved.collectAsState()
     
     LaunchedEffect(playlistId) {
         viewModel.loadPlaylist(playlistId)
@@ -158,9 +163,11 @@ fun PlaylistScreen(
             is UiState.Success -> {
                 PlaylistContent(
                     playlistDetail = state.data,
+                    isPlaylistSaved = isPlaylistSaved,
                     onBackClick = onBackClick,
                     onSongClick = onSongClick,
-                    onPlayPlaylist = onPlayPlaylist
+                    onPlayPlaylist = onPlayPlaylist,
+                    onToggleSave = { viewModel.toggleSavePlaylist() }
                 )
             }
             is UiState.Error -> {
@@ -176,9 +183,11 @@ fun PlaylistScreen(
 @Composable
 private fun PlaylistContent(
     playlistDetail: PlaylistDetail,
+    isPlaylistSaved: Boolean,
     onBackClick: () -> Unit,
     onSongClick: (videoId: String, playlistSongs: List<QueueSong>, playlistName: String, thumbnail: String) -> Unit,
-    onPlayPlaylist: (songs: List<QueueSong>, playlistName: String, thumbnail: String, shuffle: Boolean) -> Unit
+    onPlayPlaylist: (songs: List<QueueSong>, playlistName: String, thumbnail: String, shuffle: Boolean) -> Unit,
+    onToggleSave: () -> Unit
 ) {
     val context = LocalContext.current
     
@@ -273,13 +282,15 @@ private fun PlaylistContent(
                     onBackClick = onBackClick,
                     isPlaying = isPlaying,
                     isShuffleEnabled = isShuffleEnabled,
+                    isSaved = isPlaylistSaved,
                     onShuffleClick = { isShuffleEnabled = !isShuffleEnabled },
                     onPlayClick = {
                         isPlaying = !isPlaying
                         if (isPlaying) {
                             onPlayPlaylist(queueSongs, playlistDetail.playlistName, playlistDetail.thumbnailImg, isShuffleEnabled)
                         }
-                    }
+                    },
+                    onAddClick = onToggleSave
                 )
             }
             
@@ -314,8 +325,10 @@ private fun PlaylistHeader(
     onBackClick: () -> Unit,
     isPlaying: Boolean,
     isShuffleEnabled: Boolean,
+    isSaved: Boolean = false,
     onShuffleClick: () -> Unit,
-    onPlayClick: () -> Unit
+    onPlayClick: () -> Unit,
+    onAddClick: () -> Unit = {}
 ) {
     Column(
         modifier = Modifier.fillMaxWidth()
@@ -445,7 +458,7 @@ private fun PlaylistHeader(
             
             Spacer(modifier = Modifier.width(16.dp))
             
-            // Play/Pause button
+            // Play/Pause button - bigger (52dp)
             IconButton(
                 onClick = onPlayClick,
                 modifier = Modifier
@@ -462,6 +475,28 @@ private fun PlaylistHeader(
                     contentDescription = if (isPlaying) "Pause" else "Play",
                     tint = Color.Black,
                     modifier = Modifier.size(24.dp)
+                )
+            }
+            
+            Spacer(modifier = Modifier.width(16.dp))
+            
+            // Add button - toggles save state
+            IconButton(
+                onClick = onAddClick,
+                modifier = Modifier
+                    .size(44.dp)
+                    .background(
+                        color = if (isSaved) Color.White else Color.White.copy(alpha = 0.15f),
+                        shape = CircleShape
+                    )
+            ) {
+                Icon(
+                    painter = painterResource(
+                        id = if (isSaved) R.drawable.check_24px else R.drawable.add_24px
+                    ),
+                    contentDescription = if (isSaved) "Saved to Library" else "Add to Library",
+                    tint = if (isSaved) Color.Black else Color.White,
+                    modifier = Modifier.size(20.dp)
                 )
             }
         }

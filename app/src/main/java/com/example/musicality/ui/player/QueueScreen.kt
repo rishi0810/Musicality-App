@@ -59,6 +59,7 @@ fun QueueSheet(
         sheetState = sheetState,
         containerColor = Color.Black, // Pure black background
         contentColor = Color.White,
+        shape = androidx.compose.ui.graphics.RectangleShape,
         dragHandle = {
             // Custom header with drag handle and close button
             Column(
@@ -79,7 +80,7 @@ fun QueueSheet(
                             .height(4.dp)
                             .background(
                                 color = Color.White.copy(alpha = 0.4f),
-                                shape = RoundedCornerShape(2.dp)
+                                shape = RoundedCornerShape(10.dp)
                             )
                     )
                 }
@@ -128,7 +129,7 @@ fun QueueSheet(
                 Spacer(modifier = Modifier.height(8.dp))
             }
         },
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+//        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
         modifier = modifier.statusBarsPadding()
     ) {
         // Sheet content - respect safe areas

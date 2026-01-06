@@ -17,6 +17,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -44,14 +45,19 @@ import com.example.musicality.util.UiState
 @Composable
 fun ArtistScreen(
     artistId: String,
-    viewModel: ArtistViewModel = viewModel(),
     onBackClick: () -> Unit,
     onSongClick: (videoId: String, thumbnail: String) -> Unit,
     onAlbumClick: (albumId: String) -> Unit,
     onPlaylistClick: (playlistId: String) -> Unit,
     onArtistClick: (artistId: String) -> Unit
 ) {
+    val context = LocalContext.current
+    val viewModel: ArtistViewModel = viewModel(
+        factory = ArtistViewModel.Factory(context)
+    )
+    
     val uiState by viewModel.uiState.collectAsState()
+    val isArtistSaved by viewModel.isArtistSaved.collectAsState()
     
     LaunchedEffect(artistId) {
         viewModel.loadArtist(artistId)
@@ -78,11 +84,13 @@ fun ArtistScreen(
             is UiState.Success -> {
                 ArtistContent(
                     artistDetail = state.data,
+                    isArtistSaved = isArtistSaved,
                     onBackClick = onBackClick,
                     onSongClick = onSongClick,
                     onAlbumClick = onAlbumClick,
                     onPlaylistClick = onPlaylistClick,
-                    onArtistClick = onArtistClick
+                    onArtistClick = onArtistClick,
+                    onToggleSave = { viewModel.toggleSaveArtist() }
                 )
             }
             is UiState.Error -> {
@@ -98,11 +106,13 @@ fun ArtistScreen(
 @Composable
 private fun ArtistContent(
     artistDetail: ArtistDetail,
+    isArtistSaved: Boolean,
     onBackClick: () -> Unit,
     onSongClick: (videoId: String, thumbnail: String) -> Unit,
     onAlbumClick: (albumId: String) -> Unit,
     onPlaylistClick: (playlistId: String) -> Unit,
-    onArtistClick: (artistId: String) -> Unit
+    onArtistClick: (artistId: String) -> Unit,
+    onToggleSave: () -> Unit
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize()
@@ -111,7 +121,9 @@ private fun ArtistContent(
         item {
             ArtistHeader(
                 artistDetail = artistDetail,
-                onBackClick = onBackClick
+                isSaved = isArtistSaved,
+                onBackClick = onBackClick,
+                onAddClick = onToggleSave
             )
         }
         
@@ -244,7 +256,9 @@ private fun ArtistContent(
 @Composable
 private fun ArtistHeader(
     artistDetail: ArtistDetail,
-    onBackClick: () -> Unit
+    isSaved: Boolean = false,
+    onBackClick: () -> Unit,
+    onAddClick: () -> Unit = {}
 ) {
     Box(
         modifier = Modifier
@@ -298,28 +312,59 @@ private fun ArtistHeader(
             )
         }
         
-        // Artist name and monthly views - bottom left
-        Column(
+        // Artist name, monthly views, and Add button - bottom row
+        Row(
             modifier = Modifier
                 .align(Alignment.BottomStart)
-                .padding(horizontal = 20.dp, vertical = 16.dp)
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Bottom
         ) {
-            Text(
-                text = artistDetail.artistName,
-                style = MaterialTheme.typography.displaySmall,
-                fontSize = 32.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color.White,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
-            
-            if (artistDetail.monthlyAudience.isNotBlank()) {
-                Spacer(modifier = Modifier.height(4.dp))
+            // Left side - Artist name and monthly views
+            Column(
+                modifier = Modifier.weight(1f)
+            ) {
+
                 Text(
-                    text = artistDetail.monthlyAudience,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = Color.White.copy(alpha = 0.7f)
+                    text = artistDetail.artistName,
+                    style = MaterialTheme.typography.displaySmall,
+                    fontSize = 32.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                
+                if (artistDetail.monthlyAudience.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = artistDetail.monthlyAudience,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color.White.copy(alpha = 0.7f)
+                    )
+                }
+            }
+            
+            Spacer(modifier = Modifier.width(16.dp))
+            
+            // Right side - Add button - toggles save state
+            IconButton(
+                onClick = onAddClick,
+                modifier = Modifier
+                    .size(50.dp)
+                    .background(
+                        color = Color.White,
+                        shape = CircleShape
+                    )
+            ) {
+                Icon(
+                    painter = painterResource(
+                        id = if (isSaved) R.drawable.check_24px else R.drawable.add_24px
+                    ),
+                    contentDescription = if (isSaved) "Saved to Library" else "Add to Library",
+                    tint = Color.Black,
+                    modifier = Modifier.size(20.dp)
                 )
             }
         }

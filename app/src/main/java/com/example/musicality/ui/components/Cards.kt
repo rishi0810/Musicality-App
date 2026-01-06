@@ -66,7 +66,7 @@ fun IconCard(
         modifier = Modifier
             .width(cardSize)
             .clickable(onClick = onClick),
-        horizontalAlignment = Alignment.CenterHorizontally
+        horizontalAlignment = Alignment.Start
     ) {
         Box(
             modifier = Modifier
@@ -124,7 +124,7 @@ fun ThumbnailCard(
         modifier = Modifier
             .width(cardSize)
             .clickable(onClick = onClick),
-        horizontalAlignment = Alignment.CenterHorizontally
+        horizontalAlignment = Alignment.Start
     ) {
         Box(
             modifier = Modifier

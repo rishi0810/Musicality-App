@@ -125,14 +125,19 @@ private fun extractColors(bitmap: Bitmap?): ScreenColors {
 @Composable
 fun AlbumScreen(
     albumId: String,
-    viewModel: AlbumViewModel = viewModel(),
     onBackClick: () -> Unit = {},
     onSongClick: (videoId: String, albumSongs: List<QueueSong>, albumName: String, albumThumbnail: String) -> Unit = { _, _, _, _ -> },
     onPlayAlbum: (albumSongs: List<QueueSong>, albumName: String, albumThumbnail: String, shuffle: Boolean) -> Unit = { _, _, _, _ -> },
     onAlbumClick: (albumId: String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
+    val viewModel: AlbumViewModel = viewModel(
+        factory = AlbumViewModel.Factory(context)
+    )
+    
     val albumState by viewModel.albumState.collectAsState()
+    val isAlbumSaved by viewModel.isAlbumSaved.collectAsState()
     
     // Load album when screen opens
     LaunchedEffect(albumId) {
@@ -158,10 +163,12 @@ fun AlbumScreen(
             is UiState.Success -> {
                 AlbumContent(
                     albumDetail = state.data,
+                    isAlbumSaved = isAlbumSaved,
                     onBackClick = onBackClick,
                     onSongClick = onSongClick,
                     onPlayAlbum = onPlayAlbum,
-                    onAlbumClick = onAlbumClick
+                    onAlbumClick = onAlbumClick,
+                    onToggleSave = { viewModel.toggleSaveAlbum() }
                 )
             }
             
@@ -188,10 +195,12 @@ fun AlbumScreen(
 @Composable
 private fun AlbumContent(
     albumDetail: AlbumDetail,
+    isAlbumSaved: Boolean,
     onBackClick: () -> Unit,
     onSongClick: (videoId: String, albumSongs: List<QueueSong>, albumName: String, albumThumbnail: String) -> Unit,
     onPlayAlbum: (albumSongs: List<QueueSong>, albumName: String, albumThumbnail: String, shuffle: Boolean) -> Unit,
-    onAlbumClick: (albumId: String) -> Unit
+    onAlbumClick: (albumId: String) -> Unit,
+    onToggleSave: () -> Unit
 ) {
     val context = LocalContext.current
     
@@ -291,6 +300,7 @@ private fun AlbumContent(
                     onBackClick = onBackClick,
                     isPlaying = isAlbumPlaying,
                     isShuffleEnabled = isShuffleEnabled,
+                    isSaved = isAlbumSaved,
                     onShuffleClick = {
                         isShuffleEnabled = !isShuffleEnabled
                     },
@@ -300,7 +310,8 @@ private fun AlbumContent(
                             isAlbumPlaying = true
                             onPlayAlbum(albumSongsAsQueue, albumDetail.albumName, albumDetail.albumThumbnail, isShuffleEnabled)
                         }
-                    }
+                    },
+                    onAddClick = onToggleSave
                 )
             }
             
@@ -358,7 +369,9 @@ private fun AlbumContent(
 }
 
 /**
- * Album header with back button above, padded art, and info row with circular buttons
+ * Album header with back button above, centered art, centered name/artist/metadata, and centered CTAs
+ * - Matches PlaylistScreen layout with centralized elements
+ * - Three CTAs: Shuffle (44dp), Play (52dp bigger), Add (44dp)
  */
 @Composable
 private fun AlbumHeader(
@@ -366,12 +379,13 @@ private fun AlbumHeader(
     onBackClick: () -> Unit,
     isPlaying: Boolean,
     isShuffleEnabled: Boolean,
+    isSaved: Boolean = false,
     onShuffleClick: () -> Unit,
-    onPlayClick: () -> Unit
+    onPlayClick: () -> Unit,
+    onAddClick: () -> Unit = {}
 ) {
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
+        modifier = Modifier.fillMaxWidth()
     ) {
         // Back button - top left, above album art
         IconButton(
@@ -386,12 +400,12 @@ private fun AlbumHeader(
                 .border(0.7.dp, color = Color.DarkGray, shape = CircleShape)
         ) {
             Icon(
-                painter = androidx.compose.ui.res.painterResource(id = com.example.musicality.R.drawable.arrow_back_ios_new_24px),
-                contentDescription = "Minimize",
+                painter = painterResource(id = R.drawable.arrow_back_ios_new_24px),
+                contentDescription = "Back",
                 tint = Color.White,
                 modifier = Modifier
                     .size(20.dp)
-                    .padding(end = 2.dp) // Center the arrow icon
+                    .padding(end = 2.dp)
             )
         }
         
@@ -407,7 +421,7 @@ private fun AlbumHeader(
                 contentDescription = albumDetail.albumName,
                 modifier = Modifier
                     .fillMaxWidth(0.7f)
-                    .aspectRatio(1f) // Square album art
+                    .aspectRatio(1f)
                     .clip(RoundedCornerShape(12.dp)),
                 contentScale = ContentScale.Crop
             )
@@ -415,128 +429,164 @@ private fun AlbumHeader(
         
         Spacer(modifier = Modifier.height(20.dp))
         
-        // Main info row: Left side (album name, artist, metrics) | Right side (buttons)
-        Row(
+        // Album name - centered, bigger and bolder
+        Text(
+            text = albumDetail.albumName,
+            style = MaterialTheme.typography.headlineLarge,
+            fontSize = 26.sp,
+            fontWeight = FontWeight.ExtraBold,
+            color = Color.White,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
+                .padding(horizontal = 20.dp)
+        )
+        
+        Spacer(modifier = Modifier.height(12.dp))
+        
+        // Artist image + name row - centered
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Left side - Album name, Artist with image, Metrics
-            Column(
-                modifier = Modifier.weight(1f)
-            ) {
-                // Album name on top
-                Text(
-                    text = albumDetail.albumName,
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-                
-                Spacer(modifier = Modifier.height(8.dp))
-                
-                // Artist image + name row
-                Row(
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    // Small circular artist image
-                    AsyncImage(
-                        model = albumDetail.artistThumbnail,
-                        contentDescription = albumDetail.artist,
-                        modifier = Modifier
-                            .size(28.dp)
-                            .clip(CircleShape),
-                        contentScale = ContentScale.Crop
-                    )
-                    
-                    Spacer(modifier = Modifier.width(8.dp))
-                    
-                    // Artist name
-                    Text(
-                        text = albumDetail.artist,
-                        style = MaterialTheme.typography.bodyLarge,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = Color.White.copy(alpha = 0.8f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-                
-                Spacer(modifier = Modifier.height(6.dp))
-                
-                // Song count and duration
-                Row {
-                    if (albumDetail.count.isNotBlank()) {
-                        Text(
-                            text = albumDetail.count,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color.White.copy(alpha = 0.6f)
-                        )
-                    }
-                    if (albumDetail.duration.isNotBlank()) {
-                        Text(
-                            text = " • ${albumDetail.duration}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color.White.copy(alpha = 0.6f)
-                        )
-                    }
-                }
-            }
+            // Small circular artist image
+            AsyncImage(
+                model = albumDetail.artistThumbnail,
+                contentDescription = albumDetail.artist,
+                modifier = Modifier
+                    .size(28.dp)
+                    .clip(CircleShape),
+                contentScale = ContentScale.Crop
+            )
             
-            Spacer(modifier = Modifier.width(12.dp))
+            Spacer(modifier = Modifier.width(8.dp))
             
-            // Right side - Circular buttons (Shuffle + Play/Pause)
+            // Artist name
+            Text(
+                text = albumDetail.artist,
+                style = MaterialTheme.typography.bodyLarge,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Medium,
+                color = Color.White.copy(alpha = 0.8f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        
+        Spacer(modifier = Modifier.height(8.dp))
+        
+        // Metadata - centered (track count + duration)
+        val hasCount = albumDetail.count.isNotBlank()
+        val hasDuration = albumDetail.duration.isNotBlank()
+        
+        if (hasCount || hasDuration) {
             Row(
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp),
+                horizontalArrangement = Arrangement.Center
             ) {
-                // Shuffle button - white when enabled, neutral when disabled
-                IconButton(
-                    onClick = onShuffleClick,
-                    modifier = Modifier
-                        .size(44.dp)
-                        .background(
-                            color = if (isShuffleEnabled) Color.White else Color.White.copy(alpha = 0.15f),
-                            shape = CircleShape
-                        )
-                ) {
-                    Icon(
-                        painter = painterResource(id = R.drawable.shuffle_24px),
-                        contentDescription = "Shuffle",
-                        tint = if (isShuffleEnabled) Color.Black else Color.White,
-                        modifier = Modifier.size(20.dp)
+                if (hasCount) {
+                    Text(
+                        text = albumDetail.count,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.White.copy(alpha = 0.6f)
                     )
                 }
-                
-                // Play/Pause button
-                IconButton(
-                    onClick = onPlayClick,
-                    modifier = Modifier
-                        .size(44.dp)
-                        .background(
-                            color = Color.White,
-                            shape = CircleShape
-                        )
-                ) {
-                    Icon(
-                        painter = painterResource(
-                            id = if (isPlaying) R.drawable.pause_24px else R.drawable.play_arrow_24px
-                        ),
-                        contentDescription = if (isPlaying) "Pause" else "Play",
-                        tint = Color.Black,
-                        modifier = Modifier.size(20.dp)
+                if (hasCount && hasDuration) {
+                    Text(
+                        text = " • ",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.White.copy(alpha = 0.6f)
+                    )
+                }
+                if (hasDuration) {
+                    Text(
+                        text = albumDetail.duration,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.White.copy(alpha = 0.6f)
                     )
                 }
             }
         }
         
         Spacer(modifier = Modifier.height(16.dp))
+        
+        // Control buttons - centered row: Shuffle (44dp) | Play (52dp) | Add (44dp)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Shuffle button
+            IconButton(
+                onClick = onShuffleClick,
+                modifier = Modifier
+                    .size(44.dp)
+                    .background(
+                        color = if (isShuffleEnabled) Color.White else Color.White.copy(alpha = 0.15f),
+                        shape = CircleShape
+                    )
+            ) {
+                Icon(
+                    painter = painterResource(id = R.drawable.shuffle_24px),
+                    contentDescription = "Shuffle",
+                    tint = if (isShuffleEnabled) Color.Black else Color.White,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+            
+            Spacer(modifier = Modifier.width(16.dp))
+            
+            // Play/Pause button - bigger (52dp)
+            IconButton(
+                onClick = onPlayClick,
+                modifier = Modifier
+                    .size(52.dp)
+                    .background(
+                        color = Color.White,
+                        shape = CircleShape
+                    )
+            ) {
+                Icon(
+                    painter = painterResource(
+                        id = if (isPlaying) R.drawable.pause_24px else R.drawable.play_arrow_24px
+                    ),
+                    contentDescription = if (isPlaying) "Pause" else "Play",
+                    tint = Color.Black,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+            
+            Spacer(modifier = Modifier.width(16.dp))
+            
+            // Add button - toggles save state
+            IconButton(
+                onClick = onAddClick,
+                modifier = Modifier
+                    .size(44.dp)
+                    .background(
+                        color = if (isSaved) Color.White else Color.White.copy(alpha = 0.15f),
+                        shape = CircleShape
+                    )
+            ) {
+                Icon(
+                    painter = painterResource(
+                        id = if (isSaved) R.drawable.check_24px else R.drawable.add_24px
+                    ),
+                    contentDescription = if (isSaved) "Saved to Library" else "Add to Library",
+                    tint = if (isSaved) Color.Black else Color.White,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
+        
+        Spacer(modifier = Modifier.height(20.dp))
     }
 }
 
