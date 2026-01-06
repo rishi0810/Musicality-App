@@ -31,9 +31,7 @@ val DefaultSurfaceColor = Color(0xFF121212)
 val DefaultTextPrimary = Color.White
 val DefaultTextMuted = Color.White.copy(alpha = 0.5f)
 
-/**
- * Section header for content sections.
- */
+
 @Composable
 fun SectionHeader(
     title: String,
