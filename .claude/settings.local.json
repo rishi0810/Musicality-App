@@ -4,7 +4,9 @@
       "WebSearch",
       "Bash(python3:*)",
       "mcp__context7__resolve-library-id",
-      "mcp__context7__query-docs"
+      "mcp__context7__query-docs",
+      "Bash(curl -s \"https://music.youtube.com/sw.js_data\")",
+      "Bash(grep -oE 'Cg[a-zA-Z0-9%_-]{20,}')"
     ]
   }
 }
