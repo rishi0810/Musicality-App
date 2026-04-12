@@ -67,11 +67,22 @@ data class PlaylistPanelContentItem(
 
 @Serializable
 data class PlaylistPanelVideoWrapperRenderer(
-    val primaryRenderer: PlaylistPanelPrimaryRenderer? = null
+    val primaryRenderer: PlaylistPanelPrimaryRenderer? = null,
+    val counterpart: List<PlaylistPanelCounterpartItem>? = null
 )
 
 @Serializable
 data class PlaylistPanelPrimaryRenderer(
+    val playlistPanelVideoRenderer: PlaylistPanelVideoRenderer? = null
+)
+
+@Serializable
+data class PlaylistPanelCounterpartItem(
+    val counterpartRenderer: PlaylistPanelCounterpartRenderer? = null
+)
+
+@Serializable
+data class PlaylistPanelCounterpartRenderer(
     val playlistPanelVideoRenderer: PlaylistPanelVideoRenderer? = null
 )
 
@@ -86,4 +97,3 @@ data class PlaylistPanelVideoRenderer(
     val videoId: String? = null,
     val selected: Boolean? = null
 )
-

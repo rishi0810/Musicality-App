@@ -110,6 +110,7 @@ fun QueueContent(
     onQueueActionConsumed: (() -> Unit)? = null,
     crossfadeEnabled: Boolean = false,
     crossfadeLockActive: Boolean = false,
+    headerContent: (@Composable () -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -141,6 +142,11 @@ fun QueueContent(
                 .fillMaxWidth()
                 .padding(bottom = 32.dp)
         ) {
+            if (headerContent != null) {
+                item(key = "queue-header", contentType = "header") {
+                    headerContent()
+                }
+            }
             itemsIndexed(
                 items = queue.items,
                 key = { index, item -> queueItemStableKey(index, item) },

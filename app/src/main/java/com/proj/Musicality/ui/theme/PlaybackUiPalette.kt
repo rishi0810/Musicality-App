@@ -18,18 +18,27 @@ data class PlaybackUiPalette(
 )
 
 val LocalPlaybackUiPalette = staticCompositionLocalOf<PlaybackUiPalette?> { null }
+val LocalPlaybackBackdropPalette = staticCompositionLocalOf<MediaBackdropPalette?> { null }
 
 @Composable
-fun rememberPlaybackUiPalette(
+fun rememberPlaybackBackdropPalette(
     artworkUrl: String?
-): PlaybackUiPalette? {
+): MediaBackdropPalette? {
     if (artworkUrl.isNullOrBlank()) return null
 
     val fallbackSurface = MaterialTheme.colorScheme.surface
-    val palette = rememberMediaBackdropPalette(
+    return rememberMediaBackdropPalette(
         imageUrl = artworkUrl,
-        fallbackSurface = fallbackSurface
+        fallbackSurface = fallbackSurface,
+        animateTransitions = false
     )
+}
+
+@Composable
+fun rememberPlaybackUiPalette(
+    palette: MediaBackdropPalette?
+): PlaybackUiPalette? {
+    if (palette == null) return null
 
     return remember(palette) {
         PlaybackUiPalette(

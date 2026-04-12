@@ -1,5 +1,6 @@
 package com.proj.Musicality.viewmodel
 
+import android.util.Log
 import android.content.Context
 import com.proj.Musicality.api.VisitorManager
 import com.proj.Musicality.cache.AppCache
@@ -10,6 +11,7 @@ import com.proj.Musicality.data.model.HomeSection
 import com.proj.Musicality.data.parser.HomeParser
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -18,13 +20,18 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 internal object HomePrefetchManager {
-
+    private const val TAG = "HomePrefetchManager"
     private const val HOME_BROWSE_ID = "FEmusic_home"
     private const val HOME_API_FEED_CACHE_KEY = "home-feed-api"
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val apiMutex = Mutex()
     private val personalizationMutex = Mutex()
+    private val prefetchMutex = Mutex()
+    private var pendingPrefetchContext: Context? = null
+    private var pendingForceApi = false
+    private var pendingForcePersonalization = false
+    private var prefetchJob: Job? = null
 
     fun prefetch(
         context: Context,
@@ -33,11 +40,19 @@ internal object HomePrefetchManager {
     ) {
         val appContext = context.applicationContext
         scope.launch {
-            warmCaches(
-                context = appContext,
-                forceApi = forceApi,
-                forcePersonalization = forcePersonalization
-            )
+            prefetchMutex.withLock {
+                pendingPrefetchContext = appContext
+                pendingForceApi = pendingForceApi || forceApi
+                pendingForcePersonalization = pendingForcePersonalization || forcePersonalization
+
+                if (prefetchJob?.isActive == true) {
+                    return@withLock
+                }
+
+                prefetchJob = scope.launch {
+                    drainPrefetchQueue()
+                }
+            }
         }
     }
 
@@ -163,6 +178,36 @@ internal object HomePrefetchManager {
         personalizationJob.await()
     }
 
+    private suspend fun drainPrefetchQueue() {
+        while (true) {
+            val request = prefetchMutex.withLock {
+                val appContext = pendingPrefetchContext ?: run {
+                    prefetchJob = null
+                    return@withLock null
+                }
+                PrefetchRequest(
+                    context = appContext,
+                    forceApi = pendingForceApi,
+                    forcePersonalization = pendingForcePersonalization
+                ).also {
+                    pendingPrefetchContext = null
+                    pendingForceApi = false
+                    pendingForcePersonalization = false
+                }
+            } ?: return
+
+            runCatching {
+                warmCaches(
+                    context = request.context,
+                    forceApi = request.forceApi,
+                    forcePersonalization = request.forcePersonalization
+                )
+            }.onFailure { throwable ->
+                Log.w(TAG, "prefetch: warmCaches failed", throwable)
+            }
+        }
+    }
+
     private fun loadCachedApiFeed(context: Context): HomeFeed? {
         val memoryFeed = AppCache.browse.get(HOME_API_FEED_CACHE_KEY) as? HomeFeed
         if (memoryFeed != null) return memoryFeed
@@ -183,4 +228,10 @@ internal data class CachedHomeSnapshot(
     val personalizedSections: List<HomeSection>,
     val reservedPersonalizedSlots: Int,
     val snapshotKey: String
+)
+
+private data class PrefetchRequest(
+    val context: Context,
+    val forceApi: Boolean,
+    val forcePersonalization: Boolean
 )

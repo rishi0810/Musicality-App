@@ -26,7 +26,6 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Search
-import androidx.compose.material.icons.rounded.Explore
 import androidx.compose.material.icons.rounded.LibraryMusic
 import com.proj.Musicality.data.parser.MoodCategoryParser
 import androidx.compose.material3.*
@@ -62,8 +61,10 @@ import com.proj.Musicality.ui.components.ExpressiveBottomNavBar
 import com.proj.Musicality.ui.components.ExpressiveBottomNavItem
 import com.proj.Musicality.ui.player.PlayerSheet
 import com.proj.Musicality.ui.screen.*
+import com.proj.Musicality.ui.theme.LocalPlaybackBackdropPalette
 import com.proj.Musicality.ui.theme.LocalPlaybackUiPalette
 import com.proj.Musicality.ui.theme.LocalSharedTransitionScope
+import com.proj.Musicality.ui.theme.rememberPlaybackBackdropPalette
 import com.proj.Musicality.ui.theme.rememberPlaybackUiPalette
 import com.proj.Musicality.util.upscaleThumbnail
 import com.proj.Musicality.viewmodel.PlaybackViewModel
@@ -89,7 +90,8 @@ fun MusicApp() {
     val currentArtworkUrl by currentArtworkFlow.collectAsStateWithLifecycle(
         initialValue = playbackViewModel.state.value.currentItem?.thumbnailUrl?.let(::upscaleThumbnail)
     )
-    val playbackUiPalette = rememberPlaybackUiPalette(currentArtworkUrl)
+    val playbackBackdropPalette = rememberPlaybackBackdropPalette(currentArtworkUrl)
+    val playbackUiPalette = rememberPlaybackUiPalette(playbackBackdropPalette)
     val density = LocalDensity.current
     val configuration = LocalConfiguration.current
 
@@ -97,9 +99,8 @@ fun MusicApp() {
     val navBarMaxHeightPx = with(density) { navBarMaxHeight.toPx() }
     val miniPlayerHeight = 74.dp
     val screenWidth = configuration.screenWidthDp.dp
-    // 4 nav items at 68 dp each + 32 dp padding = 304 dp, capped near screen width
-    val navBarWidth = min(316.dp.value, (screenWidth - 24.dp).value).dp
-    val miniPlayerWidth = min((navBarWidth * 1.5f).value, (screenWidth - 20.dp).value).dp
+    // 3 nav items at 68 dp each + 32 dp padding = 236 dp, capped near screen width
+    val navBarWidth = min(252.dp.value, (screenWidth - 24.dp).value).dp
     var hadMediaPreviously by rememberSaveable { mutableStateOf(playbackViewModel.state.value.hasMedia) }
     // Keep the collapsed mini player above the app navigation bar.
     // This also makes morph end-bounds line up with the visible mini art target.
@@ -212,24 +213,69 @@ fun MusicApp() {
         val route = navBackStackEntry?.destination?.route ?: return@LaunchedEffect
         when {
             route.endsWith("Home") -> selectedTab = 0
-            route.endsWith("Explore") -> selectedTab = 1
-            route.endsWith("Search") -> selectedTab = 2
-            route.endsWith("Library") || route.contains("LibraryCollection") -> selectedTab = 3
+            route.endsWith("Search") || route.endsWith("Explore") -> selectedTab = 1
+            route.endsWith("Library") || route.contains("LibraryCollection") -> selectedTab = 2
         }
     }
     LaunchedEffect(hasMedia, bottomSheetState) {
-        // Auto-open only when transitioning from "no media" -> "has media".
+        // Show the mini player on first playback, but don't force a full-screen
+        // expand while audio/service/artwork initialization is still happening.
         if (!hadMediaPreviously && hasMedia) {
             runCatching { bottomSheetState.partialExpand() }
-            // Let mini-player/socket bounds settle before first expand morph.
-            withFrameNanos { }
-            withFrameNanos { }
-            runCatching { bottomSheetState.expand() }
         }
         hadMediaPreviously = hasMedia
     }
+    val bottomNavItems = remember(navController) {
+        listOf(
+            ExpressiveBottomNavItem(
+                label = "Home",
+                selectedIcon = Icons.Filled.Home,
+                unselectedIcon = Icons.Outlined.Home
+            ) {
+                selectedTab = 0
+                navController.navigate(Route.Home) {
+                    popUpTo(navController.graph.findStartDestination().id) {
+                        saveState = true
+                    }
+                    launchSingleTop = true
+                    restoreState = true
+                }
+            },
+            ExpressiveBottomNavItem(
+                label = "Search",
+                selectedIcon = Icons.Filled.Search,
+                unselectedIcon = Icons.Outlined.Search
+            ) {
+                selectedTab = 1
+                navController.navigate(Route.Search) {
+                    popUpTo(navController.graph.findStartDestination().id) {
+                        saveState = true
+                    }
+                    launchSingleTop = true
+                    restoreState = true
+                }
+            },
+            ExpressiveBottomNavItem(
+                label = "Library",
+                selectedIcon = Icons.Rounded.LibraryMusic,
+                unselectedIcon = Icons.Rounded.LibraryMusic
+            ) {
+                selectedTab = 2
+                navController.navigate(Route.Library) {
+                    popUpTo(navController.graph.findStartDestination().id) {
+                        saveState = true
+                    }
+                    launchSingleTop = true
+                    restoreState = true
+                }
+            }
+        )
+    }
 
-    CompositionLocalProvider(LocalPlaybackUiPalette provides playbackUiPalette) {
+    CompositionLocalProvider(
+        LocalPlaybackBackdropPalette provides playbackBackdropPalette,
+        LocalPlaybackUiPalette provides playbackUiPalette
+    ) {
         Scaffold(
             contentWindowInsets = WindowInsets(0, 0, 0, 0),
             bottomBar = {
@@ -262,64 +308,7 @@ fun MusicApp() {
                             barHeight = navBarMaxHeight,
                             barWidth = navBarWidth,
                             selectedIndex = selectedTab,
-                            items = listOf(
-                                ExpressiveBottomNavItem(
-                                    label = "Home",
-                                    selectedIcon = Icons.Filled.Home,
-                                    unselectedIcon = Icons.Outlined.Home
-                                ) {
-                                    selectedTab = 0
-                                    navController.navigate(Route.Home) {
-                                        popUpTo(navController.graph.findStartDestination().id) {
-                                            saveState = true
-                                        }
-                                        launchSingleTop = true
-                                        restoreState = true
-                                    }
-                                },
-                                ExpressiveBottomNavItem(
-                                    label = "Explore",
-                                    selectedIcon = Icons.Rounded.Explore,
-                                    unselectedIcon = Icons.Rounded.Explore
-                                ) {
-                                    selectedTab = 1
-                                    navController.navigate(Route.Explore) {
-                                        popUpTo(navController.graph.findStartDestination().id) {
-                                            saveState = true
-                                        }
-                                        launchSingleTop = true
-                                        restoreState = true
-                                    }
-                                },
-                                ExpressiveBottomNavItem(
-                                    label = "Search",
-                                    selectedIcon = Icons.Filled.Search,
-                                    unselectedIcon = Icons.Outlined.Search
-                                ) {
-                                    selectedTab = 2
-                                    navController.navigate(Route.Search) {
-                                        popUpTo(navController.graph.findStartDestination().id) {
-                                            saveState = true
-                                        }
-                                        launchSingleTop = true
-                                        restoreState = true
-                                    }
-                                },
-                                ExpressiveBottomNavItem(
-                                    label = "Library",
-                                    selectedIcon = Icons.Rounded.LibraryMusic,
-                                    unselectedIcon = Icons.Rounded.LibraryMusic
-                                ) {
-                                    selectedTab = 3
-                                    navController.navigate(Route.Library) {
-                                        popUpTo(navController.graph.findStartDestination().id) {
-                                            saveState = true
-                                        }
-                                        launchSingleTop = true
-                                        restoreState = true
-                                    }
-                                },
-                            ),
+                            items = bottomNavItems,
                         )
                 }
             }
@@ -352,8 +341,7 @@ fun MusicApp() {
                     onMoveInQueue = playbackViewModel::moveInQueue,
                     crossfadeEnabled = crossfadeEnabled,
                     onToggleCrossfade = playbackViewModel::toggleCrossfade,
-                    miniPlayerHeight = miniPlayerHeight,
-                    miniPlayerWidth = miniPlayerWidth
+                    miniPlayerHeight = miniPlayerHeight
                 )
             },
             sheetDragHandle = null,
@@ -390,6 +378,8 @@ fun MusicApp() {
                         animatedVisibilityScope = this@composable,
                         collapsedMiniPlayerHeight = floatingControlsHeight + 3.dp,
                         onSongTap = onSongTap,
+                        onPlayNext = onPlayNext,
+                        onAddToQueue = onAddToQueue,
                         onVideoTap = onVideoTap,
                         onArtistTap = navToArtist,
                         onAlbumTap = navToAlbum,
@@ -435,6 +425,15 @@ fun MusicApp() {
                         SearchScreen(
                         modifier = Modifier.statusBarsPadding(),
                         animatedVisibilityScope = this@composable,
+                        onBackToHome = {
+                            navController.navigate(Route.Home) {
+                                popUpTo(navController.graph.findStartDestination().id) {
+                                    saveState = true
+                                }
+                                launchSingleTop = true
+                                restoreState = true
+                            }
+                        },
                         collapsedMiniPlayerHeight = floatingControlsHeight + 3.dp,
                         onSongTap = onSongTap,
                         onPlayNext = onPlayNext,
@@ -453,7 +452,10 @@ fun MusicApp() {
                         onArtistMenuTap = navToArtistNoThumb,
                         onAlbumTap = navToAlbum,
                         onAlbumMenuTap = navToAlbumNoThumb,
-                        onPlaylistTap = navToPlaylist
+                        onPlaylistTap = navToPlaylist,
+                        onMoodTap = { mood ->
+                            navController.navigate(Route.MoodCategory(mood.name))
+                        }
                     )
                     }
 

@@ -24,7 +24,28 @@ data class SearchSectionListWrapper(val sectionListRenderer: SearchSectionList? 
 data class SearchSectionList(val contents: List<SearchSectionContent> = emptyList())
 
 @Serializable
-data class SearchSectionContent(val musicShelfRenderer: SearchMusicShelfRenderer? = null)
+data class SearchSectionContent(
+    val musicShelfRenderer: SearchMusicShelfRenderer? = null,
+    val musicCardShelfRenderer: MusicCardShelfRenderer? = null
+)
+
+@Serializable
+data class MusicCardShelfRenderer(
+    val title: Runs? = null,
+    val subtitle: Runs? = null,
+    val thumbnail: ThumbnailRenderer? = null,
+    val buttons: List<ButtonWrapper>? = null
+)
+
+@Serializable
+data class ButtonWrapper(
+    val buttonRenderer: ButtonRenderer? = null
+)
+
+@Serializable
+data class ButtonRenderer(
+    val command: NavigationEndpoint? = null
+)
 
 @Serializable
 data class SearchMusicShelfRenderer(val contents: List<MusicResponsiveListItemWrapper> = emptyList())

@@ -26,6 +26,10 @@ enum class SectionLayout {
     HERO_WITH_TOP_PICKS,
     /** Wider album cards in LazyRow. */
     ALBUM_CAROUSEL,
+    /** Song cards in a horizontal carousel. */
+    SONG_CAROUSEL,
+    /** One featured song with compact follow-up picks. */
+    SONG_FEATURED_MIX,
     /** Force 4-item stacked column layout. */
     STACKED_SONGS
 }

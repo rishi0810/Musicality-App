@@ -6,7 +6,6 @@ object ApiConstants {
     const val SEARCH_URL = "https://music.youtube.com/youtubei/v1/search?prettyPrint=false"
     const val SUGGESTION_URL = "https://music.youtube.com/youtubei/v1/music/get_search_suggestions?prettyPrint=false"
     const val VISITOR_BROWSE_URL = "https://music.youtube.com/sw.js_data"
-    const val VISITOR_STREAM_URL = "https://youtubei.googleapis.com/youtubei/v1/visitor_id?prettyPrint=false"
     const val REEL_URL = "https://youtubei.googleapis.com/youtubei/v1/reel/reel_item_watch"
     const val PLAYER_URL = "https://www.youtube.com/youtubei/v1/player?prettyPrint=false"
 
@@ -23,6 +22,7 @@ object ApiConstants {
 }
 
 enum class SearchType(val params: String) {
+    ALL(""),
     SONGS("EgWKAQIIAWoQEAMQBBAFEBAQChAJEBUQEQ=="),
     VIDEOS("EgWKAQIQAWoQEAMQBBAFEBAQChAJEBUQEQ=="),
     ARTISTS("EgWKAQIgAWoQEAMQBBAFEBAQChAJEBUQEQ=="),

@@ -108,13 +108,8 @@ fun ExploreScreen(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(bottom = collapsedMiniPlayerHeight + 8.dp)
         ) {
-            item(key = "explore-title") {
-                Text(
-                    text = "Explore",
-                    style = MaterialTheme.typography.headlineLarge,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
-                )
+            item(key = "explore-top-space") {
+                Spacer(Modifier.height(12.dp))
             }
 
             when (val s = state) {

@@ -11,6 +11,12 @@ android {
         version = release(36)
     }
 
+    val hasCiSigning =
+        !System.getenv("ANDROID_KEYSTORE_PATH").isNullOrBlank() &&
+            !System.getenv("ANDROID_KEYSTORE_PASSWORD").isNullOrBlank() &&
+            !System.getenv("ANDROID_KEY_ALIAS").isNullOrBlank() &&
+            !System.getenv("ANDROID_KEY_PASSWORD").isNullOrBlank()
+
     defaultConfig {
         applicationId = "com.proj.Musicality"
         minSdk = 33
@@ -21,10 +27,33 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        if (hasCiSigning) {
+            create("release") {
+                storeFile = file(System.getenv("ANDROID_KEYSTORE_PATH"))
+                storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("ANDROID_KEY_ALIAS")
+                keyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         getByName("debug") {
             // Standard debug settings
             isMinifyEnabled = false
+        }
+
+        getByName("release") {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+            if (hasCiSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
 
         // Create a custom build type for performance testing
@@ -104,5 +133,10 @@ dependencies {
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.rules)
     androidTestImplementation(libs.androidx.espresso.core)
+    androidTestImplementation(composeBom)
+    androidTestImplementation(libs.compose.ui.test.junit4)
+    debugImplementation(libs.compose.ui.test.manifest)
 }

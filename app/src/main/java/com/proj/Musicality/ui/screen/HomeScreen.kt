@@ -1,5 +1,7 @@
 package com.proj.Musicality.ui.screen
 
+import android.content.Intent
+import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.foundation.background
@@ -26,15 +28,23 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.TrendingUp
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Album
+import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Podcasts
+import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Widgets
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.LoadingIndicator
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -43,6 +53,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -57,12 +68,14 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.proj.Musicality.data.local.LibraryRepository
 import coil3.compose.AsyncImage
 import com.proj.Musicality.data.model.HomeItem
 import com.proj.Musicality.data.model.HomeMoreEndpoint
@@ -75,13 +88,25 @@ import com.proj.Musicality.data.model.SectionLayout
 import com.proj.Musicality.ui.components.ContentCard
 import com.proj.Musicality.ui.components.ErrorMessage
 import com.proj.Musicality.ui.components.SectionHeader
-import com.proj.Musicality.ui.components.ShimmerSection
 import com.proj.Musicality.ui.components.SongListItem
 import com.proj.Musicality.ui.components.Thumbnail
 import com.proj.Musicality.ui.theme.LocalPlaybackUiPalette
+import com.proj.Musicality.ui.theme.rememberMediaBackdropPalette
 import com.proj.Musicality.util.upscaleThumbnail
 import com.proj.Musicality.viewmodel.HomeViewModel
 import kotlinx.coroutines.launch
+
+private data class HomeSongMenuModel(
+    val title: String,
+    val subtitle: String?,
+    val mediaItem: MediaItem,
+    val artistName: String,
+    val artistId: String?,
+    val albumName: String?,
+    val albumId: String?,
+    val thumb: String?,
+    val shareUrl: String
+)
 
 @OptIn(
     ExperimentalMaterial3Api::class,
@@ -92,6 +117,8 @@ import kotlinx.coroutines.launch
 fun HomeScreen(
     animatedVisibilityScope: AnimatedVisibilityScope,
     onSongTap: (MediaItem, PlaybackQueue) -> Unit,
+    onPlayNext: (MediaItem) -> Unit,
+    onAddToQueue: (MediaItem) -> Unit,
     onVideoTap: (MediaItem) -> Unit,
     onArtistTap: (String, String, String?) -> Unit,
     onAlbumTap: (String, String, String?, String?) -> Unit,
@@ -99,11 +126,16 @@ fun HomeScreen(
     collapsedMiniPlayerHeight: Dp = 0.dp,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
+    val repository = remember(context.applicationContext) {
+        LibraryRepository.getInstance(context.applicationContext)
+    }
     val viewModel: HomeViewModel = viewModel()
     val state by viewModel.state.collectAsStateWithLifecycle()
     val isLoadingMore by viewModel.isLoadingMore.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     var isRefreshing by remember { mutableStateOf(false) }
+    var selectedSongMenu by remember { mutableStateOf<HomeSongMenuModel?>(null) }
     val pullState = rememberPullToRefreshState()
     val listState = rememberLazyListState()
     val playbackUiPalette = LocalPlaybackUiPalette.current
@@ -159,15 +191,21 @@ fun HomeScreen(
                         section = section,
                         animatedVisibilityScope = animatedVisibilityScope,
                         onSongTap = onSongTap,
+                        onSongOverflowClick = { selectedSongMenu = it.toMenuModel() },
                         onVideoTap = onVideoTap,
                         onArtistTap = onArtistTap,
                         onAlbumTap = onAlbumTap,
                         onPlaylistTap = onPlaylistTap
                     )
                 }
-            } else if (state.reservedPersonalizedSlots > 0) {
-                items(state.reservedPersonalizedSlots, key = { "personalized-shimmer-$it" }) {
-                    ShimmerSection()
+            }
+
+            val showUnifiedLoader = state.isApiLoading || state.isPersonalizationLoading
+            if (showUnifiedLoader) {
+                item(key = "home-unified-loader") {
+                    HomeLoadingPlaceholder(
+                        accentColor = refreshContainerColor
+                    )
                 }
             }
 
@@ -183,6 +221,7 @@ fun HomeScreen(
                             section = section,
                             animatedVisibilityScope = animatedVisibilityScope,
                             onSongTap = onSongTap,
+                            onSongOverflowClick = { selectedSongMenu = it.toMenuModel() },
                             onVideoTap = onVideoTap,
                             onArtistTap = onArtistTap,
                             onAlbumTap = onAlbumTap,
@@ -211,14 +250,86 @@ fun HomeScreen(
                         ErrorMessage(message = errorMessage)
                     }
                 }
-
-                state.isInitialLoading -> {
-                    items(4, key = { "api-shimmer-$it" }) {
-                        ShimmerSection()
-                    }
-                }
             }
         }
+    }
+
+    selectedSongMenu?.let { menu ->
+        HomeSongActionsSheet(
+            model = menu,
+            onDismiss = { selectedSongMenu = null },
+            onPlayNext = {
+                onPlayNext(menu.mediaItem)
+                selectedSongMenu = null
+            },
+            onAddToQueue = {
+                onAddToQueue(menu.mediaItem)
+                selectedSongMenu = null
+            },
+            onViewArtist = {
+                val artistId = menu.artistId ?: return@HomeSongActionsSheet
+                onArtistTap(menu.artistName, artistId, menu.thumb)
+                selectedSongMenu = null
+            },
+            onViewAlbum = {
+                val albumId = menu.albumId ?: return@HomeSongActionsSheet
+                onAlbumTap(menu.albumName ?: menu.title, albumId, menu.artistName, menu.thumb)
+                selectedSongMenu = null
+            },
+            onShare = {
+                val shareText = buildString {
+                    append(menu.title)
+                    if (!menu.subtitle.isNullOrBlank()) {
+                        append("\n")
+                        append(menu.subtitle)
+                    }
+                    append("\n")
+                    append(menu.shareUrl)
+                }
+                runCatching {
+                    context.startActivity(
+                        Intent.createChooser(
+                            Intent(Intent.ACTION_SEND).apply {
+                                type = "text/plain"
+                                putExtra(Intent.EXTRA_SUBJECT, menu.title)
+                                putExtra(Intent.EXTRA_TEXT, shareText)
+                            },
+                            "Share"
+                        )
+                    )
+                }
+                selectedSongMenu = null
+            },
+            onDownload = {
+                scope.launch {
+                    val result = repository.download(menu.mediaItem)
+                    Toast.makeText(
+                        context,
+                        if (result.isSuccess) "Downloaded: ${menu.title}" else "Download failed: ${menu.title}",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+                selectedSongMenu = null
+            }
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun HomeLoadingPlaceholder(
+    accentColor: Color
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 20.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        LoadingIndicator(
+            modifier = Modifier.size(56.dp),
+            color = accentColor
+        )
     }
 }
 
@@ -228,6 +339,7 @@ private fun HomeSectionShelf(
     section: HomeSection,
     animatedVisibilityScope: AnimatedVisibilityScope,
     onSongTap: (MediaItem, PlaybackQueue) -> Unit,
+    onSongOverflowClick: (HomeItem.Song) -> Unit,
     onVideoTap: (MediaItem) -> Unit,
     onArtistTap: (String, String, String?) -> Unit,
     onAlbumTap: (String, String, String?, String?) -> Unit,
@@ -282,6 +394,36 @@ private fun HomeSectionShelf(
                 Spacer(Modifier.height(14.dp))
                 return@Column
             }
+            SectionLayout.SONG_CAROUSEL -> {
+                if (section.title.isNotBlank()) {
+                    SectionHeader(
+                        title = section.title,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+                SongCarousel(
+                    section = section,
+                    onSongTap = onSongTap,
+                    onSongOverflowClick = onSongOverflowClick
+                )
+                Spacer(Modifier.height(14.dp))
+                return@Column
+            }
+            SectionLayout.SONG_FEATURED_MIX -> {
+                if (section.title.isNotBlank()) {
+                    SectionHeader(
+                        title = section.title,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+                SongFeaturedMix(
+                    section = section,
+                    onSongTap = onSongTap,
+                    onSongOverflowClick = onSongOverflowClick
+                )
+                Spacer(Modifier.height(14.dp))
+                return@Column
+            }
             else -> { /* fall through to existing logic */ }
         }
 
@@ -325,15 +467,17 @@ private fun HomeSectionShelf(
                                         thumbnailUrl = item.thumbnailUrl,
                                         sharedElementKey = "thumb-${item.videoId}",
                                         animatedVisibilityScope = animatedVisibilityScope,
-                                        onOverflowClick = {},
+                                        onOverflowClick = { onSongOverflowClick(item) },
                                         onClick = {
                                             val index = songIndexById[item.videoId] ?: 0
+                                            val mediaItem = item.toMediaItem()
                                             onSongTap(
-                                                item.toMediaItem(),
-                                                PlaybackQueue(
-                                                    items = queueItems.ifEmpty { listOf(item.toMediaItem()) },
-                                                    currentIndex = index,
-                                                    source = QueueSource.HOME
+                                                mediaItem,
+                                                buildHomeSectionQueue(
+                                                    section = section,
+                                                    tappedItem = mediaItem,
+                                                    queueItems = queueItems,
+                                                    currentIndex = index
                                                 )
                                             )
                                         }
@@ -345,7 +489,7 @@ private fun HomeSectionShelf(
                                         title = item.title,
                                         subtitle = item.subtitle,
                                         thumbnailUrl = item.thumbnailUrl,
-                                        onOverflowClick = {},
+                                        onOverflowClick = null,
                                         onClick = {
                                             when {
                                                 item.videoId != null -> onVideoTap(item.toVideoMediaItem())
@@ -392,7 +536,7 @@ private fun HomeSectionShelf(
                                             item.duration
                                         ).joinToString(" • "),
                                         thumbnailUrl = item.thumbnailUrl,
-                                        onOverflowClick = {},
+                                        onOverflowClick = null,
                                         onClick = { onVideoTap(item.toMediaItem()) }
                                     )
                                 }
@@ -429,7 +573,7 @@ private fun HomeSectionShelf(
                                 thumbnailUrl = card.thumbnailUrl,
                                 cardWidth = 220.dp,
                                 thumbnailSize = 220.dp,
-                                onOverflowClick = {},
+                                onOverflowClick = null,
                                 onClick = { if (card.videoId != null) onVideoTap(card.toVideoMediaItem()) }
                             )
                         }
@@ -458,15 +602,17 @@ private fun HomeSectionShelf(
                                 thumbnailUrl = song.thumbnailUrl,
                                 sharedElementKey = "thumb-${song.videoId}",
                                 animatedVisibilityScope = animatedVisibilityScope,
-                                onOverflowClick = {},
+                                onOverflowClick = { onSongOverflowClick(song) },
                                 onClick = {
                                     val index = songIndexById[song.videoId] ?: 0
+                                    val mediaItem = song.toMediaItem()
                                     onSongTap(
-                                        song.toMediaItem(),
-                                        PlaybackQueue(
-                                            items = queueItems,
-                                            currentIndex = index,
-                                            source = QueueSource.HOME
+                                        mediaItem,
+                                        buildHomeSectionQueue(
+                                            section = section,
+                                            tappedItem = mediaItem,
+                                            queueItems = queueItems,
+                                            currentIndex = index
                                         )
                                     )
                                 }
@@ -544,15 +690,17 @@ private fun HomeSectionShelf(
                     is HomeItem.Song -> {
                         HomeSongCard(
                             song = item,
-                            onOverflowClick = {},
+                            onOverflowClick = { onSongOverflowClick(item) },
                             onClick = {
                                 val index = songIndexById[item.videoId] ?: 0
+                                val mediaItem = item.toMediaItem()
                                 onSongTap(
-                                    item.toMediaItem(),
-                                    PlaybackQueue(
-                                        items = queueItems.ifEmpty { listOf(item.toMediaItem()) },
-                                        currentIndex = index,
-                                        source = QueueSource.HOME
+                                    mediaItem,
+                                    buildHomeSectionQueue(
+                                        section = section,
+                                        tappedItem = mediaItem,
+                                        queueItems = queueItems,
+                                        currentIndex = index
                                     )
                                 )
                             }
@@ -564,6 +712,285 @@ private fun HomeSectionShelf(
 
         Spacer(Modifier.height(14.dp))
     }
+}
+
+@Composable
+private fun SongCarousel(
+    section: HomeSection,
+    onSongTap: (MediaItem, PlaybackQueue) -> Unit,
+    onSongOverflowClick: (HomeItem.Song) -> Unit
+) {
+    val songs = remember(section.items) { section.items.filterIsInstance<HomeItem.Song>() }
+    if (songs.isEmpty()) return
+    val queueItems = remember(songs) { songs.map { it.toMediaItem() } }
+
+    LazyRow(
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        contentPadding = PaddingValues(horizontal = 16.dp)
+    ) {
+        itemsIndexed(
+            songs,
+            key = { _, song -> "carousel-song-${song.videoId}" }
+        ) { index, song ->
+            HomeSongCard(
+                song = song,
+                onOverflowClick = { onSongOverflowClick(song) },
+                onClick = {
+                    val mediaItem = song.toMediaItem()
+                    onSongTap(
+                        mediaItem,
+                        buildHomeSectionQueue(
+                            section = section,
+                            tappedItem = mediaItem,
+                            queueItems = queueItems,
+                            currentIndex = index
+                        )
+                    )
+                }
+            )
+        }
+    }
+}
+
+@Composable
+private fun SongFeaturedMix(
+    section: HomeSection,
+    onSongTap: (MediaItem, PlaybackQueue) -> Unit,
+    onSongOverflowClick: (HomeItem.Song) -> Unit
+) {
+    val songs = remember(section.items) { section.items.filterIsInstance<HomeItem.Song>() }
+    if (songs.isEmpty()) return
+    val queueItems = remember(songs) { songs.map { it.toMediaItem() } }
+    val featured = songs.first()
+    val followUps = songs.drop(1).take(7)
+    val featuredPalette = rememberMediaBackdropPalette(
+        imageUrl = upscaleThumbnail(featured.thumbnailUrl, 720),
+        fallbackSurface = MaterialTheme.colorScheme.surfaceContainerHigh,
+        animateTransitions = false
+    )
+    val featuredPlayTint = featuredPalette.accent
+
+    Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+    ) {
+        val featuredItem = featured.toMediaItem()
+        Surface(
+            shape = RoundedCornerShape(14.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable {
+                    onSongTap(
+                        featuredItem,
+                        buildHomeSectionQueue(
+                            section = section,
+                            tappedItem = featuredItem,
+                            queueItems = queueItems,
+                            currentIndex = 0
+                        )
+                    )
+                }
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(10.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(end = 40.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box {
+                        Thumbnail(
+                            url = featured.thumbnailUrl,
+                            size = 98.dp,
+                            cornerRadius = 10.dp
+                        )
+                        IconButton(
+                            onClick = { onSongOverflowClick(featured) },
+                            modifier = Modifier.align(Alignment.TopEnd)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.MoreVert,
+                                contentDescription = "More actions for ${featured.title}"
+                            )
+                        }
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Column(
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(
+                            text = featured.title,
+                            style = MaterialTheme.typography.titleMedium,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = listOfNotNull(
+                                featured.artistName.takeIf { it.isNotBlank() },
+                                featured.plays
+                            ).joinToString(" • "),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+                Icon(
+                    imageVector = Icons.Rounded.PlayArrow,
+                    contentDescription = "Play ${featured.title}",
+                    tint = featuredPlayTint,
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(end = 4.dp, bottom = 4.dp)
+                        .size(32.dp)
+                )
+            }
+        }
+
+        if (followUps.isNotEmpty()) {
+            Spacer(Modifier.height(10.dp))
+            LazyRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(horizontal = 0.dp)
+            ) {
+                itemsIndexed(
+                    followUps,
+                    key = { _, song -> "featured-followup-${song.videoId}" }
+                ) { _, song ->
+                    val songIndex = songs.indexOfFirst { it.videoId == song.videoId }.coerceAtLeast(0)
+                    CompactSongCard(
+                        song = song,
+                        onClick = {
+                            val mediaItem = song.toMediaItem()
+                            onSongTap(
+                                mediaItem,
+                                buildHomeSectionQueue(
+                                    section = section,
+                                    tappedItem = mediaItem,
+                                    queueItems = queueItems,
+                                    currentIndex = songIndex
+                                )
+                            )
+                        },
+                        modifier = Modifier.width(122.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun HomeSongActionsSheet(
+    model: HomeSongMenuModel,
+    onDismiss: () -> Unit,
+    onPlayNext: () -> Unit,
+    onAddToQueue: () -> Unit,
+    onViewArtist: () -> Unit,
+    onViewAlbum: () -> Unit,
+    onShare: () -> Unit,
+    onDownload: () -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState
+    ) {
+        Column(modifier = Modifier.padding(bottom = 16.dp)) {
+            Text(
+                text = model.title,
+                style = MaterialTheme.typography.titleMedium,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp)
+            )
+            if (!model.subtitle.isNullOrBlank()) {
+                Text(
+                    text = model.subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(horizontal = 24.dp)
+                )
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            HomeSongActionItem(
+                label = "Play next",
+                icon = Icons.Rounded.PlayArrow,
+                onClick = onPlayNext
+            )
+            HomeSongActionItem(
+                label = "Add to Queue",
+                icon = Icons.Rounded.Add,
+                onClick = onAddToQueue
+            )
+            if (model.artistId != null) {
+                HomeSongActionItem(
+                    label = "View Artist",
+                    icon = Icons.Rounded.Person,
+                    onClick = onViewArtist
+                )
+            }
+            if (model.albumId != null) {
+                HomeSongActionItem(
+                    label = "View Album",
+                    icon = Icons.Rounded.Album,
+                    onClick = onViewAlbum
+                )
+            }
+            HomeSongActionItem(
+                label = "Share",
+                icon = Icons.Rounded.Share,
+                onClick = onShare
+            )
+            HomeSongActionItem(
+                label = "Download",
+                icon = Icons.Rounded.Download,
+                onClick = onDownload
+            )
+        }
+    }
+}
+
+@Composable
+private fun HomeSongActionItem(
+    label: String,
+    icon: ImageVector,
+    onClick: () -> Unit
+) {
+    ListItem(
+        headlineContent = {
+            Text(
+                text = label,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 2.dp)
+            )
+        },
+        leadingContent = {
+            Icon(
+                imageVector = icon,
+                contentDescription = null
+            )
+        },
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+    )
 }
 
 @Composable
@@ -731,6 +1158,9 @@ private fun HeroContinuePlaying(
 ) {
     val song = section.items.firstOrNull() as? HomeItem.Song ?: return
     val mediaItem = remember(song) { song.toMediaItem() }
+    val queueItems = remember(section.items) {
+        section.items.filterIsInstance<HomeItem.Song>().map { it.toMediaItem() }
+    }
 
     Box(
         modifier = Modifier
@@ -741,10 +1171,11 @@ private fun HeroContinuePlaying(
             .clickable {
                 onSongTap(
                     mediaItem,
-                    PlaybackQueue(
-                        items = listOf(mediaItem),
-                        currentIndex = 0,
-                        source = QueueSource.HOME
+                    buildHomeSectionQueue(
+                        section = section,
+                        tappedItem = mediaItem,
+                        queueItems = queueItems,
+                        currentIndex = queueItems.indexOfFirst { it.videoId == mediaItem.videoId }
                     )
                 )
             }
@@ -818,6 +1249,10 @@ private fun HeroContinuePlayingWithTopPicks(
     section: HomeSection,
     onSongTap: (MediaItem, PlaybackQueue) -> Unit
 ) {
+    val queueItems = remember(section.items) {
+        section.items.filterIsInstance<HomeItem.Song>().map { it.toMediaItem() }
+    }
+
     Column(modifier = Modifier.fillMaxWidth()) {
         HeroContinuePlaying(section = section, onSongTap = onSongTap)
 
@@ -840,12 +1275,15 @@ private fun HeroContinuePlayingWithTopPicks(
                     CompactSongCard(
                         song = song,
                         onClick = {
+                            val mediaItem = song.toMediaItem()
+                            val index = queueItems.indexOfFirst { it.videoId == mediaItem.videoId }
                             onSongTap(
-                                song.toMediaItem(),
-                                PlaybackQueue(
-                                    items = listOf(song.toMediaItem()),
-                                    currentIndex = 0,
-                                    source = QueueSource.HOME
+                                mediaItem,
+                                buildHomeSectionQueue(
+                                    section = section,
+                                    tappedItem = mediaItem,
+                                    queueItems = queueItems,
+                                    currentIndex = index
                                 )
                             )
                         },
@@ -855,6 +1293,35 @@ private fun HeroContinuePlayingWithTopPicks(
             }
         }
     }
+}
+
+private fun HomeSection.usesUpNextSeedQueue(): Boolean {
+    return title.startsWith("Continue Playing", ignoreCase = true) ||
+        title.startsWith("Similar to", ignoreCase = true)
+}
+
+private fun buildHomeSectionQueue(
+    section: HomeSection,
+    tappedItem: MediaItem,
+    queueItems: List<MediaItem>,
+    currentIndex: Int
+): PlaybackQueue {
+    if (section.usesUpNextSeedQueue()) {
+        // Seed with only the tapped song so PlaybackViewModel upgrades it via the Next endpoint queue.
+        return PlaybackQueue(
+            items = listOf(tappedItem),
+            currentIndex = 0,
+            source = QueueSource.SINGLE
+        )
+    }
+
+    val safeQueueItems = queueItems.ifEmpty { listOf(tappedItem) }
+    val safeIndex = currentIndex.coerceIn(0, safeQueueItems.lastIndex)
+    return PlaybackQueue(
+        items = safeQueueItems,
+        currentIndex = safeIndex,
+        source = QueueSource.HOME
+    )
 }
 
 @Composable
@@ -958,6 +1425,26 @@ private fun HomeItem.Song.toMediaItem(): MediaItem {
         thumbnailUrl = thumbnailUrl,
         durationText = null,
         musicVideoType = musicVideoType ?: "MUSIC_VIDEO_TYPE_ATV"
+    )
+}
+
+private fun HomeItem.Song.toMenuModel(): HomeSongMenuModel {
+    val subtitle = listOfNotNull(
+        artistName.takeIf { it.isNotBlank() },
+        albumName?.takeIf { it.isNotBlank() },
+        plays?.takeIf { it.isNotBlank() }
+    ).joinToString(" • ").ifBlank { null }
+
+    return HomeSongMenuModel(
+        title = title,
+        subtitle = subtitle,
+        mediaItem = toMediaItem(),
+        artistName = artistName,
+        artistId = artistId,
+        albumName = albumName,
+        albumId = albumId,
+        thumb = thumbnailUrl,
+        shareUrl = "https://music.youtube.com/watch?v=$videoId"
     )
 }
 

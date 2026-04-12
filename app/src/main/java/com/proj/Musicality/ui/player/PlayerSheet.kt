@@ -20,6 +20,7 @@ import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -31,6 +32,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
@@ -126,8 +128,10 @@ import com.proj.Musicality.R
 import com.proj.Musicality.data.local.LibraryRepository
 import com.proj.Musicality.data.local.MediaLibraryState
 import com.proj.Musicality.data.model.LyricsState
+import com.proj.Musicality.data.model.MediaItem
 import com.proj.Musicality.data.model.PlaybackQueue
 import com.proj.Musicality.ui.components.pressScale
+import com.proj.Musicality.ui.theme.LocalPlaybackBackdropPalette
 import com.proj.Musicality.ui.theme.LocalPlaybackUiPalette
 import com.proj.Musicality.ui.theme.rememberMediaBackdropPalette
 import com.proj.Musicality.util.formatMs
@@ -177,12 +181,8 @@ fun PlayerSheet(
     onMoveInQueue: (Int, Int) -> Unit,
     crossfadeEnabled: Boolean = false,
     onToggleCrossfade: () -> Unit = {},
-    miniPlayerHeight: Dp = 70.dp,
-    miniPlayerWidth: Dp = 340.dp
+    miniPlayerHeight: Dp = 70.dp
 ) {
-    // Collect position & lyrics internally — avoids recomposing the entire MusicApp tree
-    val positionMs by positionMsFlow.collectAsStateWithLifecycle()
-    val lyricsState by lyricsStateFlow.collectAsStateWithLifecycle()
     val item = state.currentItem ?: return
     val queue = state.queue
     // Read the expand progress state here — PlayerSheet subscribes, not MusicApp
@@ -196,7 +196,10 @@ fun PlayerSheet(
     LaunchedEffect(item.videoId, artworkUrl) {
         Log.d(TAG, "PlayerSheet hero artwork url=$artworkUrl for videoId=${item.videoId}")
     }
-    val mediaPalette = rememberMediaBackdropPalette(
+    val sharedBackdropPalette = LocalPlaybackBackdropPalette.current
+    // Reuse the root palette when available so first playback doesn't decode
+    // and extract the same artwork colors twice in parallel.
+    val mediaPalette = sharedBackdropPalette ?: rememberMediaBackdropPalette(
         imageUrl = artworkUrl,
         fallbackSurface = surface
     )
@@ -270,12 +273,6 @@ fun PlayerSheet(
     val isLooping = state.repeatMode == Player.REPEAT_MODE_ONE
     var showQueueSheet by remember { mutableStateOf(false) }
     var showOptionsSheet by remember { mutableStateOf(false) }
-    val hasNextTrack = queue.currentIndex + 1 < queue.items.size
-    val remainingMs = (state.durationMs - positionMs).coerceAtLeast(0L)
-    val showCrossfadeCue = crossfadeEnabled &&
-        hasNextTrack &&
-        state.durationMs > 0L &&
-        remainingMs in 1L..CROSSFADE_UI_LEAD_MS
 
     PredictiveBackHandler(enabled = isExpanded) { progress: Flow<androidx.activity.BackEventCompat> ->
         try {
@@ -395,7 +392,8 @@ fun PlayerSheet(
                         Icon(
                             Icons.AutoMirrored.Rounded.ArrowBack,
                             contentDescription = "Back",
-                            tint = onSurface
+                            tint = onSurface,
+                            modifier = Modifier.graphicsLayer { rotationZ = -90f }
                         )
                     }
                     Text(
@@ -498,7 +496,7 @@ fun PlayerSheet(
                                     Text(
                                         text = animItem.artistName,
                                         style = MaterialTheme.typography.bodyLarge,
-                                        color = primary,
+                                        color = Color.White,
                                         fontWeight = FontWeight.Medium,
                                         textAlign = TextAlign.Center,
                                         modifier = Modifier.clickable {
@@ -509,44 +507,16 @@ fun PlayerSheet(
                             }
                             Spacer(Modifier.height(28.dp))
 
-                            // ── Progress bar ──
-                            val duration = state.durationMs
-                            val playbackProgress = if (duration > 0) positionMs.toFloat() / duration else 0f
-                            SeekablePlaybackBar(
-                                progress = playbackProgress,
-                                durationMs = duration,
+                            ExpandedPlaybackProgressSection(
+                                positionMsFlow = positionMsFlow,
+                                durationMs = state.durationMs,
+                                durationText = item.durationText,
+                                crossfadeEnabled = crossfadeEnabled,
+                                hasNextTrack = queue.currentIndex + 1 < queue.items.size,
                                 onSeek = onSeek,
-                                modifier = Modifier.fillMaxWidth(),
-                                color = playbackAccent,
-                                trackColor = Color(0xFF4A4A4A),
-                                trackHeight = 6.dp,
-                                thumbSize = 14.dp
-                            )
-
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(top = 4.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text(
-                                    text = formatMs(positionMs),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = onSurface.copy(alpha = 0.85f)
-                                )
-                                Text(
-                                    text = if (duration > 0) formatMs(duration) else (item.durationText ?: ""),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = onSurface.copy(alpha = 0.85f)
-                                )
-                            }
-
-                            CrossfadeCountdownCue(
-                                visible = showCrossfadeCue,
-                                accentColor = playbackAccent,
-                                modifier = Modifier
-                                    .padding(top = 6.dp)
-                                    .fillMaxWidth()
+                                playbackAccent = playbackAccent,
+                                onSurface = onSurface,
+                                modifier = Modifier.fillMaxWidth()
                             )
 
                             Spacer(Modifier.height(22.dp))
@@ -726,9 +696,9 @@ fun PlayerSheet(
 
                     // ── Layer 2: Lyrics content (always composed so bounds are tracked) ──
                     if (lyricsProgress > 0.001f) {
-                        LyricsContent(
-                            lyricsState = lyricsState,
-                            positionMs = positionMs,
+                        LyricsContentHost(
+                            positionMsFlow = positionMsFlow,
+                            lyricsStateFlow = lyricsStateFlow,
                             durationMs = state.durationMs,
                             isPlaying = state.isPlaying,
                             artworkUrl = artworkUrl,
@@ -779,8 +749,10 @@ fun PlayerSheet(
         }
 
         if (showQueueSheet) {
-            QueueActionSheet(
+            QueueActionSheetHost(
                 queue = queue,
+                positionMsFlow = positionMsFlow,
+                durationMs = state.durationMs,
                 onDismiss = { showQueueSheet = false },
                 onSkipToIndex = onSkipToIndex,
                 onRemoveFromQueue = onRemoveFromQueue,
@@ -788,7 +760,6 @@ fun PlayerSheet(
                 onArtistTap = onArtistTap,
                 onAlbumTap = onAlbumTap,
                 crossfadeEnabled = crossfadeEnabled,
-                crossfadeLockActive = showCrossfadeCue
             )
         }
 
@@ -859,11 +830,6 @@ fun PlayerSheet(
         }
 
         // ── Mini player with horizontal swipe ──
-        val progress = if (state.durationMs > 0) positionMs.toFloat() / state.durationMs else 0f
-        val miniArtAlpha = if (hideBaseArtDuringExpandMorph) 0f else 1f
-        val density = LocalDensity.current
-        val swipeThresholdPx = with(density) { 80.dp.toPx() }
-        val miniSwipeOffset = remember { Animatable(0f) }
         val miniContainerColor = remember(mediaPalette.middle, mediaPalette.bottom) {
             opaqueColorForWhiteForeground(
                 lerp(mediaPalette.middle, mediaPalette.bottom, 0.48f).copy(alpha = 1f)
@@ -871,143 +837,28 @@ fun PlayerSheet(
         }
         val miniTitleColor = readableContentColor(miniContainerColor)
         val miniSubtitleColor = miniTitleColor.copy(alpha = 0.78f)
-
-        val miniInteractionsEnabled = !isExpanded
-        val effectiveMiniContentAlpha = miniContentAlpha
-        Row(
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .zIndex(if (clampedExpandProgress < 0.35f) 2f else 0f)
-                .fillMaxWidth()
-                .height(miniPlayerHeight)
-                .graphicsLayer {
-                    alpha = effectiveMiniContentAlpha
-                    translationX = miniSwipeOffset.value
-                }
-                .pointerInput(miniInteractionsEnabled) {
-                    if (!miniInteractionsEnabled) return@pointerInput
-                    detectHorizontalDragGestures(
-                        onDragEnd = {
-                            coroutineScope.launch {
-                                if (miniSwipeOffset.value.absoluteValue > swipeThresholdPx) {
-                                    val goingLeft = miniSwipeOffset.value < 0
-                                    miniSwipeOffset.animateTo(
-                                        targetValue = if (goingLeft) -size.width.toFloat() else size.width.toFloat(),
-                                        animationSpec = tween(150)
-                                    )
-                                    if (goingLeft) onSkipNext() else onSkipPrev()
-                                    miniSwipeOffset.snapTo(if (goingLeft) size.width.toFloat() else -size.width.toFloat())
-                                    miniSwipeOffset.animateTo(0f, animationSpec = tween(200))
-                                } else {
-                                    miniSwipeOffset.animateTo(0f, animationSpec = spring())
-                                }
-                            }
-                        },
-                        onDragCancel = {
-                            coroutineScope.launch { miniSwipeOffset.animateTo(0f, spring()) }
-                        },
-                        onHorizontalDrag = { _, dragAmount ->
-                            coroutineScope.launch {
-                                miniSwipeOffset.snapTo(miniSwipeOffset.value + dragAmount)
-                            }
-                        }
-                    )
-                },
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Surface(
-                modifier = Modifier.fillMaxSize(),
-                shape = RectangleShape,
-                color = miniContainerColor,
-                tonalElevation = 0.dp,
-                shadowElevation = 0.dp
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clickable(
-                                enabled = miniInteractionsEnabled,
-                                indication = null,
-                                interactionSource = remember { MutableInteractionSource() },
-                                onClick = onExpand
-                            ),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier.size(44.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            CircularProgressIndicator(
-                                progress = { progress.coerceIn(0f, 1f) },
-                                modifier = Modifier.fillMaxSize(),
-                                color = miniTitleColor.copy(alpha = 0.92f),
-                                trackColor = miniTitleColor.copy(alpha = 0.18f),
-                                strokeWidth = 3.dp
-                            )
-                            AsyncImage(
-                                model = artworkUrl,
-                                contentDescription = null,
-                                modifier = Modifier
-                                    .size(32.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .graphicsLayer { alpha = miniArtAlpha }
-                                    .onGloballyPositioned { coordinates ->
-                                        miniArtBounds = boundsInContainer(shellCoordinates, coordinates)
-                                    },
-                                contentScale = ContentScale.Crop
-                            )
-                        }
-
-                        Spacer(Modifier.width(14.dp))
-                        AnimatedContent(
-                            targetState = item,
-                            transitionSpec = {
-                                fadeIn(tween(200)) togetherWith fadeOut(tween(150))
-                            },
-                            contentKey = { it.videoId },
-                            label = "mini-info"
-                        ) { animItem ->
-                            Column {
-                                Text(
-                                    text = animItem.title,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = FontWeight.Medium,
-                                    color = miniTitleColor,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Text(
-                                    text = animItem.artistName,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = miniSubtitleColor,
-                                    maxLines = 1
-                                )
-                            }
-                        }
-                    }
-                    IconButton(onClick = onPlayPause, enabled = miniInteractionsEnabled) {
-                        Icon(
-                            imageVector = if (state.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                            contentDescription = "Play/Pause",
-                            tint = miniTitleColor
-                        )
-                    }
-                    IconButton(onClick = onSkipNext, enabled = miniInteractionsEnabled) {
-                        Icon(
-                            Icons.Rounded.SkipNext,
-                            contentDescription = "Next",
-                            tint = miniTitleColor
-                        )
-                    }
-                }
+        MiniPlayerBar(
+            positionMsFlow = positionMsFlow,
+            durationMs = state.durationMs,
+            item = item,
+            artworkUrl = artworkUrl,
+            isPlaying = state.isPlaying,
+            isExpanded = isExpanded,
+            miniPlayerHeight = miniPlayerHeight,
+            miniContentAlpha = miniContentAlpha,
+            clampedExpandProgress = clampedExpandProgress,
+            miniContainerColor = miniContainerColor,
+            miniTitleColor = miniTitleColor,
+            miniSubtitleColor = miniSubtitleColor,
+            miniArtAlpha = if (hideBaseArtDuringExpandMorph) 0f else 1f,
+            onExpand = onExpand,
+            onPlayPause = onPlayPause,
+            onSkipNext = onSkipNext,
+            onSkipPrev = onSkipPrev,
+            onMiniArtPositioned = { coordinates ->
+                miniArtBounds = boundsInContainer(shellCoordinates, coordinates)
             }
-        }
+        )
 
         // ── Expand/collapse morphing album art overlay ──
         val startBounds = miniArtBounds
@@ -1035,6 +886,310 @@ fun PlayerSheet(
     }
 }
 
+@Composable
+private fun ExpandedPlaybackProgressSection(
+    positionMsFlow: StateFlow<Long>,
+    durationMs: Long,
+    durationText: String?,
+    crossfadeEnabled: Boolean,
+    hasNextTrack: Boolean,
+    onSeek: (Long) -> Unit,
+    playbackAccent: Color,
+    onSurface: Color,
+    modifier: Modifier = Modifier
+) {
+    val positionMs by positionMsFlow.collectAsStateWithLifecycle()
+    val playbackProgress = playbackProgress(positionMs, durationMs)
+
+    Column(modifier = modifier) {
+        SeekablePlaybackBar(
+            progress = playbackProgress,
+            durationMs = durationMs,
+            onSeek = onSeek,
+            modifier = Modifier.fillMaxWidth(),
+            color = playbackAccent,
+            trackColor = Color(0xFF4A4A4A),
+            trackHeight = 6.dp,
+            thumbSize = 14.dp
+        )
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = formatMs(positionMs),
+                style = MaterialTheme.typography.labelSmall,
+                color = onSurface.copy(alpha = 0.85f)
+            )
+            Text(
+                text = if (durationMs > 0) formatMs(durationMs) else (durationText ?: ""),
+                style = MaterialTheme.typography.labelSmall,
+                color = onSurface.copy(alpha = 0.85f)
+            )
+        }
+
+        CrossfadeCountdownCue(
+            visible = showCrossfadeCue(
+                positionMs = positionMs,
+                durationMs = durationMs,
+                crossfadeEnabled = crossfadeEnabled,
+                hasNextTrack = hasNextTrack
+            ),
+            accentColor = playbackAccent,
+            modifier = Modifier
+                .padding(top = 6.dp)
+                .fillMaxWidth()
+        )
+    }
+}
+
+@Composable
+private fun LyricsContentHost(
+    positionMsFlow: StateFlow<Long>,
+    lyricsStateFlow: StateFlow<LyricsState>,
+    durationMs: Long,
+    isPlaying: Boolean,
+    artworkUrl: String?,
+    compactArtAlpha: Float,
+    controlsAlpha: Float,
+    listAlpha: Float,
+    onSeek: (Long) -> Unit,
+    onSkipPrev: () -> Unit,
+    onSkipNext: () -> Unit,
+    onPlayPause: () -> Unit,
+    onExitLyrics: () -> Unit,
+    onCompactArtPositioned: (LayoutCoordinates) -> Unit,
+    primary: Color,
+    playbackAccent: Color,
+    onPlaybackAccent: Color,
+    onSurface: Color,
+    onSurfaceVariant: Color
+) {
+    val positionMs by positionMsFlow.collectAsStateWithLifecycle()
+    val lyricsState by lyricsStateFlow.collectAsStateWithLifecycle()
+
+    LyricsContent(
+        lyricsState = lyricsState,
+        positionMs = positionMs,
+        durationMs = durationMs,
+        isPlaying = isPlaying,
+        artworkUrl = artworkUrl,
+        compactArtAlpha = compactArtAlpha,
+        controlsAlpha = controlsAlpha,
+        listAlpha = listAlpha,
+        onSeek = onSeek,
+        onSkipPrev = onSkipPrev,
+        onSkipNext = onSkipNext,
+        onPlayPause = onPlayPause,
+        onExitLyrics = onExitLyrics,
+        onCompactArtPositioned = onCompactArtPositioned,
+        primary = primary,
+        playbackAccent = playbackAccent,
+        onPlaybackAccent = onPlaybackAccent,
+        onSurface = onSurface,
+        onSurfaceVariant = onSurfaceVariant
+    )
+}
+
+@Composable
+private fun QueueActionSheetHost(
+    queue: PlaybackQueue,
+    positionMsFlow: StateFlow<Long>,
+    durationMs: Long,
+    onDismiss: () -> Unit,
+    onSkipToIndex: (Int) -> Unit,
+    onRemoveFromQueue: (Int) -> Unit,
+    onMoveInQueue: (Int, Int) -> Unit,
+    onArtistTap: (String, String, String?) -> Unit,
+    onAlbumTap: (String, String, String?) -> Unit,
+    crossfadeEnabled: Boolean = false
+) {
+    val positionMs by positionMsFlow.collectAsStateWithLifecycle()
+
+    QueueActionSheet(
+        queue = queue,
+        onDismiss = onDismiss,
+        onSkipToIndex = onSkipToIndex,
+        onRemoveFromQueue = onRemoveFromQueue,
+        onMoveInQueue = onMoveInQueue,
+        onArtistTap = onArtistTap,
+        onAlbumTap = onAlbumTap,
+        crossfadeEnabled = crossfadeEnabled,
+        crossfadeLockActive = showCrossfadeCue(
+            positionMs = positionMs,
+            durationMs = durationMs,
+            crossfadeEnabled = crossfadeEnabled,
+            hasNextTrack = queue.currentIndex + 1 < queue.items.size
+        )
+    )
+}
+
+@Composable
+private fun BoxScope.MiniPlayerBar(
+    positionMsFlow: StateFlow<Long>,
+    durationMs: Long,
+    item: MediaItem,
+    artworkUrl: String?,
+    isPlaying: Boolean,
+    isExpanded: Boolean,
+    miniPlayerHeight: Dp,
+    miniContentAlpha: Float,
+    clampedExpandProgress: Float,
+    miniContainerColor: Color,
+    miniTitleColor: Color,
+    miniSubtitleColor: Color,
+    miniArtAlpha: Float,
+    onExpand: () -> Unit,
+    onPlayPause: () -> Unit,
+    onSkipNext: () -> Unit,
+    onSkipPrev: () -> Unit,
+    onMiniArtPositioned: (LayoutCoordinates) -> Unit
+) {
+    val positionMs by positionMsFlow.collectAsStateWithLifecycle()
+    val progress = playbackProgress(positionMs, durationMs)
+    val density = LocalDensity.current
+    val swipeThresholdPx = with(density) { 80.dp.toPx() }
+    val miniSwipeOffset = remember { Animatable(0f) }
+    val coroutineScope = rememberCoroutineScope()
+    val miniInteractionsEnabled = !isExpanded
+
+    Row(
+        modifier = Modifier
+            .align(Alignment.TopCenter)
+            .zIndex(if (clampedExpandProgress < 0.35f) 2f else 0f)
+            .fillMaxWidth()
+            .height(miniPlayerHeight)
+            .graphicsLayer {
+                alpha = miniContentAlpha
+                translationX = miniSwipeOffset.value
+            }
+            .pointerInput(miniInteractionsEnabled) {
+                if (!miniInteractionsEnabled) return@pointerInput
+                detectHorizontalDragGestures(
+                    onDragEnd = {
+                        coroutineScope.launch {
+                            if (miniSwipeOffset.value.absoluteValue > swipeThresholdPx) {
+                                val goingLeft = miniSwipeOffset.value < 0
+                                miniSwipeOffset.animateTo(
+                                    targetValue = if (goingLeft) -size.width.toFloat() else size.width.toFloat(),
+                                    animationSpec = tween(150)
+                                )
+                                if (goingLeft) onSkipNext() else onSkipPrev()
+                                miniSwipeOffset.snapTo(if (goingLeft) size.width.toFloat() else -size.width.toFloat())
+                                miniSwipeOffset.animateTo(0f, animationSpec = tween(200))
+                            } else {
+                                miniSwipeOffset.animateTo(0f, animationSpec = spring())
+                            }
+                        }
+                    },
+                    onDragCancel = {
+                        coroutineScope.launch { miniSwipeOffset.animateTo(0f, spring()) }
+                    },
+                    onHorizontalDrag = { _, dragAmount ->
+                        coroutineScope.launch {
+                            miniSwipeOffset.snapTo(miniSwipeOffset.value + dragAmount)
+                        }
+                    }
+                )
+            },
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            shape = RectangleShape,
+            color = miniContainerColor,
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable(
+                            enabled = miniInteractionsEnabled,
+                            indication = null,
+                            interactionSource = remember { MutableInteractionSource() },
+                            onClick = onExpand
+                        ),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier.size(44.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(
+                            progress = { progress },
+                            modifier = Modifier.fillMaxSize(),
+                            color = miniTitleColor.copy(alpha = 0.92f),
+                            trackColor = miniTitleColor.copy(alpha = 0.18f),
+                            strokeWidth = 3.dp
+                        )
+                        AsyncImage(
+                            model = artworkUrl,
+                            contentDescription = null,
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .graphicsLayer { alpha = miniArtAlpha }
+                                .onGloballyPositioned(onMiniArtPositioned),
+                            contentScale = ContentScale.Crop
+                        )
+                    }
+
+                    Spacer(Modifier.width(14.dp))
+                    AnimatedContent(
+                        targetState = item,
+                        transitionSpec = {
+                            fadeIn(tween(200)) togetherWith fadeOut(tween(150))
+                        },
+                        contentKey = { it.videoId },
+                        label = "mini-info"
+                    ) { animItem ->
+                        Column {
+                            Text(
+                                text = animItem.title,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium,
+                                color = miniTitleColor,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = animItem.artistName,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = miniSubtitleColor,
+                                maxLines = 1
+                            )
+                        }
+                    }
+                }
+                IconButton(onClick = onPlayPause, enabled = miniInteractionsEnabled) {
+                    Icon(
+                        imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                        contentDescription = "Play/Pause",
+                        tint = miniTitleColor
+                    )
+                }
+                IconButton(onClick = onSkipNext, enabled = miniInteractionsEnabled) {
+                    Icon(
+                        Icons.Rounded.SkipNext,
+                        contentDescription = "Next",
+                        tint = miniTitleColor
+                    )
+                }
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun QueueActionSheet(
@@ -1051,6 +1206,7 @@ private fun QueueActionSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     ModalBottomSheet(
+        modifier = Modifier.statusBarsPadding(),
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         shape = RectangleShape,
@@ -1058,45 +1214,40 @@ private fun QueueActionSheet(
         scrimColor = Color.Black.copy(alpha = 0.32f),
         tonalElevation = 0.dp,
         dragHandle = null,
-        contentWindowInsets = { androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0) }
+        contentWindowInsets = { WindowInsets(0, 0, 0, 0) }
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .statusBarsPadding()
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Spacer(modifier = Modifier.weight(1f))
-                IconButton(
-                    onClick = onDismiss,
-                    modifier = Modifier.size(32.dp)
+        QueueContent(
+            queue = queue,
+            onSkipToIndex = onSkipToIndex,
+            onRemoveFromQueue = onRemoveFromQueue,
+            onMoveInQueue = onMoveInQueue,
+            onArtistTap = onArtistTap,
+            onAlbumTap = onAlbumTap,
+            onQueueActionConsumed = onDismiss,
+            crossfadeEnabled = crossfadeEnabled,
+            crossfadeLockActive = crossfadeLockActive,
+            headerContent = {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Close,
-                        contentDescription = "Close queue",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Spacer(modifier = Modifier.weight(1f))
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Close,
+                            contentDescription = "Close queue",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
-            }
-
-            QueueContent(
-                queue = queue,
-                onSkipToIndex = onSkipToIndex,
-                onRemoveFromQueue = onRemoveFromQueue,
-                onMoveInQueue = onMoveInQueue,
-                onArtistTap = onArtistTap,
-                onAlbumTap = onAlbumTap,
-                onQueueActionConsumed = onDismiss,
-                crossfadeEnabled = crossfadeEnabled,
-                crossfadeLockActive = crossfadeLockActive,
-                modifier = Modifier.weight(1f)
-            )
-        }
+            },
+            modifier = Modifier.fillMaxSize()
+        )
     }
 }
 
@@ -1595,6 +1746,25 @@ private fun boundsInContainer(
         right = topLeft.x + width,
         bottom = topLeft.y + height
     )
+}
+
+private fun playbackProgress(positionMs: Long, durationMs: Long): Float {
+    return if (durationMs > 0L) {
+        (positionMs.toFloat() / durationMs).coerceIn(0f, 1f)
+    } else {
+        0f
+    }
+}
+
+private fun showCrossfadeCue(
+    positionMs: Long,
+    durationMs: Long,
+    crossfadeEnabled: Boolean,
+    hasNextTrack: Boolean
+): Boolean {
+    if (!crossfadeEnabled || !hasNextTrack || durationMs <= 0L) return false
+    val remainingMs = (durationMs - positionMs).coerceAtLeast(0L)
+    return remainingMs in 1L..CROSSFADE_UI_LEAD_MS
 }
 
 private fun lerpFloat(start: Float, end: Float, fraction: Float): Float {

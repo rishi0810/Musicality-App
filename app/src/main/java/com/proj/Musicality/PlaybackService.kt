@@ -9,6 +9,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import com.proj.Musicality.crossfade.CrossfadeDelegatingPlayer
+import com.proj.Musicality.util.shouldRestartCurrentTrack
 import kotlinx.coroutines.flow.MutableSharedFlow
 
 @UnstableApi
@@ -31,6 +32,16 @@ class PlaybackService : MediaSessionService() {
         delegatingPlayer = crossfadePlayer
 
         val forwarding = object : ForwardingPlayer(crossfadePlayer) {
+            fun handlePreviousTransportCommand(source: String) {
+                if (shouldRestartCurrentTrack(currentPosition)) {
+                    Log.d(TAG, "$source: restart current track")
+                    seekTo(0)
+                } else {
+                    Log.d(TAG, "$source: previous track")
+                    skipEvents.tryEmit(-1)
+                }
+            }
+
             override fun seekToNext() {
                 Log.d(TAG, "seekToNext (notification)")
                 skipEvents.tryEmit(1)
@@ -42,17 +53,11 @@ class PlaybackService : MediaSessionService() {
             }
 
             override fun seekToPrevious() {
-                if (currentPosition > 3000) {
-                    seekTo(0)
-                } else {
-                    Log.d(TAG, "seekToPrevious (notification)")
-                    skipEvents.tryEmit(-1)
-                }
+                handlePreviousTransportCommand("seekToPrevious (notification)")
             }
 
             override fun seekToPreviousMediaItem() {
-                Log.d(TAG, "seekToPreviousMediaItem (notification)")
-                skipEvents.tryEmit(-1)
+                handlePreviousTransportCommand("seekToPreviousMediaItem (notification)")
             }
 
             override fun hasNextMediaItem(): Boolean = true

@@ -3,14 +3,18 @@ package com.proj.Musicality.cache
 import android.content.Context
 import android.util.Log
 import com.proj.Musicality.api.StreamRequestResolver
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
 /**
@@ -34,37 +38,50 @@ object AudioFileCache {
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
         .build()
+    private val downloadScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val stateLock = Any()
+    private val inFlightDownloads = ConcurrentHashMap<String, kotlinx.coroutines.Deferred<File?>>()
 
     /** videoId → File, ordered by access time (most recent last). */
     private val fileMap = LinkedHashMap<String, File>(MAX_CACHED_FILES + 2, 0.75f, true)
-    private val downloadMutex = Mutex()
 
     /** Video IDs that should not be evicted (current + next during crossfade). */
     private val pinned = mutableSetOf<String>()
 
     fun init(context: Context) {
-        cacheDir = File(context.cacheDir, CACHE_DIR_NAME).apply { mkdirs() }
-        // Index any files left from a previous session
-        cacheDir.listFiles()?.forEach { file ->
-            val videoId = file.nameWithoutExtension
-            fileMap[videoId] = file
+        synchronized(stateLock) {
+            cacheDir = File(context.cacheDir, CACHE_DIR_NAME).apply { mkdirs() }
+            fileMap.clear()
+            // Rebuild LRU order from disk so eviction prefers the oldest files first.
+            cacheDir.listFiles()
+                ?.sortedBy { it.lastModified() }
+                ?.forEach { file ->
+                    val videoId = file.nameWithoutExtension
+                    fileMap[videoId] = file
+                }
         }
         Log.d(TAG, "Initialized with ${fileMap.size} cached files")
     }
 
     /** Pin a videoId so it won't be evicted. Call for current + next track. */
     fun pin(videoId: String) {
-        pinned.add(videoId)
+        synchronized(stateLock) {
+            pinned.add(videoId)
+        }
     }
 
     /** Unpin a videoId (e.g., after song change). */
     fun unpin(videoId: String) {
-        pinned.remove(videoId)
+        synchronized(stateLock) {
+            pinned.remove(videoId)
+        }
     }
 
     /** Unpin all and optionally evict everything except [keep]. */
     fun unpinAll() {
-        pinned.clear()
+        synchronized(stateLock) {
+            pinned.clear()
+        }
     }
 
     /**
@@ -73,76 +90,102 @@ object AudioFileCache {
      * Thread-safe — concurrent calls for the same videoId will not duplicate work.
      */
     suspend fun getOrDownload(videoId: String): File? = withContext(Dispatchers.IO) {
-        // Fast path: already cached
-        val existing = fileMap[videoId]
-        if (existing != null && existing.exists() && existing.length() > 0) {
-            Log.d(TAG, "CACHE HIT for '$videoId' (${existing.length() / 1024}KB)")
-            return@withContext existing
+        synchronized(stateLock) {
+            existingCachedFileLocked(videoId)?.let { existing ->
+                Log.d(TAG, "CACHE HIT for '$videoId' (${existing.length() / 1024}KB)")
+                return@withContext existing
+            }
         }
 
-        // Serialize downloads to avoid duplicate fetches
-        downloadMutex.withLock {
-            // Re-check after acquiring lock
-            val recheck = fileMap[videoId]
-            if (recheck != null && recheck.exists() && recheck.length() > 0) {
-                return@withLock recheck
-            }
+        val newDownload = downloadScope.async(start = CoroutineStart.LAZY) {
+            downloadAndCache(videoId)
+        }
+        val activeDownload = inFlightDownloads.putIfAbsent(videoId, newDownload)
+        val download = if (activeDownload == null) {
+            newDownload.apply { start() }
+        } else {
+            newDownload.cancel()
+            activeDownload
+        }
 
-            // Resolve stream URL
-            val streamUrl = resolveStreamUrl(videoId) ?: return@withLock null
-
-            // Download full file (use range=0- to get everything)
-            val downloadUrl = streamUrl.withFullRange()
-            Log.d(TAG, "Downloading full audio for '$videoId'...")
-
-            val request = Request.Builder().url(downloadUrl).build()
-            val file = runCatching {
-                client.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) {
-                        Log.e(TAG, "Download failed: HTTP ${response.code} for '$videoId'")
-                        return@use null
-                    }
-                    val body = response.body ?: return@use null
-                    val ext = extensionFromContentType(response.header("Content-Type"))
-                    val outputFile = File(cacheDir, "$videoId.$ext")
-
-                    body.byteStream().use { input ->
-                        outputFile.outputStream().use { output ->
-                            input.copyTo(output)
-                        }
-                    }
-                    Log.d(TAG, "Downloaded '$videoId': ${outputFile.length() / 1024}KB")
-                    outputFile
-                }
-            }.onFailure {
-                Log.e(TAG, "Download exception for '$videoId'", it)
-            }.getOrNull()
-
-            if (file != null && file.exists() && file.length() > 0) {
-                fileMap[videoId] = file
-                evictIfNeeded()
-                file
-            } else {
-                null
+        try {
+            download.await()
+        } finally {
+            if (activeDownload == null) {
+                inFlightDownloads.remove(videoId, download)
             }
         }
     }
 
     /** Remove cached file for a specific videoId. */
     fun remove(videoId: String) {
-        fileMap.remove(videoId)?.let { file ->
+        val removed = synchronized(stateLock) {
+            pinned.remove(videoId)
+            fileMap.remove(videoId)
+        }
+        removed?.let { file ->
             runCatching { file.delete() }
         }
     }
 
     /** Clear all cached files. */
     fun clearAll() {
-        fileMap.values.forEach { file -> runCatching { file.delete() } }
-        fileMap.clear()
-        pinned.clear()
+        val files = synchronized(stateLock) {
+            val snapshot = fileMap.values.toList()
+            fileMap.clear()
+            pinned.clear()
+            snapshot
+        }
+        files.forEach { file -> runCatching { file.delete() } }
     }
 
-    private fun evictIfNeeded() {
+    private suspend fun downloadAndCache(videoId: String): File? {
+        synchronized(stateLock) {
+            existingCachedFileLocked(videoId)?.let { existing ->
+                Log.d(TAG, "CACHE HIT for '$videoId' (${existing.length() / 1024}KB)")
+                return existing
+            }
+        }
+
+        val streamUrl = resolveStreamUrl(videoId) ?: return null
+        val downloadUrl = streamUrl.withFullRange()
+        Log.d(TAG, "Downloading full audio for '$videoId'...")
+
+        val request = Request.Builder().url(downloadUrl).build()
+        val file = runCatching {
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    Log.e(TAG, "Download failed: HTTP ${response.code} for '$videoId'")
+                    return@use null
+                }
+                val body = response.body ?: return@use null
+                val ext = extensionFromContentType(response.header("Content-Type"))
+                val outputFile = File(cacheDir, "$videoId.$ext")
+
+                body.byteStream().use { input ->
+                    outputFile.outputStream().use { output ->
+                        input.copyTo(output)
+                    }
+                }
+                Log.d(TAG, "Downloaded '$videoId': ${outputFile.length() / 1024}KB")
+                outputFile
+            }
+        }.onFailure {
+            Log.e(TAG, "Download exception for '$videoId'", it)
+        }.getOrNull()
+
+        if (file != null && file.exists() && file.length() > 0) {
+            synchronized(stateLock) {
+                fileMap[videoId] = file
+                evictIfNeededLocked()
+            }
+            return file
+        }
+
+        return null
+    }
+
+    private fun evictIfNeededLocked() {
         while (fileMap.size > MAX_CACHED_FILES) {
             // Find the oldest (first) entry that is not pinned
             val victim = fileMap.entries.firstOrNull { it.key !in pinned }
@@ -154,6 +197,16 @@ object AudioFileCache {
                 break // All entries are pinned, can't evict
             }
         }
+    }
+
+    private fun existingCachedFileLocked(videoId: String): File? {
+        val existing = fileMap[videoId] ?: return null
+        if (existing.exists() && existing.length() > 0) {
+            return existing
+        }
+        fileMap.remove(videoId)
+        runCatching { existing.delete() }
+        return null
     }
 
     private suspend fun resolveStreamUrl(videoId: String): String? {

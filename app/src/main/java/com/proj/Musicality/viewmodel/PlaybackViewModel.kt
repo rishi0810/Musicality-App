@@ -23,10 +23,12 @@ import com.proj.Musicality.data.model.LyricsState
 import com.proj.Musicality.data.model.MediaItem
 import com.proj.Musicality.data.model.PlaybackQueue
 import com.proj.Musicality.data.model.QueueSource
+import com.proj.Musicality.data.resolver.SongArtResolver
 import com.proj.Musicality.crossfade.CrossfadeNextTrack
 import com.proj.Musicality.crossfade.CrossfadeDelegatingPlayer
 import com.proj.Musicality.data.parser.NextParser
 import com.proj.Musicality.crossfade.SimpleCrossfadeManager
+import com.proj.Musicality.util.shouldRestartCurrentTrack
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -193,22 +195,24 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun playQueue(queue: PlaybackQueue) {
-        val item = queue.items[queue.currentIndex]
-        Log.d(TAG, "playQueue: index=${queue.currentIndex}, videoId='${item.videoId}', title='${item.title}'")
-        _state.update {
-            it.copy(
-                currentItem = item,
-                queue = queue,
-                isPlaying = false,
-                durationMs = 0L
-            )
-        }
-        _positionMs.value = 0L
-        fetchAndPlay(item)
-        if (queue.source == QueueSource.SINGLE || queue.source == QueueSource.SEARCH) {
-            loadUpNextQueue(item.videoId)
-        } else {
-            prefetchNext(queue)
+        viewModelScope.launch {
+            val item = queue.items[queue.currentIndex]
+            Log.d(TAG, "playQueue: index=${queue.currentIndex}, videoId='${item.videoId}', title='${item.title}'")
+            _state.update {
+                it.copy(
+                    currentItem = item,
+                    queue = queue,
+                    isPlaying = false,
+                    durationMs = 0L
+                )
+            }
+            _positionMs.value = 0L
+            fetchAndPlay(item)
+            if (queue.source == QueueSource.SINGLE || queue.source == QueueSource.SEARCH) {
+                loadUpNextQueue(item.videoId)
+            } else {
+                prefetchNext(queue)
+            }
         }
     }
 
@@ -216,6 +220,29 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         Log.d(TAG, "playSingle: videoId='${item.videoId}', title='${item.title}'")
         val queue = PlaybackQueue(listOf(item), 0, QueueSource.SINGLE)
         playQueue(queue)
+    }
+
+    private suspend fun resolveQueueHeadToAtv(queue: PlaybackQueue): PlaybackQueue {
+        if (queue.items.isEmpty() || queue.currentIndex !in queue.items.indices) return queue
+        val currentItem = queue.items[queue.currentIndex]
+        val resolution = runCatching {
+            SongArtResolver.resolveToAtv(currentItem)
+        }.getOrNull() ?: return queue
+
+        val resolvedVideoId = resolution.videoId.takeIf { it.isNotBlank() } ?: currentItem.videoId
+        val resolvedThumb = resolution.thumbnailUrl ?: currentItem.thumbnailUrl
+        val resolvedType = resolution.musicVideoType ?: currentItem.musicVideoType
+
+        val resolvedItem = currentItem.copy(
+            videoId = resolvedVideoId,
+            thumbnailUrl = resolvedThumb,
+            musicVideoType = resolvedType
+        )
+        if (resolvedItem == currentItem) return queue
+
+        val updated = queue.items.toMutableList()
+        updated[queue.currentIndex] = resolvedItem
+        return queue.copy(items = updated)
     }
 
     fun skipNext() {
@@ -317,12 +344,9 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         crossfadeManager.cancelTransition()
         val current = _state.value
         val effectivePlayer = activePlayer()
-        if (effectivePlayer != null && effectivePlayer.currentPosition > 3000) {
-            val currentItem = current.currentItem
-            if (currentItem != null) {
-                _positionMs.value = 0L
-                fetchAndPlay(currentItem)
-            }
+        if (effectivePlayer != null && shouldRestartCurrentTrack(effectivePlayer.currentPosition)) {
+            effectivePlayer.seekTo(0L)
+            _positionMs.value = 0L
             return
         }
         val prev = current.queue.currentIndex - 1

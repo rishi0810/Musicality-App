@@ -156,6 +156,71 @@ object SearchParser {
         }
     }
 
+    fun extractAll(jsonResponse: String): List<AllResult> {
+        val response = JsonParser.instance.decodeFromString<SearchResultResponse>(jsonResponse)
+        val sections = response.contents?.tabbedSearchResultsRenderer?.tabs?.firstOrNull()
+            ?.tabRenderer?.content?.sectionListRenderer?.contents ?: emptyList()
+
+        val results = mutableListOf<AllResult>()
+
+        for (section in sections) {
+            val topCard = section.musicCardShelfRenderer
+            if (topCard != null) {
+                val title = topCard.title?.runs?.firstOrNull()?.text ?: ""
+                val subtitleRuns = topCard.subtitle?.runs ?: emptyList()
+                val subtitle = subtitleRuns.joinToString("") { it.text }
+                val typeText = subtitleRuns.firstOrNull()?.text ?: "Top Result"
+
+                val id = topCard.title?.runs?.firstOrNull()?.navigationEndpoint?.watchEndpoint?.videoId
+                    ?: topCard.title?.runs?.firstOrNull()?.navigationEndpoint?.browseEndpoint?.browseId
+                    ?: topCard.buttons?.firstOrNull()?.buttonRenderer?.command?.watchEndpoint?.videoId
+                    ?: topCard.buttons?.firstOrNull()?.buttonRenderer?.command?.watchPlaylistEndpoint?.playlistId
+                    ?: ""
+
+                val thumb = bestThumbUrl(
+                    (topCard.thumbnail?.musicThumbnailRenderer?.thumbnailImage
+                        ?: topCard.thumbnail?.musicThumbnailRenderer?.thumbnail)
+                        ?.thumbnails
+                )
+
+                results.add(AllResult(title, id, typeText, subtitle, thumb, isTopResult = true))
+            }
+
+            val shelf = section.musicShelfRenderer
+            if (shelf != null) {
+                val items = shelf.contents.mapNotNull { wrapper ->
+                    val item = wrapper.musicResponsiveListItemRenderer ?: return@mapNotNull null
+                    val cols = item.flexColumns ?: return@mapNotNull null
+
+                    val titleRuns = cols.getOrNull(0)?.musicResponsiveListItemFlexColumnRenderer?.text?.runs ?: emptyList()
+                    val title = titleRuns.firstOrNull()?.text ?: ""
+
+                    val navEndpoint = titleRuns.firstOrNull()?.navigationEndpoint
+                    val id = navEndpoint?.watchEndpoint?.videoId
+                        ?: navEndpoint?.watchPlaylistEndpoint?.playlistId
+                        ?: navEndpoint?.browseEndpoint?.browseId
+                        ?: item.navigationEndpoint?.browseEndpoint?.browseId
+                        ?: item.navigationEndpoint?.watchEndpoint?.videoId
+                        ?: ""
+
+                    val metadataRuns = cols.getOrNull(1)?.musicResponsiveListItemFlexColumnRenderer?.text?.runs ?: emptyList()
+                    val subtitle = metadataRuns.joinToString("") { it.text }
+                    val typeText = metadataRuns.firstOrNull()?.text ?: "Unknown"
+
+                    val thumb = bestThumbUrl(
+                        (item.thumbnail?.musicThumbnailRenderer?.thumbnailImage
+                            ?: item.thumbnail?.musicThumbnailRenderer?.thumbnail)
+                            ?.thumbnails
+                    )
+
+                    AllResult(title, id, typeText, subtitle, thumb, isTopResult = false)
+                }
+                results.addAll(items)
+            }
+        }
+        return results
+    }
+
     private fun bestThumbUrl(thumbnails: List<Thumbnail>?): String? {
         val highest = thumbnails?.maxByOrNull { it.width }?.url
         return upscaleThumbnail(highest, size = 544)

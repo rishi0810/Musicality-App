@@ -70,3 +70,13 @@ data class PlaylistResult(
     val countOrViews: String?,
     val thumb: String?
 )
+
+@Immutable
+data class AllResult(
+    val title: String,
+    val id: String,
+    val type: String,
+    val subtitle: String,
+    val thumb: String?,
+    val isTopResult: Boolean = false
+)

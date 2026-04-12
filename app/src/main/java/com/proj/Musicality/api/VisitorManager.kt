@@ -22,6 +22,7 @@ object VisitorManager {
         private set
 
     private const val PREFS_NAME = "visitor_prefs"
+    private const val KEY_UNIFIED = "visitor_id"
     private const val KEY_BROWSE = "browse_visitor_id"
     private const val KEY_STREAM = "stream_visitor_id"
     private var appContext: Context? = null
@@ -31,8 +32,12 @@ object VisitorManager {
     fun loadFromPrefs(context: Context) {
         appContext = context.applicationContext
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        browseVisitorId = prefs.getString(KEY_BROWSE, "") ?: ""
-        streamVisitorId = prefs.getString(KEY_STREAM, "") ?: ""
+        val unified = prefs.getString(KEY_UNIFIED, "") ?: ""
+        val browse = prefs.getString(KEY_BROWSE, "") ?: ""
+        val stream = prefs.getString(KEY_STREAM, "") ?: ""
+        val resolved = unified.ifBlank { browse.ifBlank { stream } }
+        browseVisitorId = resolved
+        streamVisitorId = resolved
         Log.d(TAG, "loadFromPrefs: browse='$browseVisitorId', stream='$streamVisitorId'")
         updateInitializedFlag()
     }
@@ -68,7 +73,7 @@ object VisitorManager {
             .onFailure { Log.e(TAG, "refreshBrowseVisitorId: fetch failed", it) }
             .getOrDefault("")
         if (fetched.isNotBlank()) {
-            browseVisitorId = fetched
+            setVisitorIds(fetched)
             persistToPrefs()
             updateInitializedFlag()
         }
@@ -76,15 +81,8 @@ object VisitorManager {
     }
 
     suspend fun refreshStreamVisitorId(): String = streamMutex.withLock {
-        val fetched = runCatching { RequestExecutor.fetchStreamVisitorId() }
-            .onFailure { Log.e(TAG, "refreshStreamVisitorId: fetch failed", it) }
-            .getOrDefault("")
-        if (fetched.isNotBlank()) {
-            streamVisitorId = fetched
-            persistToPrefs()
-            updateInitializedFlag()
-        }
-        streamVisitorId
+        // Stream calls now use the same SW-derived visitor ID as browse calls.
+        refreshBrowseVisitorId()
     }
 
     suspend fun validateAndRefreshStreamVisitorIdIfNeeded() = withContext(Dispatchers.IO) {
@@ -133,6 +131,21 @@ object VisitorManager {
         }.getOrDefault(first)
     }
 
+    suspend fun executeSearchAllRequestWithRecovery(query: String): String {
+        val initialId = ensureBrowseVisitorId()
+        if (initialId.isBlank()) return ""
+        val first = runCatching {
+            RequestExecutor.executeSearchAllRequest(query, initialId)
+        }.getOrDefault("")
+        if (first.isNotBlank()) return first
+
+        val refreshedId = refreshBrowseVisitorId()
+        if (refreshedId.isBlank() || refreshedId == initialId) return first
+        return runCatching {
+            RequestExecutor.executeSearchAllRequest(query, refreshedId)
+        }.getOrDefault(first)
+    }
+
     suspend fun executeSearchRequestWithRecovery(query: String, params: String): String {
         val initialId = ensureBrowseVisitorId()
         if (initialId.isBlank()) return ""
@@ -171,8 +184,14 @@ object VisitorManager {
         val ctx = appContext ?: return
         ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .edit()
+            .putString(KEY_UNIFIED, browseVisitorId)
             .putString(KEY_BROWSE, browseVisitorId)
             .putString(KEY_STREAM, streamVisitorId)
             .apply()
+    }
+
+    private fun setVisitorIds(visitorId: String) {
+        browseVisitorId = visitorId
+        streamVisitorId = visitorId
     }
 }

@@ -165,6 +165,51 @@ object RequestExecutor {
         }
     }
 
+    suspend fun executeSearchAllRequest(query: String, visitorId: String): String = withContext(Dispatchers.IO) {
+        val body = """
+            {
+                "context": {
+                    "client": {
+                        "clientName": "WEB_REMIX",
+                        "clientVersion": "1.20260213.01.00",
+                        "gl": "US",
+                        "hl": "en",
+                        "visitorData": "$visitorId"
+                    },
+                    "request": {
+                        "internalExperimentFlags": [],
+                        "useSsl": true
+                    },
+                    "user": {
+                        "lockedSafetyMode": false
+                    }
+                },
+                "query": "$query"
+            }
+        """.trimIndent().toRequestBody(jsonMediaType)
+
+        val request = Request.Builder()
+            .url(ApiConstants.SEARCH_URL + "?prettyPrint=false")
+            .addHeader("x-goog-api-format-version", "1")
+            .addHeader("x-youtube-client-name", "67")
+            .addHeader("x-youtube-client-version", "1.20260213.01.00")
+            .addHeader("x-origin", "https://music.youtube.com")
+            .addHeader("referer", "https://music.youtube.com/")
+            .addHeader("x-goog-visitor-id", visitorId)
+            .addHeader("user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0")
+            .addHeader("accept", "application/json")
+            .addHeader("accept-language", "en-US,en;q=0.9")
+            .addHeader("cache-control", "no-cache")
+            .addHeader("content-type", "application/json")
+            .post(body)
+            .build()
+
+        client.newCall(request).execute().use { response ->
+            response.body?.string() ?: ""
+        }
+    }
+
+
     suspend fun executeSuggestionRequest(input: String, visitorId: String): String = withContext(Dispatchers.IO) {
         val body = """
             {"context":{"client":{"clientName":"${ApiConstants.WEB_REMIX_CLIENT_NAME}","clientVersion":"${ApiConstants.WEB_REMIX_CLIENT_VERSION}","gl":"US","hl":"en","visitorData":"$visitorId"},"request":{"internalExperimentFlags":[],"useSsl":true},"user":{"lockedSafetyMode":false}},"input":"$input"}
@@ -401,36 +446,7 @@ object RequestExecutor {
     }
 
     suspend fun fetchStreamVisitorId(): String = withContext(Dispatchers.IO) {
-        Log.d(TAG, "fetchStreamVisitorId: fetching from ${ApiConstants.VISITOR_STREAM_URL}")
-        val body = """
-            {"context":{"client":{"clientName":"${ApiConstants.ANDROID_CLIENT_NAME}","clientVersion":"${ApiConstants.ANDROID_CLIENT_VERSION}","clientScreen":"WATCH","platform":"MOBILE","osName":"Android","osVersion":"16","androidSdkVersion":36,"hl":"en-GB","gl":"GB","utcOffsetMinutes":0},"request":{"internalExperimentFlags":[],"useSsl":true},"user":{"lockedSafetyMode":false}}}
-        """.trimIndent().toRequestBody(jsonMediaType)
-
-        val request = Request.Builder()
-            .url(ApiConstants.VISITOR_STREAM_URL)
-            .addHeader("user-agent", ApiConstants.ANDROID_USER_AGENT)
-            .addHeader("x-goog-api-format-version", "2")
-            .addHeader("content-type", "application/json")
-            .addHeader("accept-language", "en-GB, en;q=0.9")
-            .post(body)
-            .build()
-
-        val json = client.newCall(request).execute().use { response ->
-            val code = response.code
-            val respBody = response.body?.string() ?: ""
-            Log.d(TAG, "fetchStreamVisitorId: HTTP $code, body length=${respBody.length}")
-            Log.d(TAG, "fetchStreamVisitorId: response (first 300): ${respBody.take(300)}")
-            respBody
-        }
-
-        val result = runCatching {
-            com.proj.Musicality.data.parser.JsonParser.instance
-                .decodeFromString<com.proj.Musicality.data.json.VisitorIdResponse>(json)
-                .responseContext?.visitorData ?: ""
-        }.onFailure { Log.e(TAG, "fetchStreamVisitorId: JSON parse FAILED", it) }
-            .getOrDefault("")
-        Log.d(TAG, "fetchStreamVisitorId: result='${result.take(30)}...' (${result.length} chars)")
-        if (result.isBlank()) Log.e(TAG, "fetchStreamVisitorId: FAILED - no visitor ID extracted!")
-        result
+        Log.d(TAG, "fetchStreamVisitorId: using SW-based visitor ID extraction")
+        fetchBrowseVisitorId()
     }
 }

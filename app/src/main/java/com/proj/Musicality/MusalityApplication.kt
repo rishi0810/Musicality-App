@@ -9,24 +9,22 @@ import coil3.request.crossfade
 import com.proj.Musicality.api.IpLocationRepository
 import com.proj.Musicality.api.VisitorManager
 import com.proj.Musicality.viewmodel.HomePrefetchManager
-import kotlinx.coroutines.DelicateCoroutinesApi
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import okio.Path.Companion.toPath
 
 class MusalityApplication : Application(), SingletonImageLoader.Factory {
+    private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    @OptIn(DelicateCoroutinesApi::class)
     override fun onCreate() {
         super.onCreate()
         VisitorManager.loadFromPrefs(this)
-        GlobalScope.launch(Dispatchers.IO) {
+        applicationScope.launch {
             IpLocationRepository.fetchAndCacheOnce(this@MusalityApplication)
         }
-        GlobalScope.launch(Dispatchers.IO) {
-            HomePrefetchManager.prefetch(this@MusalityApplication)
-        }
+        HomePrefetchManager.prefetch(this)
     }
 
     override fun newImageLoader(context: android.content.Context): ImageLoader {

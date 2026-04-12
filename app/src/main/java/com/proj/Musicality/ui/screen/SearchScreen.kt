@@ -1,6 +1,8 @@
 package com.proj.Musicality.ui.screen
 
+import android.content.Context
 import android.content.Intent
+import android.view.inputmethod.InputMethodManager
 import android.widget.Toast
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibilityScope
@@ -10,8 +12,10 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -25,10 +29,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Album
 import androidx.compose.material.icons.rounded.Clear
@@ -62,10 +68,13 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -74,6 +83,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.proj.Musicality.api.SearchType
 import com.proj.Musicality.data.local.LibraryRepository
 import com.proj.Musicality.data.model.AlbumResult
+import com.proj.Musicality.data.model.AllResult
 import com.proj.Musicality.data.model.ArtistResult
 import com.proj.Musicality.data.model.MediaItem
 import com.proj.Musicality.data.model.PlaybackQueue
@@ -83,6 +93,7 @@ import com.proj.Musicality.data.model.SongResult
 import com.proj.Musicality.data.model.SuggestionType
 import com.proj.Musicality.data.model.VideoResult
 import com.proj.Musicality.data.model.toMediaItem
+import com.proj.Musicality.data.parser.MoodCategoryParser
 import com.proj.Musicality.ui.components.SongListItem
 import com.proj.Musicality.ui.theme.LocalPlaybackUiPalette
 import com.proj.Musicality.util.upscaleThumbnail
@@ -107,6 +118,7 @@ private data class SearchResultMenuModel(
 @Composable
 fun SearchScreen(
     animatedVisibilityScope: AnimatedVisibilityScope,
+    onBackToHome: () -> Unit,
     onSongTap: (MediaItem, PlaybackQueue) -> Unit,
     onPlayNext: (MediaItem) -> Unit,
     onAddToQueue: (MediaItem) -> Unit,
@@ -116,6 +128,7 @@ fun SearchScreen(
     onAlbumTap: (String, String, String?, String?) -> Unit,
     onAlbumMenuTap: (String, String, String?, String?) -> Unit,
     onPlaylistTap: (String, String, String?, String?) -> Unit,
+    onMoodTap: (MoodCategoryParser.Mood) -> Unit,
     collapsedMiniPlayerHeight: Dp = 0.dp,
     modifier: Modifier = Modifier
 ) {
@@ -139,7 +152,17 @@ fun SearchScreen(
     val scope = rememberCoroutineScope()
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
+    val view = LocalView.current
     var selectedResultMenu by remember { mutableStateOf<SearchResultMenuModel?>(null) }
+    var isSearchFieldFocused by remember { mutableStateOf(false) }
+    val dismissKeyboard = remember(focusManager, keyboardController, context, view) {
+        {
+            focusManager.clearFocus(force = true)
+            keyboardController?.hide()
+            val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+            imm?.hideSoftInputFromWindow(view.windowToken, 0)
+        }
+    }
 
     val querySuggestions = remember(suggestions) {
         suggestions.filter { it.type == SuggestionType.SUGGESTION }
@@ -147,66 +170,113 @@ fun SearchScreen(
     val richSuggestions = remember(suggestions) {
         suggestions.filter { it.type != SuggestionType.SUGGESTION && it.type != SuggestionType.UNKNOWN }
     }
+    val isInExploreDefaultState = query.isBlank() && !isSearchMode && !isSearchFieldFocused
+    val onSearchBarBack = remember(
+        isInExploreDefaultState,
+        dismissKeyboard,
+        onBackToHome,
+        viewModel
+    ) {
+        {
+            if (isInExploreDefaultState) {
+                dismissKeyboard()
+                onBackToHome()
+            } else {
+                // Return to embedded Explore default state from any active search state.
+                viewModel.onQueryChange("")
+                dismissKeyboard()
+                isSearchFieldFocused = false
+            }
+        }
+    }
 
     Column(modifier = modifier.fillMaxSize()) {
-        TextField(
-            value = query,
-            onValueChange = { viewModel.onQueryChange(it) },
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            placeholder = {
-                Text(
-                    "Search songs, artists, albums...",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            },
-            leadingIcon = {
+                .padding(horizontal = 14.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(50.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                    .clickable(onClick = onSearchBarBack),
+                contentAlignment = Alignment.Center
+            ) {
                 Icon(
-                    Icons.Rounded.Search,
-                    contentDescription = null,
+                    imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
+                    contentDescription = "Back to Home",
+                    modifier = Modifier.size(24.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-            },
-            trailingIcon = {
-                if (query.isNotEmpty()) {
-                    IconButton(onClick = { viewModel.onQueryChange("") }) {
-                        Icon(
-                            Icons.Rounded.Clear,
-                            contentDescription = "Clear",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+            }
+            Spacer(Modifier.width(8.dp))
+            TextField(
+                value = query,
+                onValueChange = { viewModel.onQueryChange(it) },
+                modifier = Modifier
+                    .weight(1f)
+                    .onFocusChanged { isSearchFieldFocused = it.isFocused },
+                placeholder = {
+                    Text(
+                        "Search songs, artists, albums...",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                },
+                trailingIcon = {
+                    if (query.isNotEmpty()) {
+                        IconButton(onClick = { viewModel.onQueryChange("") }) {
+                            Icon(
+                                Icons.Rounded.Clear,
+                                contentDescription = "Clear",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
-                }
-            },
-            singleLine = true,
-            shape = RoundedCornerShape(28.dp),
-            colors = TextFieldDefaults.colors(
-                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                unfocusedIndicatorColor = Color.Transparent,
-                focusedIndicatorColor = Color.Transparent
-            ),
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-            keyboardActions = KeyboardActions(onSearch = {
-                viewModel.onSubmit()
-                focusManager.clearFocus()
-                keyboardController?.hide()
-            })
-        )
+                },
+                singleLine = true,
+                shape = RoundedCornerShape(28.dp),
+                colors = TextFieldDefaults.colors(
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    unfocusedIndicatorColor = Color.Transparent,
+                    focusedIndicatorColor = Color.Transparent
+                ),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(onSearch = {
+                    dismissKeyboard()
+                    viewModel.onSubmit()
+                })
+            )
+        }
 
-        AnimatedContent(
-            targetState = isSearchMode,
-            transitionSpec = {
-                (fadeIn(motionScheme.defaultEffectsSpec()) +
-                    slideInVertically(motionScheme.fastSpatialSpec()) { it / 8 })
-                    .togetherWith(fadeOut(motionScheme.fastEffectsSpec()))
-            },
-            label = "search-mode"
-        ) { searchMode ->
-            if (searchMode) {
+        val showExploreDefault = isInExploreDefaultState
+        if (showExploreDefault) {
+            ExploreScreen(
+                modifier = Modifier.weight(1f),
+                animatedVisibilityScope = animatedVisibilityScope,
+                collapsedMiniPlayerHeight = collapsedMiniPlayerHeight,
+                onArtistTap = { name, id, thumb -> onArtistTap(name, id, thumb, null) },
+                onAlbumTap = onAlbumTap,
+                onPlaylistTap = onPlaylistTap,
+                onMoodTap = onMoodTap
+            )
+        } else {
+            AnimatedContent(
+                targetState = isSearchMode,
+                transitionSpec = {
+                    (fadeIn(motionScheme.defaultEffectsSpec()) +
+                        slideInVertically(motionScheme.fastSpatialSpec()) { it / 8 })
+                        .togetherWith(fadeOut(motionScheme.fastEffectsSpec()))
+                },
+                label = "search-mode"
+            ) { searchMode ->
+                if (searchMode) {
                 Column(modifier = Modifier.fillMaxSize()) {
                     val tabs = listOf(
+                        SearchType.ALL to "All",
                         SearchType.SONGS to "Songs",
                         SearchType.VIDEOS to "Videos",
                         SearchType.ARTISTS to "Artists",
@@ -248,6 +318,62 @@ fun SearchScreen(
                             contentPadding = PaddingValues(bottom = collapsedMiniPlayerHeight)
                         ) {
                             when (tab) {
+                                SearchType.ALL -> {
+                                    val allList = (currentResults as? List<*>)
+                                        ?.filterIsInstance<AllResult>()
+                                        .orEmpty()
+                                    // Group results by type, preserving order, with top result first
+                                    val topResults = allList.filter { it.isTopResult }
+                                    val grouped = allList.filter { !it.isTopResult }
+                                        .groupBy { it.type }
+
+                                    if (topResults.isNotEmpty()) {
+                                        item(key = "header-top-result") {
+                                            Text(
+                                                text = "Top result",
+                                                style = MaterialTheme.typography.titleMedium,
+                                                color = MaterialTheme.colorScheme.onSurface,
+                                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
+                                            )
+                                        }
+                                        items(topResults, key = { "top-${it.id}" }, contentType = { "all" }) { result ->
+                                            SongListItem(
+                                                title = result.title,
+                                                subtitle = result.subtitle,
+                                                thumbnailUrl = result.thumb,
+                                                onClick = {
+                                                    handleAllResultTap(
+                                                        result, onSongTap, onVideoTap, onArtistTap, onAlbumTap, onPlaylistTap
+                                                    )
+                                                }
+                                            )
+                                        }
+                                    }
+
+                                    grouped.forEach { (typeLabel, items) ->
+                                        item(key = "header-$typeLabel") {
+                                            Text(
+                                                text = typeLabel.replaceFirstChar { it.uppercase() },
+                                                style = MaterialTheme.typography.titleMedium,
+                                                color = MaterialTheme.colorScheme.onSurface,
+                                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
+                                            )
+                                        }
+                                        items(items, key = { "${it.type}-${it.id}" }, contentType = { "all" }) { result ->
+                                            SongListItem(
+                                                title = result.title,
+                                                subtitle = result.subtitle,
+                                                thumbnailUrl = result.thumb,
+                                                onClick = {
+                                                    handleAllResultTap(
+                                                        result, onSongTap, onVideoTap, onArtistTap, onAlbumTap, onPlaylistTap
+                                                    )
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+
                                 SearchType.SONGS -> {
                                     itemsIndexed(songList, key = { _, song -> song.videoId }, contentType = { _, _ -> "song" }) { index, song ->
                                         SongListItem(
@@ -448,8 +574,7 @@ fun SearchScreen(
                                 .clickable {
                                     viewModel.onQueryChange(suggestion.title)
                                     viewModel.onSubmit()
-                                    focusManager.clearFocus()
-                                    keyboardController?.hide()
+                                    dismissKeyboard()
                                 }
                                 .padding(horizontal = 16.dp, vertical = 14.dp),
                             verticalAlignment = Alignment.CenterVertically
@@ -521,6 +646,7 @@ fun SearchScreen(
                                         )
                                     },
                                     onClick = {
+                                        dismissKeyboard()
                                         val item = MediaItem(
                                             videoId = suggestion.id ?: "",
                                             title = suggestion.title,
@@ -544,6 +670,7 @@ fun SearchScreen(
                                     subtitle = suggestion.subtitle,
                                     thumbnailUrl = suggestionThumb,
                                     onClick = {
+                                        dismissKeyboard()
                                         val item = MediaItem(
                                             videoId = suggestion.id ?: "",
                                             title = suggestion.title,
@@ -568,6 +695,7 @@ fun SearchScreen(
                                     sharedElementKey = suggestion.id?.let { "thumb-artist-$it" },
                                     animatedVisibilityScope = animatedVisibilityScope,
                                     onClick = {
+                                        dismissKeyboard()
                                         onArtistTap(
                                             suggestion.title,
                                             suggestion.id ?: "",
@@ -586,6 +714,7 @@ fun SearchScreen(
                                     sharedElementKey = suggestion.id?.let { "thumb-album-$it" },
                                     animatedVisibilityScope = animatedVisibilityScope,
                                     onClick = {
+                                        dismissKeyboard()
                                         onAlbumTap(
                                             suggestion.title,
                                             suggestion.id ?: "",
@@ -604,6 +733,7 @@ fun SearchScreen(
                                     sharedElementKey = suggestion.id?.let { "thumb-playlist-$it" },
                                     animatedVisibilityScope = animatedVisibilityScope,
                                     onClick = {
+                                        dismissKeyboard()
                                         onPlaylistTap(
                                             suggestion.title,
                                             suggestion.id ?: "",
@@ -689,6 +819,43 @@ fun SearchScreen(
                 selectedResultMenu = null
             }
         )
+    }
+}
+
+}
+
+
+private fun handleAllResultTap(
+    result: AllResult,
+    onSongTap: (MediaItem, PlaybackQueue) -> Unit,
+    onVideoTap: (MediaItem) -> Unit,
+    onArtistTap: (String, String, String?, String?) -> Unit,
+    onAlbumTap: (String, String, String?, String?) -> Unit,
+    onPlaylistTap: (String, String, String?, String?) -> Unit
+) {
+    val typeLower = result.type.lowercase()
+    when {
+        typeLower.contains("artist") -> onArtistTap(result.title, result.id, result.thumb, result.subtitle)
+        typeLower.contains("album") || typeLower.contains("single") || typeLower.contains("ep") -> onAlbumTap(result.title, result.id, null, result.thumb)
+        typeLower.contains("playlist") -> onPlaylistTap(result.title, result.id, null, result.thumb)
+        typeLower.contains("video") -> {
+            val item = MediaItem(
+                videoId = result.id, title = result.title,
+                artistName = "", artistId = null, albumName = null, albumId = null,
+                thumbnailUrl = result.thumb, durationText = null, musicVideoType = "MUSIC_VIDEO_TYPE_OMV"
+            )
+            onVideoTap(item)
+        }
+        else -> {
+            // Default: treat as song
+            val item = MediaItem(
+                videoId = result.id, title = result.title,
+                artistName = "", artistId = null, albumName = null, albumId = null,
+                thumbnailUrl = result.thumb, durationText = null, musicVideoType = "MUSIC_VIDEO_TYPE_ATV"
+            )
+            val queue = PlaybackQueue(listOf(item), 0, QueueSource.SEARCH)
+            onSongTap(item, queue)
+        }
     }
 }
 

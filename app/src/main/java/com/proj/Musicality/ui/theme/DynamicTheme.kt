@@ -81,7 +81,8 @@ fun rememberAlbumColors(
 fun rememberMediaBackdropPalette(
     imageUrl: String?,
     fallbackSurface: Color = Color(0xFF121212),
-    allowNetworkFetch: Boolean = true
+    allowNetworkFetch: Boolean = true,
+    animateTransitions: Boolean = true
 ): MediaBackdropPalette {
     val context = LocalContext.current
     var palette by remember(imageUrl, fallbackSurface) {
@@ -94,7 +95,7 @@ fun rememberMediaBackdropPalette(
             return@LaunchedEffect
         }
 
-        val cacheKey = "media-palette:$imageUrl:${fallbackSurface.toArgb()}"
+        val cacheKey = "media-palette:v2:$imageUrl:${fallbackSurface.toArgb()}"
         (AppCache.paletteColors.get(cacheKey) as? MediaBackdropPalette)?.let {
             palette = it
             return@LaunchedEffect
@@ -129,6 +130,10 @@ fun rememberMediaBackdropPalette(
         }
         AppCache.paletteColors.put(cacheKey, extracted)
         palette = extracted
+    }
+
+    if (!animateTransitions) {
+        return palette
     }
 
     val animatedTop by animateColorAsState(
@@ -232,9 +237,9 @@ private fun buildMediaBackdropPalette(
         background = bottom,
         minContrast = 3.1
     )
-    val title = readableForeground(top)
+    val title = readableForegroundForBackgrounds(top, middle, bottom)
     val body = title.copy(alpha = 0.74f)
-    val outline = readableForeground(top).copy(alpha = 0.16f)
+    val outline = title.copy(alpha = 0.16f)
 
     return MediaBackdropPalette(
         top = top,
@@ -253,7 +258,7 @@ private fun defaultMediaBackdropPalette(surface: Color): MediaBackdropPalette {
     val middle = lerp(surface.copy(alpha = 1f), Color.Black, 0.22f)
     val bottom = lerp(surface.copy(alpha = 1f), Color.Black, 0.34f)
     val accent = ensureContrastAgainst(Color(0xFF9CCBFF), bottom, 3.1)
-    val title = readableForeground(top)
+    val title = readableForegroundForBackgrounds(top, middle, bottom)
     return MediaBackdropPalette(
         top = top,
         middle = middle,
@@ -335,6 +340,21 @@ private fun readableForeground(background: Color): Color {
     val blackContrast = ColorUtils.calculateContrast(Color.Black.toArgb(), background.toArgb())
     val whiteContrast = ColorUtils.calculateContrast(Color.White.toArgb(), background.toArgb())
     return if (blackContrast >= whiteContrast) Color.Black else Color.White
+}
+
+private fun readableForegroundForBackgrounds(
+    first: Color,
+    second: Color,
+    third: Color
+): Color {
+    val backgrounds = listOf(first, second, third)
+    val blackWorstContrast = backgrounds.minOf { background ->
+        ColorUtils.calculateContrast(Color.Black.toArgb(), background.toArgb())
+    }
+    val whiteWorstContrast = backgrounds.minOf { background ->
+        ColorUtils.calculateContrast(Color.White.toArgb(), background.toArgb())
+    }
+    return if (blackWorstContrast >= whiteWorstContrast) Color.Black else Color.White
 }
 
 private fun hueDistance(a: Color, b: Color): Float {
