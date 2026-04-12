@@ -27,7 +27,7 @@ object AlbumParser {
         val trackCount = trackCountStr?.toIntOrNull()
         val duration = header.secondSubtitle?.runs?.lastOrNull()?.text
 
-        val thumbnail = header.thumbnail?.musicThumbnailRenderer?.thumbnail?.thumbnails?.lastOrNull()?.url
+        val thumbnail = header.thumbnail?.musicThumbnailRenderer?.thumbnail?.thumbnails?.maxByOrNull { it.width }?.url
 
         val description = header.description?.musicDescriptionShelfRenderer?.description?.runs
             ?.joinToString("") { it.text }
@@ -54,7 +54,16 @@ object AlbumParser {
             val indexStr = renderer.index?.runs?.firstOrNull()?.text
             val index = indexStr?.toIntOrNull() ?: 0
 
-            Track(trackTitle, videoId, trackDuration, plays, index)
+            // Per-track artist (often includes featured artists that differ from
+            // the album's primary artist, e.g. "Seedhe Maut & Hisab" on a
+            // Seedhe Maut album). Uses primaryArtistRun so collab strings with
+            // no browseId still yield a usable display name.
+            val trackArtistRuns = cols.getOrNull(1)?.musicResponsiveListItemFlexColumnRenderer?.text?.runs
+            val trackArtistRun = trackArtistRuns?.primaryArtistRun()
+            val trackArtist = trackArtistRun?.text
+            val trackArtistId = trackArtistRun?.artistBrowseIdOrNull()
+
+            Track(trackTitle, videoId, trackDuration, plays, index, trackArtist, trackArtistId)
         } ?: emptyList()
 
         return AlbumPage(

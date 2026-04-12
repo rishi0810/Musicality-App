@@ -6,6 +6,7 @@ import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -16,6 +17,7 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -53,6 +55,7 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.GraphicEq
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.Person
@@ -66,13 +69,11 @@ import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
@@ -82,6 +83,7 @@ import androidx.media3.common.Player
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -181,7 +183,8 @@ fun PlayerSheet(
     onMoveInQueue: (Int, Int) -> Unit,
     crossfadeEnabled: Boolean = false,
     onToggleCrossfade: () -> Unit = {},
-    miniPlayerHeight: Dp = 70.dp
+    miniPlayerHeight: Dp = 70.dp,
+    onLyricsOpenChange: (Boolean) -> Unit = {}
 ) {
     val item = state.currentItem ?: return
     val queue = state.queue
@@ -223,49 +226,27 @@ fun PlayerSheet(
     var shellCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
     var miniArtBounds by remember { mutableStateOf<Rect?>(null) }
     var fullArtBounds by remember { mutableStateOf<Rect?>(null) }
-    // Tracks the compact album art position inside the lyrics layout
-    var lyricsArtBounds by remember { mutableStateOf<Rect?>(null) }
 
     val canMorphAlbumArt =
         showMorphingOverlay &&
             miniArtBounds != null &&
             fullArtBounds != null
 
-    // ── Lyrics mode animated progress (0 = normal player, 1 = lyrics view) ──
+    // ── Lyrics panel state: 0 = closed, 1 = full-screen ──
     val lyricsAnim = remember { Animatable(0f) }
-    val lyricsProgress = lyricsAnim.value
-    val isLyricsTransitioning = lyricsProgress in 0.001f..0.999f
+    val isLyricsOpen by remember { derivedStateOf { lyricsAnim.value > 0.01f } }
 
-    // Alpha curves for smooth cross-fade:
-    //  - Normal content: fades out in 0→20% on enter; fades in 20%→0 on exit (no overlap)
-    //  - Lyrics controls: tight window near 1.0 so they vanish the instant a drag starts
-    //    and only materialise once the art has fully morphed into place
-    //  - Lyrics list: appears well after the art settles; gone early on exit so the
-    //    growing art has a clean canvas
-    val normalContentAlpha = (1f - lyricsProgress / 0.2f).coerceIn(0f, 1f)
-    val lyricsControlsAlpha = ((lyricsProgress - 0.93f) / 0.07f).coerceIn(0f, 1f)
-    val lyricsListAlpha = ((lyricsProgress - 0.6f) / 0.2f).coerceIn(0f, 1f)
+    val showPlayerContent by remember { derivedStateOf { lyricsAnim.value < 0.999f } }
 
-    // Lyrics art morph overlay fires when both bounds are known and we're mid-transition
-    val canMorphLyricsArt = isLyricsTransitioning && fullArtBounds != null && lyricsArtBounds != null
-    // Hide the static full-size art for the entire morph window so it never "lags"
-    // behind the sheet drag before the morph starts.
     val hideBaseArtDuringExpandMorph = canMorphAlbumArt
+    val expandedArtAlpha = if (hideBaseArtDuringExpandMorph) 0f else 1f
 
-    // The static full-size art is hidden whenever either morph is active
-    val expandedArtAlpha = when {
-        hideBaseArtDuringExpandMorph -> 0f
-        canMorphLyricsArt -> 0f
-        lyricsProgress > 0.3f -> 0f   // fully replaced by lyrics compact art
-        else -> 1f
-    }
-    // Compact lyrics art is hidden while the morph overlay is animating it
-    val lyricsCompactArtAlpha = if (canMorphLyricsArt) 0f else 1f
+    fun openLyrics() = coroutineScope.launch { lyricsAnim.animateTo(1f, lyricsSpring) }
+    fun closeLyrics() = coroutineScope.launch { lyricsAnim.animateTo(0f, lyricsSpring) }
 
-    fun exitLyrics() = coroutineScope.launch { lyricsAnim.animateTo(0f, lyricsSpring) }
-    fun enterLyrics() = coroutineScope.launch { lyricsAnim.animateTo(1f, lyricsSpring) }
+    LaunchedEffect(isLyricsOpen) { onLyricsOpenChange(isLyricsOpen) }
 
-    // Reset lyrics mode when the sheet collapses
+    // Reset lyrics panel when the sheet collapses
     LaunchedEffect(isExpanded) {
         if (!isExpanded) lyricsAnim.animateTo(0f, lyricsSpring)
     }
@@ -277,7 +258,10 @@ fun PlayerSheet(
     PredictiveBackHandler(enabled = isExpanded) { progress: Flow<androidx.activity.BackEventCompat> ->
         try {
             progress.collect { }
-            if (lyricsProgress > 0.5f) exitLyrics() else onCollapse()
+            when {
+                lyricsAnim.value > 0.01f -> closeLyrics()
+                else -> onCollapse()
+            }
         } catch (_: CancellationException) {
         }
     }
@@ -386,7 +370,12 @@ fun PlayerSheet(
                         .padding(horizontal = 4.dp, vertical = 8.dp)
                 ) {
                     IconButton(
-                        onClick = { if (lyricsProgress > 0.5f) exitLyrics() else onCollapse() },
+                        onClick = {
+                            when {
+                                lyricsAnim.value > 0.01f -> closeLyrics()
+                                else -> onCollapse()
+                            }
+                        },
                         modifier = Modifier.align(Alignment.CenterStart)
                     ) {
                         Icon(
@@ -421,11 +410,15 @@ fun PlayerSheet(
                 Box(modifier = Modifier.fillMaxSize()) {
 
                     // ── Layer 1: Normal player content ──
-                    if (normalContentAlpha > 0.001f) {
+                    if (showPlayerContent) {
                         Column(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .graphicsLayer { alpha = normalContentAlpha }
+                                .graphicsLayer {
+                                    val f = lyricsAnim.value
+                                    alpha = 1f - f.coerceIn(0f, 1f)
+                                    translationY = -f.coerceIn(0f, 1f) * size.height * 0.12f
+                                }
                                 .padding(horizontal = 24.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
@@ -562,10 +555,10 @@ fun PlayerSheet(
                                             .shadow(
                                                 elevation = 16.dp,
                                                 shape = CircleShape,
-                                                ambientColor = playbackAccent.copy(alpha = 0.25f),
-                                                spotColor = playbackAccent.copy(alpha = 0.3f)
+                                                ambientColor = mediaPalette.bottom.copy(alpha = 0.25f),
+                                                spotColor = mediaPalette.bottom.copy(alpha = 0.3f)
                                             )
-                                            .background(playbackAccent, CircleShape)
+                                            .background(mediaPalette.bottom, CircleShape)
                                             .clickable(
                                                 interactionSource = playInteraction,
                                                 indication = null
@@ -575,7 +568,7 @@ fun PlayerSheet(
                                         Icon(
                                             if (state.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                                             contentDescription = "Play/Pause",
-                                            tint = onPlaybackAccent,
+                                            tint = Color.White,
                                             modifier = Modifier.size(40.dp)
                                         )
                                     }
@@ -617,7 +610,9 @@ fun PlayerSheet(
                                 horizontalArrangement = Arrangement.SpaceEvenly,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                IconButton(onClick = { enterLyrics() }) {
+                                IconButton(onClick = {
+                                    if (isLyricsOpen) closeLyrics() else openLyrics()
+                                }) {
                                     Icon(
                                         painter = painterResource(id = R.drawable.lyrics_24px),
                                         contentDescription = "Lyrics",
@@ -694,56 +689,6 @@ fun PlayerSheet(
                         }
                     }
 
-                    // ── Layer 2: Lyrics content (always composed so bounds are tracked) ──
-                    if (lyricsProgress > 0.001f) {
-                        LyricsContentHost(
-                            positionMsFlow = positionMsFlow,
-                            lyricsStateFlow = lyricsStateFlow,
-                            durationMs = state.durationMs,
-                            isPlaying = state.isPlaying,
-                            artworkUrl = artworkUrl,
-                            compactArtAlpha = lyricsCompactArtAlpha,
-                            controlsAlpha = lyricsControlsAlpha,
-                            listAlpha = lyricsListAlpha,
-                            onSeek = onSeek,
-                            onSkipPrev = onSkipPrev,
-                            onSkipNext = onSkipNext,
-                            onPlayPause = onPlayPause,
-                            onExitLyrics = { exitLyrics() },
-                            onCompactArtPositioned = { coords ->
-                                lyricsArtBounds = boundsInContainer(shellCoordinates, coords)
-                            },
-                            primary = primary,
-                            playbackAccent = playbackAccent,
-                            onPlaybackAccent = onPlaybackAccent,
-                            onSurface = onSurface,
-                            onSurfaceVariant = onSurfaceVariant
-                        )
-                    } else {
-                        // Always render an invisible compact art placeholder to track its bounds
-                        // even when lyrics mode hasn't been activated yet
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .drawWithContent { /* invisible – only tracks layout bounds */ }
-                                .zIndex(-1f)
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(76.dp)
-                                        .onGloballyPositioned { coords ->
-                                            lyricsArtBounds = boundsInContainer(shellCoordinates, coords)
-                                        }
-                                )
-                            }
-                        }
-                    }
                 }
             }
         }
@@ -872,15 +817,28 @@ fun PlayerSheet(
             )
         }
 
-        // ── Lyrics mode morphing album art overlay ──
-        val lyricsFromBounds = fullArtBounds
-        val lyricsToBounds = lyricsArtBounds
-        if (lyricsFromBounds != null && lyricsToBounds != null && canMorphLyricsArt) {
-            MorphingLyricsArt(
-                thumbnailUrl = artworkUrl,
-                fromBounds = lyricsFromBounds,
-                toBounds = lyricsToBounds,
-                expansion = lyricsProgress
+        // ── Lyrics full-screen sliding panel ──
+        if (isLyricsOpen) {
+            LyricsPanel(
+                positionMsFlow = positionMsFlow,
+                lyricsStateFlow = lyricsStateFlow,
+                durationMs = state.durationMs,
+                isPlaying = state.isPlaying,
+                onClose = { closeLyrics() },
+                onSeek = onSeek,
+                onSkipPrev = onSkipPrev,
+                onSkipNext = onSkipNext,
+                onPlayPause = onPlayPause,
+                backgroundColor = mediaPalette.bottom,
+                playbackAccent = playbackAccent,
+                playbackButton = playbackAccent,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .zIndex(3f)
+                    .graphicsLayer {
+                        val f = lyricsAnim.value
+                        translationY = (1f - f) * size.height
+                    }
             )
         }
     }
@@ -909,8 +867,8 @@ private fun ExpandedPlaybackProgressSection(
             modifier = Modifier.fillMaxWidth(),
             color = playbackAccent,
             trackColor = Color(0xFF4A4A4A),
-            trackHeight = 6.dp,
-            thumbSize = 14.dp
+            trackHeight = 3.dp,
+            expandedTrackHeight = 12.dp
         )
 
         Row(
@@ -944,54 +902,6 @@ private fun ExpandedPlaybackProgressSection(
                 .fillMaxWidth()
         )
     }
-}
-
-@Composable
-private fun LyricsContentHost(
-    positionMsFlow: StateFlow<Long>,
-    lyricsStateFlow: StateFlow<LyricsState>,
-    durationMs: Long,
-    isPlaying: Boolean,
-    artworkUrl: String?,
-    compactArtAlpha: Float,
-    controlsAlpha: Float,
-    listAlpha: Float,
-    onSeek: (Long) -> Unit,
-    onSkipPrev: () -> Unit,
-    onSkipNext: () -> Unit,
-    onPlayPause: () -> Unit,
-    onExitLyrics: () -> Unit,
-    onCompactArtPositioned: (LayoutCoordinates) -> Unit,
-    primary: Color,
-    playbackAccent: Color,
-    onPlaybackAccent: Color,
-    onSurface: Color,
-    onSurfaceVariant: Color
-) {
-    val positionMs by positionMsFlow.collectAsStateWithLifecycle()
-    val lyricsState by lyricsStateFlow.collectAsStateWithLifecycle()
-
-    LyricsContent(
-        lyricsState = lyricsState,
-        positionMs = positionMs,
-        durationMs = durationMs,
-        isPlaying = isPlaying,
-        artworkUrl = artworkUrl,
-        compactArtAlpha = compactArtAlpha,
-        controlsAlpha = controlsAlpha,
-        listAlpha = listAlpha,
-        onSeek = onSeek,
-        onSkipPrev = onSkipPrev,
-        onSkipNext = onSkipNext,
-        onPlayPause = onPlayPause,
-        onExitLyrics = onExitLyrics,
-        onCompactArtPositioned = onCompactArtPositioned,
-        primary = primary,
-        playbackAccent = playbackAccent,
-        onPlaybackAccent = onPlaybackAccent,
-        onSurface = onSurface,
-        onSurfaceVariant = onSurfaceVariant
-    )
 }
 
 @Composable
@@ -1380,66 +1290,32 @@ private fun CrossfadeCountdownCue(
     }
 }
 
-// ── Lyrics mode morph overlay (full rounded square → small compact square) ──
-@Composable
-private fun MorphingLyricsArt(
-    thumbnailUrl: String?,
-    fromBounds: Rect,
-    toBounds: Rect,
-    expansion: Float
-) {
-    val density = LocalDensity.current
-    val left = lerpFloat(fromBounds.left, toBounds.left, expansion)
-    val top = lerpFloat(fromBounds.top, toBounds.top, expansion)
-    val width = lerpFloat(fromBounds.width, toBounds.width, expansion)
-    val fullCornerPx = with(density) { 24.dp.toPx() }
-    val compactCornerPx = with(density) { 12.dp.toPx() }
-    val cornerPx = lerpFloat(fullCornerPx, compactCornerPx, expansion)
-    val artSizeDp = with(density) { width.toDp() }
-    val cornerDp = with(density) { cornerPx.toDp() }
-
-    AsyncImage(
-        model = thumbnailUrl,
-        contentDescription = null,
-        modifier = Modifier
-            .offset { IntOffset(left.roundToInt(), top.roundToInt()) }
-            .size(artSizeDp)
-            .clip(RoundedCornerShape(cornerDp)),
-        contentScale = ContentScale.Crop
-    )
-}
-
 @OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalMaterial3Api::class)
 @Composable
-private fun LyricsContent(
-    lyricsState: LyricsState,
-    positionMs: Long,
+private fun LyricsPanel(
+    positionMsFlow: StateFlow<Long>,
+    lyricsStateFlow: StateFlow<LyricsState>,
     durationMs: Long,
     isPlaying: Boolean,
-    artworkUrl: String?,
-    compactArtAlpha: Float,
-    controlsAlpha: Float,
-    listAlpha: Float,
+    onClose: () -> Unit,
     onSeek: (Long) -> Unit,
     onSkipPrev: () -> Unit,
     onSkipNext: () -> Unit,
     onPlayPause: () -> Unit,
-    onExitLyrics: () -> Unit,
-    onCompactArtPositioned: (LayoutCoordinates) -> Unit,
-    primary: Color,
+    backgroundColor: Color,
     playbackAccent: Color,
-    onPlaybackAccent: Color,
-    onSurface: Color,
-    onSurfaceVariant: Color
+    playbackButton: Color,
+    modifier: Modifier = Modifier
 ) {
-    val listState = rememberLazyListState()
+    val positionMs by positionMsFlow.collectAsStateWithLifecycle()
+    val lyricsState by lyricsStateFlow.collectAsStateWithLifecycle()
     val playbackProgress = if (durationMs > 0) positionMs.toFloat() / durationMs else 0f
+    val listState = rememberLazyListState()
+    val coroutineScope = rememberCoroutineScope()
 
     val syncedLines = (lyricsState as? LyricsState.Loaded)?.takeIf { it.isSynced }?.lines
-    var previousLineIndex by remember { mutableIntStateOf(-1) }
     val currentLineIndex = remember(positionMs, syncedLines) {
         syncedLines?.let { lines ->
-            // Binary search for last line with timeMs <= positionMs (O(log n) vs O(n))
             var lo = 0
             var hi = lines.size - 1
             var result = -1
@@ -1455,14 +1331,8 @@ private fun LyricsContent(
             result.coerceAtLeast(0)
         } ?: 0
     }
-    LaunchedEffect(currentLineIndex) {
-        // Track the previous line so we can animate it out
-        previousLineIndex = currentLineIndex
-    }
 
-    // Auto-scroll: disabled for 5 s after manual scroll or lyric tap
     var userScrolled by remember { mutableStateOf(false) }
-    val coroutineScope = rememberCoroutineScope()
     LaunchedEffect(listState.isScrollInProgress) {
         if (listState.isScrollInProgress) {
             userScrolled = true
@@ -1475,129 +1345,48 @@ private fun LyricsContent(
     }
     LaunchedEffect(currentLineIndex) {
         if (!userScrolled && syncedLines != null && syncedLines.isNotEmpty()) {
-            listState.animateScrollToItem(index = (currentLineIndex - 2).coerceAtLeast(0))
+            val target = (currentLineIndex - 2).coerceAtLeast(0)
+            listState.animateScrollToItem(index = target)
         }
     }
 
-    Column(modifier = Modifier.fillMaxSize()) {
-
-        // ── Compact art + controls row ──
-        // The row always occupies its layout slot (so bounds are always tracked), but its
-        // content is faded via controlsAlpha.
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .background(backgroundColor)
+            .systemBarsPadding()
+    ) {
+        // ── Header ──
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .graphicsLayer { alpha = controlsAlpha }
-                .padding(horizontal = 16.dp, vertical = 8.dp),
+                .padding(horizontal = 20.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // CTA 1: tap compact art → exit lyrics
-            AsyncImage(
-                model = artworkUrl,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier
-                    .size(76.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .graphicsLayer { alpha = compactArtAlpha }
-                    .onGloballyPositioned { onCompactArtPositioned(it) }
-                    .clickable(
-                        indication = null,
-                        interactionSource = remember { MutableInteractionSource() },
-                        onClick = onExitLyrics
-                    )
+            Text(
+                text = "Lyrics",
+                color = Color.White,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold
             )
-            Spacer(Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                SeekablePlaybackBar(
-                    progress = playbackProgress,
-                    durationMs = durationMs,
-                    onSeek = onSeek,
-                    modifier = Modifier.fillMaxWidth(),
-                    color = playbackAccent,
-                    trackColor = Color(0xFF4A4A4A),
-                    trackHeight = 5.dp,
-                    thumbSize = 12.dp
+            Spacer(Modifier.weight(1f))
+            IconButton(onClick = onClose) {
+                Icon(
+                    imageVector = Icons.Rounded.KeyboardArrowDown,
+                    contentDescription = "Close",
+                    tint = Color.White
                 )
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 2.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        formatMs(positionMs),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = onSurface.copy(alpha = 0.75f)
-                    )
-                    Text(
-                        if (durationMs > 0) formatMs(durationMs) else "",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = onSurface.copy(alpha = 0.75f)
-                    )
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton(onClick = onSkipPrev, modifier = Modifier.size(40.dp)) {
-                        Icon(
-                            Icons.Rounded.SkipPrevious,
-                            contentDescription = "Previous",
-                            tint = onSurface,
-                            modifier = Modifier.size(28.dp)
-                        )
-                    }
-                    val playInteraction = remember { MutableInteractionSource() }
-                    Box(
-                        modifier = Modifier
-                            .size(52.dp)
-                            .pressScale(playInteraction)
-                            .shadow(
-                                12.dp,
-                                CircleShape,
-                                ambientColor = playbackAccent.copy(alpha = 0.25f),
-                                spotColor = playbackAccent.copy(alpha = 0.3f)
-                            )
-                            .background(playbackAccent, CircleShape)
-                            .clickable(
-                                interactionSource = playInteraction,
-                                indication = null
-                            ) { onPlayPause() },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                            contentDescription = "Play/Pause",
-                            tint = onPlaybackAccent,
-                            modifier = Modifier.size(30.dp)
-                        )
-                    }
-                    IconButton(onClick = onSkipNext, modifier = Modifier.size(40.dp)) {
-                        Icon(
-                            Icons.Rounded.SkipNext,
-                            contentDescription = "Next",
-                            tint = onSurface,
-                            modifier = Modifier.size(28.dp)
-                        )
-                    }
-                }
             }
         }
 
         // ── Lyrics body ──
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .graphicsLayer { alpha = listAlpha }
-        ) {
+        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
             when (val ls = lyricsState) {
                 is LyricsState.Loading, LyricsState.Idle -> {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         LoadingIndicator(
-                            modifier = Modifier.size(56.dp),
-                            color = primary
+                            modifier = Modifier.size(48.dp),
+                            color = Color.White
                         )
                     }
                 }
@@ -1605,7 +1394,7 @@ private fun LyricsContent(
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text(
                             "No lyrics available",
-                            color = onSurfaceVariant,
+                            color = Color.White.copy(alpha = 0.6f),
                             style = MaterialTheme.typography.bodyLarge
                         )
                     }
@@ -1614,67 +1403,153 @@ private fun LyricsContent(
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text(
                             "Couldn't load lyrics",
-                            color = onSurfaceVariant,
+                            color = Color.White.copy(alpha = 0.6f),
                             style = MaterialTheme.typography.bodyLarge
                         )
                     }
                 }
                 is LyricsState.Loaded -> {
-                    val dimColor = remember(onSurface) { onSurface.copy(alpha = 0.35f) }
                     LazyColumn(
                         state = listState,
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = androidx.compose.foundation.layout.PaddingValues(
                             horizontal = 24.dp,
-                            vertical = 16.dp
+                            vertical = 12.dp
                         ),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        itemsIndexed(ls.lines) { index, line ->
-                            val isCurrentLine = ls.isSynced && index == currentLineIndex
-                            val needsAnimation = ls.isSynced && (index == currentLineIndex || index == previousLineIndex)
-                            val lineColor = if (needsAnimation) {
-                                animateColorAsState(
-                                    targetValue = if (isCurrentLine) onSurface else dimColor,
-                                    animationSpec = tween(300),
-                                    label = "lyricColor"
-                                ).value
-                            } else if (isCurrentLine) {
-                                onSurface
+                        itemsIndexed(
+                            ls.lines,
+                            key = { index, _ -> index }
+                        ) { index, line ->
+                            val distance = if (ls.isSynced) (index - currentLineIndex).absoluteValue else 0
+                            val alpha = when {
+                                !ls.isSynced -> 1f
+                                distance == 0 -> 1f
+                                distance == 1 -> 0.55f
+                                distance == 2 -> 0.4f
+                                else -> 0.25f
+                            }
+                            val lineModifier = if (ls.isSynced) {
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clickable(
+                                        indication = null,
+                                        interactionSource = remember { MutableInteractionSource() }
+                                    ) {
+                                        userScrolled = true
+                                        coroutineScope.launch {
+                                            kotlinx.coroutines.delay(5000)
+                                            userScrolled = false
+                                        }
+                                        onSeek(line.timeMs)
+                                    }
+                                    .padding(vertical = 4.dp)
                             } else {
-                                dimColor
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp)
                             }
                             Text(
                                 text = line.text,
-                                style = MaterialTheme.typography.bodyLarge,
-                                fontWeight = if (isCurrentLine) FontWeight.Bold else FontWeight.Normal,
-                                color = lineColor,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .then(
-                                        if (ls.isSynced) Modifier.clickable(
-                                            indication = null,
-                                            interactionSource = remember { MutableInteractionSource() }
-                                        ) {
-                                            userScrolled = true
-                                            coroutineScope.launch {
-                                                kotlinx.coroutines.delay(5000)
-                                                userScrolled = false
-                                            }
-                                            onSeek(line.timeMs)
-                                        } else Modifier
-                                    )
-                                    .padding(vertical = 6.dp)
+                                fontSize = 21.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White.copy(alpha = alpha),
+                                modifier = lineModifier
                             )
                         }
                     }
                 }
             }
         }
+
+        // ── Controls ──
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 56.dp, top = 4.dp)
+        ) {
+            SeekablePlaybackBar(
+                progress = playbackProgress,
+                durationMs = durationMs,
+                onSeek = onSeek,
+                modifier = Modifier.fillMaxWidth(),
+                color = playbackAccent,
+                trackColor = Color.White.copy(alpha = 0.18f),
+                trackHeight = 3.dp,
+                expandedTrackHeight = 10.dp
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 2.dp),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    formatMs(positionMs),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.White.copy(alpha = 0.7f)
+                )
+                Text(
+                    if (durationMs > 0) formatMs(durationMs) else "",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.White.copy(alpha = 0.7f)
+                )
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 12.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = onSkipPrev, modifier = Modifier.size(48.dp)) {
+                    Icon(
+                        Icons.Rounded.SkipPrevious,
+                        contentDescription = "Previous",
+                        tint = Color.White,
+                        modifier = Modifier.size(32.dp)
+                    )
+                }
+                val playInteraction = remember { MutableInteractionSource() }
+                Box(
+                    modifier = Modifier
+                        .size(60.dp)
+                        .pressScale(playInteraction)
+                        .shadow(
+                            12.dp,
+                            CircleShape,
+                            ambientColor = playbackButton.copy(alpha = 0.25f),
+                            spotColor = playbackButton.copy(alpha = 0.3f)
+                        )
+                        .background(playbackButton, CircleShape)
+                        .clickable(
+                            interactionSource = playInteraction,
+                            indication = null
+                        ) { onPlayPause() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                        contentDescription = "Play/Pause",
+                        tint = Color.White,
+                        modifier = Modifier.size(32.dp)
+                    )
+                }
+                IconButton(onClick = onSkipNext, modifier = Modifier.size(48.dp)) {
+                    Icon(
+                        Icons.Rounded.SkipNext,
+                        contentDescription = "Next",
+                        tint = Color.White,
+                        modifier = Modifier.size(32.dp)
+                    )
+                }
+            }
+        }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SeekablePlaybackBar(
     progress: Float,
@@ -1684,7 +1559,7 @@ private fun SeekablePlaybackBar(
     color: Color,
     trackColor: Color,
     trackHeight: Dp,
-    thumbSize: Dp
+    expandedTrackHeight: Dp
 ) {
     var isSeeking by remember { mutableStateOf(false) }
     var seekPosition by remember { mutableFloatStateOf(progress.coerceIn(0f, 1f)) }
@@ -1696,40 +1571,67 @@ private fun SeekablePlaybackBar(
         }
     }
 
-    Slider(
-        value = displayProgress,
-        onValueChange = {
-            isSeeking = true
-            seekPosition = it.coerceIn(0f, 1f)
-        },
-        onValueChangeFinished = {
-            val targetPosition = (seekPosition.coerceIn(0f, 1f) * durationMs).toLong()
-            if (durationMs > 0L) {
-                onSeek(targetPosition)
+    val expandedHeight = expandedTrackHeight
+    val animatedHeight by animateDpAsState(
+        targetValue = if (isSeeking) expandedHeight else trackHeight,
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        label = "progressBarHeight"
+    )
+
+    Box(
+        modifier = modifier
+            .height(expandedHeight)
+            .pointerInput(durationMs) {
+                val width = size.width.toFloat().coerceAtLeast(1f)
+                detectTapGestures(
+                    onPress = { offset ->
+                        isSeeking = true
+                        seekPosition = (offset.x / width).coerceIn(0f, 1f)
+                        if (tryAwaitRelease()) {
+                            if (durationMs > 0L) {
+                                onSeek((seekPosition * durationMs).toLong())
+                            }
+                            isSeeking = false
+                        }
+                    }
+                )
             }
-            isSeeking = false
-        },
-        valueRange = 0f..1f,
-        modifier = modifier,
-        thumb = {
+            .pointerInput(durationMs) {
+                val width = size.width.toFloat().coerceAtLeast(1f)
+                detectHorizontalDragGestures(
+                    onDragStart = { offset ->
+                        isSeeking = true
+                        seekPosition = (offset.x / width).coerceIn(0f, 1f)
+                    },
+                    onDragEnd = {
+                        if (durationMs > 0L) {
+                            onSeek((seekPosition * durationMs).toLong())
+                        }
+                        isSeeking = false
+                    },
+                    onDragCancel = { isSeeking = false },
+                    onHorizontalDrag = { change, _ ->
+                        seekPosition = (change.position.x / width).coerceIn(0f, 1f)
+                    }
+                )
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(animatedHeight)
+                .clip(RoundedCornerShape(50))
+                .background(trackColor)
+        ) {
             Box(
-                Modifier
-                    .size(thumbSize)
-                    .shadow(4.dp, CircleShape, ambientColor = color.copy(alpha = 0.35f), spotColor = color.copy(alpha = 0.4f))
-                    .background(color, CircleShape)
-            )
-        },
-        track = {
-            LinearProgressIndicator(
-                progress = { displayProgress },
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .height(trackHeight),
-                color = color,
-                trackColor = trackColor
+                    .fillMaxHeight()
+                    .fillMaxWidth(displayProgress)
+                    .background(color)
             )
         }
-    )
+    }
 }
 
 private fun boundsInContainer(

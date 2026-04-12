@@ -115,9 +115,9 @@ object HomeParser {
             ?.musicResponsiveListItemFlexColumnRenderer?.text?.runs
             ?: emptyList()
 
-        val artistRun = col1Runs.firstOrNull { it.navigationEndpoint?.browseEndpoint != null }
-        val artistName = artistRun?.text ?: ""
-        val artistId = artistRun?.navigationEndpoint?.browseEndpoint?.browseId
+        val artistRun = col1Runs.primaryArtistRun()
+        val artistName = artistRun?.text?.primaryArtistName().orEmpty()
+        val artistId = artistRun?.artistBrowseIdOrNull()
 
         // Play count is the non-separator, non-linked run in col 1
         val plays = col1Runs.firstOrNull { it.text != " • " && it.navigationEndpoint == null }?.text

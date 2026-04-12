@@ -313,9 +313,11 @@ fun MusicApp() {
                 }
             }
         ) {
+            var lyricsOpen by remember { mutableStateOf(false) }
             BottomSheetScaffold(
             scaffoldState = sheetState,
             sheetPeekHeight = sheetPeekHeight,
+            sheetSwipeEnabled = !lyricsOpen,
             sheetContent = {
                 // Collect full playbackState here so only PlayerSheet recomposes on state changes,
                 // not the entire MusicApp tree
@@ -341,7 +343,8 @@ fun MusicApp() {
                     onMoveInQueue = playbackViewModel::moveInQueue,
                     crossfadeEnabled = crossfadeEnabled,
                     onToggleCrossfade = playbackViewModel::toggleCrossfade,
-                    miniPlayerHeight = miniPlayerHeight
+                    miniPlayerHeight = miniPlayerHeight,
+                    onLyricsOpenChange = { lyricsOpen = it }
                 )
             },
             sheetDragHandle = null,

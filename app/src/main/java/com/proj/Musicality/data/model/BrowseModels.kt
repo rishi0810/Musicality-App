@@ -75,7 +75,9 @@ data class Track(
     val videoId: String?,
     val duration: String?,
     val plays: String?,
-    val index: Int
+    val index: Int,
+    val artistName: String? = null,
+    val artistId: String? = null
 )
 
 @Immutable

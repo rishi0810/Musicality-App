@@ -15,6 +15,11 @@ class ListeningHistoryRepository private constructor(
 
     suspend fun recordPlayback(item: MediaItem) = withContext(Dispatchers.IO) {
         if (item.videoId.isBlank()) return@withContext
+        val safeArtistId = item.artistId?.trim()?.takeIf { it.isNotBlank() } ?: return@withContext
+        val safeArtistName = item.artistName
+            .substringBefore(',')
+            .trim()
+            .ifBlank { UNKNOWN_ARTIST_NAME }
         val now = System.currentTimeMillis()
         writeMutex.withLock {
             db.insertListeningEvent(
@@ -22,8 +27,8 @@ class ListeningHistoryRepository private constructor(
                     id = 0L,
                     videoId = item.videoId,
                     title = item.title,
-                    artistName = item.artistName,
-                    artistId = item.artistId,
+                    artistName = safeArtistName,
+                    artistId = safeArtistId,
                     thumbnailUrl = item.thumbnailUrl,
                     playedAt = now
                 )
@@ -31,26 +36,26 @@ class ListeningHistoryRepository private constructor(
             db.incrementSongPlayCount(
                 videoId = item.videoId,
                 title = item.title,
-                artistName = item.artistName,
-                artistId = item.artistId,
+                artistName = safeArtistName,
+                artistId = safeArtistId,
                 thumbnailUrl = item.thumbnailUrl,
                 playedAt = now
             )
-            val safeArtistId = item.artistId?.takeIf { it.isNotBlank() }
-            if (safeArtistId != null) {
-                db.incrementArtistPlayCount(
-                    artistId = safeArtistId,
-                    artistName = item.artistName.ifBlank { "Unknown Artist" },
-                    playedAt = now
-                )
-            }
+            db.incrementArtistPlayCount(
+                artistId = safeArtistId,
+                artistName = safeArtistName,
+                playedAt = now
+            )
             db.pruneListeningHistory(MAX_HISTORY_ROWS)
+            db.pruneSongPlayCounts(MAX_TOP_SONGS_QUERY)
         }
     }
 
     suspend fun getSnapshot(): ListeningHistorySnapshot = withContext(Dispatchers.IO) {
         // Serialize snapshot reads with writes so tiering decisions don't see partial history.
         writeMutex.withLock {
+            db.purgeRowsMissingArtistId()
+            db.normalizeMissingArtistNames(UNKNOWN_ARTIST_NAME)
             ListeningHistorySnapshot(
                 recentlyPlayed = db.getRecentlyPlayed(MAX_RECENT_QUERY),
                 topSongs = db.getTopPlayedSongs(MAX_TOP_SONGS_QUERY),
@@ -61,10 +66,11 @@ class ListeningHistoryRepository private constructor(
     }
 
     companion object {
-        private const val MAX_HISTORY_ROWS = 250
-        private const val MAX_RECENT_QUERY = 80
-        private const val MAX_TOP_SONGS_QUERY = 40
+        private const val MAX_HISTORY_ROWS = 50
+        private const val MAX_RECENT_QUERY = 50
+        private const val MAX_TOP_SONGS_QUERY = 50
         private const val MAX_TOP_ARTISTS_QUERY = 25
+        private const val UNKNOWN_ARTIST_NAME = "Unknown Artist"
 
         @Volatile
         private var INSTANCE: ListeningHistoryRepository? = null

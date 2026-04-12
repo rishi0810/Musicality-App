@@ -44,7 +44,7 @@ fun rememberPlaybackUiPalette(
         PlaybackUiPalette(
             accent = palette.accent,
             onAccent = palette.onAccent,
-            navIndicator = lerp(palette.middle, palette.accent, 0.18f).copy(alpha = 0.95f),
+            navIndicator = palette.bottom,
             currentItemContainer = lerp(palette.bottom, palette.accent, 0.14f).copy(alpha = 0.92f),
             currentItemSecondary = lerp(palette.body, palette.accent, 0.28f).copy(alpha = 0.9f)
         )

@@ -95,5 +95,6 @@ data class PlaylistPanelVideoRenderer(
     val lengthText: Runs? = null,
     val navigationEndpoint: NavigationEndpoint? = null,
     val videoId: String? = null,
-    val selected: Boolean? = null
+    val selected: Boolean? = null,
+    val menu: MenuRenderer? = null
 )

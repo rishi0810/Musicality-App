@@ -198,6 +198,11 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch {
             val item = queue.items[queue.currentIndex]
             Log.d(TAG, "playQueue: index=${queue.currentIndex}, videoId='${item.videoId}', title='${item.title}'")
+            Log.d(
+                "TapTrace",
+                "playQueue initial-currentItem: videoId='${item.videoId}' title='${item.title}' " +
+                    "artistName='${item.artistName}' durationText=${item.durationText} source=${queue.source}"
+            )
             _state.update {
                 it.copy(
                     currentItem = item,
@@ -712,9 +717,19 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
 
         val fixedQueue = upNextQueue.copy(currentIndex = idx)
 
+        val before = _state.value.currentItem
+        val after = fixedQueue.items.getOrNull(idx)
+        Log.d(
+            "TapTrace",
+            "applyUpNextQueue OVERRIDE: videoId='$seedVideoId' " +
+                "artistName: '${before?.artistName}' -> '${after?.artistName}' | " +
+                "durationText: ${before?.durationText} -> ${after?.durationText} | " +
+                "title: '${before?.title}' -> '${after?.title}'"
+        )
+
         _state.update {
             it.copy(
-                currentItem = fixedQueue.items.getOrNull(idx) ?: it.currentItem,
+                currentItem = after ?: it.currentItem,
                 queue = fixedQueue
             )
         }

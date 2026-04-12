@@ -2,6 +2,7 @@ package com.proj.Musicality.ui.screen
 
 import android.content.Context
 import android.content.Intent
+import android.util.Log
 import android.view.inputmethod.InputMethodManager
 import android.widget.Toast
 import androidx.compose.animation.AnimatedContent
@@ -657,6 +658,12 @@ fun SearchScreen(
                                             thumbnailUrl = suggestionThumb,
                                             durationText = null,
                                             musicVideoType = "MUSIC_VIDEO_TYPE_ATV"
+                                        )
+                                        Log.d(
+                                            "TapTrace",
+                                            "suggestion-tap: videoId='${item.videoId}' title='${item.title}' " +
+                                                "artistName='${item.artistName}' artistsRaw=${suggestion.artists?.map { it.name }} " +
+                                                "durationText=${item.durationText}"
                                         )
                                         val queue = PlaybackQueue(listOf(item), 0, QueueSource.SINGLE)
                                         onSongTap(item, queue)

@@ -1,9 +1,11 @@
 package com.proj.Musicality.data.parser
 
+import com.proj.Musicality.data.json.MenuRenderer
 import com.proj.Musicality.data.json.NextResponse
 import com.proj.Musicality.data.json.PlaylistPanelContentItem
 import com.proj.Musicality.data.json.PlaylistPanelVideoRenderer
 import com.proj.Musicality.data.json.PlaylistPanelVideoWrapperRenderer
+import com.proj.Musicality.data.json.Run
 import com.proj.Musicality.data.model.MediaItem
 import com.proj.Musicality.data.model.PlaybackQueue
 import com.proj.Musicality.data.model.QueueSource
@@ -13,7 +15,6 @@ import com.proj.Musicality.util.upscaleThumbnail
 object NextParser {
 
     private const val TAB_UP_NEXT = "Up next"
-    private const val PAGE_TYPE_ARTIST = "MUSIC_PAGE_TYPE_ARTIST"
     private const val PAGE_TYPE_ALBUM = "MUSIC_PAGE_TYPE_ALBUM"
     private const val MUSIC_VIDEO_TYPE_ATV = "MUSIC_VIDEO_TYPE_ATV"
     private const val MUSIC_VIDEO_TYPE_OMV = "MUSIC_VIDEO_TYPE_OMV"
@@ -117,37 +118,32 @@ object NextParser {
         val bylineRuns = longBylineText?.runs
         val shortBylineRuns = shortBylineText?.runs
 
-        val artistRuns = bylineRuns?.filter { run ->
-            run.navigationEndpoint?.browseEndpoint
-                ?.browseEndpointContextSupportedConfigs
-                ?.browseEndpointContextMusicConfig
-                ?.pageType == PAGE_TYPE_ARTIST
-        }.orEmpty()
+        val artistRun = bylineRuns
+            ?.primaryArtistRun()
+            ?: shortBylineRuns?.primaryArtistRun()
 
-        val artistName = when {
-            artistRuns.isNotEmpty() -> {
-                if (artistRuns.size == 1) artistRuns[0].text
-                else artistRuns.joinToString(", ") { it.text }
-            }
-            else -> shortBylineRuns?.firstOrNull()?.text.orEmpty()
-        }
+        // For Shape A (concatenated collab with no browseId), primaryArtistRun
+        // still returns the plain-text run. Its `.text` IS the artist display
+        // string, so primaryArtistName is what we want. For Shape B it's the
+        // first individual artist's name. substringBefore(',') preserves Shape B
+        // while Shape A has no comma so it's a no-op.
+        val artistName = artistRun?.text
+            ?.primaryArtistName()
+            ?: shortBylineRuns?.firstOrNull()?.text?.primaryArtistName().orEmpty()
 
-        val artistId = artistRuns.firstOrNull()
-            ?.navigationEndpoint
-            ?.browseEndpoint
-            ?.browseId
+        // artistId from byline if present (Shape B); fall back to the menu's
+        // "Go to artist" entry (the only place Shape A exposes a real artist ID).
+        val artistId = artistRun?.artistBrowseIdOrNull() ?: menu.artistIdFromMenu()
 
         val albumRun = bylineRuns?.firstOrNull { run ->
-            run.navigationEndpoint?.browseEndpoint
-                ?.browseEndpointContextSupportedConfigs
-                ?.browseEndpointContextMusicConfig
-                ?.pageType == PAGE_TYPE_ALBUM
+            run.pageTypeOrNull() == PAGE_TYPE_ALBUM
         }
         val albumName = albumRun?.text
         val albumId = albumRun
             ?.navigationEndpoint
             ?.browseEndpoint
             ?.browseId
+            ?: menu.albumIdFromMenu()
 
         val musicVideoType = extractMusicVideoType()
         val thumb = albumArtUrlOrNull(rawThumb) ?: upscaleThumbnail(rawThumb, size = 544)
@@ -163,5 +159,30 @@ object NextParser {
             durationText = duration,
             musicVideoType = musicVideoType
         )
+    }
+
+    private fun Run.pageTypeOrNull(): String? =
+        navigationEndpoint?.browseEndpoint
+            ?.browseEndpointContextSupportedConfigs
+            ?.browseEndpointContextMusicConfig
+            ?.pageType
+
+    private fun MenuRenderer?.artistIdFromMenu(): String? =
+        menuBrowseIdFor("MUSIC_PAGE_TYPE_ARTIST")
+
+    private fun MenuRenderer?.albumIdFromMenu(): String? =
+        menuBrowseIdFor(PAGE_TYPE_ALBUM)
+
+    private fun MenuRenderer?.menuBrowseIdFor(wantedPageType: String): String? {
+        val items = this?.menuRenderer?.items ?: return null
+        for (item in items) {
+            val ep = item.menuNavigationItemRenderer?.navigationEndpoint?.browseEndpoint ?: continue
+            val pt = ep.browseEndpointContextSupportedConfigs?.browseEndpointContextMusicConfig?.pageType
+            if (pt == wantedPageType) {
+                val id = ep.browseId?.takeIf { it.isNotBlank() } ?: continue
+                return id
+            }
+        }
+        return null
     }
 }

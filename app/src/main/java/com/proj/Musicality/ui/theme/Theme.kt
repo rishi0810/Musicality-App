@@ -20,17 +20,23 @@ fun MusicAppTheme(content: @Composable () -> Unit) {
     val context = LocalContext.current
     val darkTheme = isSystemInDarkTheme()
 
+    val appBackground = if (darkTheme) Color(0xFF000000) else Color(0xFFFFFBF5)
+
     val colorScheme = when {
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            if (darkTheme) dynamicDarkColorScheme(context)
-            else dynamicLightColorScheme(context)
+            if (darkTheme) dynamicDarkColorScheme(context).copy(background = appBackground, surface = appBackground)
+            else dynamicLightColorScheme(context).copy(background = appBackground, surface = appBackground)
         }
         darkTheme -> darkColorScheme(
             primary = Color(0xFFBB86FC),
-            surface = Color(0xFF121212),
+            background = appBackground,
+            surface = appBackground,
             surfaceContainerHigh = Color(0xFF1E1E1E)
         )
-        else -> lightColorScheme()
+        else -> lightColorScheme(
+            background = appBackground,
+            surface = appBackground
+        )
     }
 
     MaterialExpressiveTheme(

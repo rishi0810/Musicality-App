@@ -6,6 +6,30 @@ import com.proj.Musicality.util.upscaleThumbnail
 
 object SearchParser {
 
+    private const val PAGE_TYPE_ARTIST = "MUSIC_PAGE_TYPE_ARTIST"
+    private const val PAGE_TYPE_ALBUM = "MUSIC_PAGE_TYPE_ALBUM"
+    private val DURATION_REGEX = Regex("""^\d{1,2}:\d{2}(:\d{2})?$""")
+    private val YEAR_REGEX = Regex("""^(19|20)\d{2}$""")
+    private val COUNT_SUFFIX_REGEX = Regex("""\s(plays|views)$""", RegexOption.IGNORE_CASE)
+
+    private fun Run.pageTypeOrNull(): String? =
+        navigationEndpoint?.browseEndpoint
+            ?.browseEndpointContextSupportedConfigs
+            ?.browseEndpointContextMusicConfig
+            ?.pageType
+
+    private fun List<Run>.findAlbumRun(): Run? =
+        firstOrNull { it.pageTypeOrNull() == PAGE_TYPE_ALBUM }
+
+    private fun List<Run>.findDurationText(): String? =
+        lastOrNull { DURATION_REGEX.matches(it.text.trim()) }?.text
+
+    private fun List<Run>.findYearText(): String? =
+        lastOrNull { YEAR_REGEX.matches(it.text.trim()) }?.text
+
+    private fun List<Run>.findCountText(): String? =
+        firstOrNull { COUNT_SUFFIX_REGEX.containsMatchIn(it.text) }?.text
+
     fun extractSongs(jsonResponse: String): List<SongResult> {
         val response = JsonParser.instance.decodeFromString<SearchResultResponse>(jsonResponse)
         val items = response.contents?.tabbedSearchResultsRenderer?.tabs?.firstOrNull()
@@ -23,12 +47,13 @@ object SearchParser {
                     ?.playNavigationEndpoint?.watchEndpoint?.videoId ?: ""
 
             val metadataRuns = cols.getOrNull(1)?.musicResponsiveListItemFlexColumnRenderer?.text?.runs ?: emptyList()
-            val artist = metadataRuns.getOrNull(0)?.text ?: ""
-            val artistId = metadataRuns.getOrNull(0)?.navigationEndpoint?.browseEndpoint?.browseId
-            val album = if (metadataRuns.size >= 3) metadataRuns[2].text else null
-            val albumId = if (metadataRuns.size >= 3) metadataRuns[2].navigationEndpoint?.browseEndpoint?.browseId else null
-            val duration = if (metadataRuns.size >= 5) metadataRuns[4].text
-                else if (metadataRuns.size >= 3 && album == null) metadataRuns[2].text else null
+            val artistRun = metadataRuns.primaryArtistRun()
+            val artist = artistRun?.text?.primaryArtistName().orEmpty()
+            val artistId = artistRun?.artistBrowseIdOrNull()
+            val albumRun = metadataRuns.findAlbumRun()
+            val album = albumRun?.text
+            val albumId = albumRun?.navigationEndpoint?.browseEndpoint?.browseId
+            val duration = metadataRuns.findDurationText()
 
             val plays = cols.getOrNull(2)?.musicResponsiveListItemFlexColumnRenderer?.text?.runs?.firstOrNull()?.text
 
@@ -59,10 +84,11 @@ object SearchParser {
                     ?.navigationEndpoint?.watchEndpoint?.videoId ?: ""
 
             val metadataRuns = cols.getOrNull(1)?.musicResponsiveListItemFlexColumnRenderer?.text?.runs ?: emptyList()
-            val artist = metadataRuns.getOrNull(0)?.text ?: ""
-            val artistId = metadataRuns.getOrNull(0)?.navigationEndpoint?.browseEndpoint?.browseId
-            val views = if (metadataRuns.size >= 3) metadataRuns[2].text else null
-            val duration = if (metadataRuns.size >= 5) metadataRuns[4].text else null
+            val artistRun = metadataRuns.primaryArtistRun()
+            val artist = artistRun?.text?.primaryArtistName().orEmpty()
+            val artistId = artistRun?.artistBrowseIdOrNull()
+            val views = metadataRuns.findCountText()
+            val duration = metadataRuns.findDurationText()
 
             val thumb = bestThumbUrl(
                 (item.thumbnail?.musicThumbnailRenderer?.thumbnailImage
@@ -114,8 +140,11 @@ object SearchParser {
                     ?.navigationEndpoint?.browseEndpoint?.browseId ?: ""
 
             val metadataRuns = cols.getOrNull(1)?.musicResponsiveListItemFlexColumnRenderer?.text?.runs ?: emptyList()
-            val artist = if (metadataRuns.size >= 3) metadataRuns[2].text else ""
-            val year = if (metadataRuns.size >= 5) metadataRuns[4].text else null
+            // First ARTIST-typed run is the primary artist (collab albums have
+            // multiple ARTIST runs; we keep the first for this flat model).
+            val artistRun = metadataRuns.firstOrNull { it.pageTypeOrNull() == PAGE_TYPE_ARTIST }
+            val artist = artistRun?.text ?: ""
+            val year = metadataRuns.findYearText()
 
             val thumb = bestThumbUrl(
                 (item.thumbnail?.musicThumbnailRenderer?.thumbnailImage

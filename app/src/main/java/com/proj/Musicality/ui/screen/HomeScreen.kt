@@ -24,6 +24,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -73,6 +75,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.proj.Musicality.data.local.LibraryRepository
@@ -770,15 +773,24 @@ private fun SongFeaturedMix(
     )
     val featuredPlayTint = featuredPalette.accent
 
+    val darkTheme = isSystemInDarkTheme()
+    val cardColor = if (darkTheme) Color(0xFF1C1C1C) else Color(0xFFFFFFFF)
+    val cardBorderColor = if (darkTheme) Color(0xFF2A2A2A) else Color(0xFFEAEAEA)
+    val titleColor = if (darkTheme) Color(0xFFF5F5F5) else Color(0xFF1A1A1A)
+    val secondaryTextColor = if (darkTheme) Color(0xFFA0A0A0) else Color(0xFF666666)
+    val iconSurfaceColor = if (darkTheme) Color(0xFF2A2A2A) else Color(0xFFF5F5F5)
+    val iconTintColor = if (darkTheme) Color(0xFFA0A0A0) else Color(0xFF888888)
+
     Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp)
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
     ) {
         val featuredItem = featured.toMediaItem()
         Surface(
-            shape = RoundedCornerShape(14.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            shape = RoundedCornerShape(16.dp),
+            color = cardColor,
+            border = BorderStroke(1.dp, cardBorderColor),
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable {
@@ -793,40 +805,27 @@ private fun SongFeaturedMix(
                     )
                 }
         ) {
-            Box(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(10.dp)
+                    .padding(16.dp)
             ) {
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(end = 40.dp),
+                    modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Box {
-                        Thumbnail(
-                            url = featured.thumbnailUrl,
-                            size = 98.dp,
-                            cornerRadius = 10.dp
-                        )
-                        IconButton(
-                            onClick = { onSongOverflowClick(featured) },
-                            modifier = Modifier.align(Alignment.TopEnd)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.MoreVert,
-                                contentDescription = "More actions for ${featured.title}"
-                            )
-                        }
-                    }
+                    Thumbnail(
+                        url = featured.thumbnailUrl,
+                        size = 72.dp,
+                        cornerRadius = 8.dp
+                    )
                     Spacer(Modifier.width(12.dp))
-                    Column(
-                        modifier = Modifier.weight(1f)
-                    ) {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = featured.title,
-                            style = MaterialTheme.typography.titleMedium,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = titleColor,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -836,22 +835,48 @@ private fun SongFeaturedMix(
                                 featured.artistName.takeIf { it.isNotBlank() },
                                 featured.plays
                             ).joinToString(" • "),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontSize = 13.sp,
+                            color = secondaryTextColor,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
-                Icon(
-                    imageVector = Icons.Rounded.PlayArrow,
-                    contentDescription = "Play ${featured.title}",
-                    tint = featuredPlayTint,
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(end = 4.dp, bottom = 4.dp)
-                        .size(32.dp)
-                )
+                Spacer(Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .background(iconSurfaceColor, CircleShape)
+                            .clickable { onSongOverflowClick(featured) },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.MoreVert,
+                            contentDescription = "More actions for ${featured.title}",
+                            tint = iconTintColor,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .background(iconSurfaceColor, CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.PlayArrow,
+                            contentDescription = "Play ${featured.title}",
+                            tint = iconTintColor,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
             }
         }
 
@@ -1344,7 +1369,7 @@ private fun CompactSongCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(1f)
-                    .clip(RoundedCornerShape(8.dp))
+                    .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
             )
             Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp)) {
                 Text(

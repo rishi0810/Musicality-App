@@ -69,6 +69,7 @@ object SuggestionParser {
         if (subtitleRuns != null) {
             subtitle = subtitleRuns.joinToString("") { it.text }
 
+            // First pass: individual artists / album with proper browseIds (Shape B).
             subtitleRuns.forEach { run ->
                 val runNav = run.navigationEndpoint?.browseEndpoint
                 if (runNav != null) {
@@ -81,8 +82,47 @@ object SuggestionParser {
                     }
                 }
             }
+
+            // Shape A fallback: concatenated artist text with no browseId. The artist
+            // segment lives between the first and second " • " separators, e.g.
+            //   "Song" • "Artist A & Artist B" • "8.3M plays"
+            // Pair the display name with the overflow menu's "Go to artist" browseId
+            // (the primary artist — the only id recoverable when flex[1] runs carry
+            // no navigation) so downstream consumers (e.g. recordPlayback) have a
+            // usable artist_id for personalization even for collab tracks.
+            if (artists.isEmpty()) {
+                val bulletIdxs = subtitleRuns.mapIndexedNotNull { i, run ->
+                    if (run.text.trim() == "•") i else null
+                }
+                if (bulletIdxs.size >= 2) {
+                    val segment = subtitleRuns
+                        .subList(bulletIdxs[0] + 1, bulletIdxs[1])
+                        .joinToString("") { it.text }
+                        .trim()
+                    if (segment.isNotEmpty()) {
+                        val menuArtistId = renderer.menu.artistIdFromMenu().orEmpty()
+                        artists.add(ArtistInfo(segment, menuArtistId))
+                    }
+                }
+            }
         }
 
+        // Album for SONG suggestions lives in flex[2] (not flex[1]).
+        if (album == null && type == SuggestionType.SONG) {
+            val albumRun = renderer.flexColumns?.getOrNull(2)
+                ?.musicResponsiveListItemFlexColumnRenderer?.text?.runs
+                ?.firstOrNull { run ->
+                    run.navigationEndpoint?.browseEndpoint
+                        ?.browseEndpointContextSupportedConfigs
+                        ?.browseEndpointContextMusicConfig
+                        ?.pageType == "MUSIC_PAGE_TYPE_ALBUM"
+                }
+            if (albumRun != null) {
+                album = AlbumInfo(albumRun.text, albumRun.navigationEndpoint?.browseEndpoint?.browseId ?: "")
+            }
+        }
+
+        // Last-ditch album fallback via overflow menu (id only, no name).
         if (album == null && type == SuggestionType.SONG) {
             renderer.menu?.menuRenderer?.items?.forEach { menuItem ->
                 val menuNav = menuItem.menuNavigationItemRenderer?.navigationEndpoint?.browseEndpoint
@@ -94,5 +134,17 @@ object SuggestionParser {
         }
 
         return SearchSuggestionResult(type, title, id, subtitle, thumbnails, artists.ifEmpty { null }, album)
+    }
+
+    private fun MenuRenderer?.artistIdFromMenu(): String? {
+        val items = this?.menuRenderer?.items ?: return null
+        for (item in items) {
+            val ep = item.menuNavigationItemRenderer?.navigationEndpoint?.browseEndpoint ?: continue
+            val pt = ep.browseEndpointContextSupportedConfigs?.browseEndpointContextMusicConfig?.pageType
+            if (pt == "MUSIC_PAGE_TYPE_ARTIST") {
+                return ep.browseId?.takeIf { it.isNotBlank() }
+            }
+        }
+        return null
     }
 }

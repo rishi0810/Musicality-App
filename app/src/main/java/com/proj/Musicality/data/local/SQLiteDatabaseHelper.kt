@@ -111,6 +111,9 @@ class SQLiteDatabaseHelper(context: Context) : SQLiteOpenHelper(
         if (oldVersion < 2) {
             createListeningHistoryTables(db)
         }
+        if (oldVersion < 3) {
+            migrateListeningHistoryTablesToRequireArtistId(db)
+        }
     }
 
     fun getSong(videoId: String): SongDbRecord? = readableDatabase.query(
@@ -485,6 +488,77 @@ class SQLiteDatabaseHelper(context: Context) : SQLiteOpenHelper(
         if (cursor.moveToFirst()) cursor.getInt(0) else 0
     }
 
+    fun normalizeMissingArtistNames(fallbackArtistName: String) {
+        writableDatabase.execSQL(
+            """
+            UPDATE listening_history
+            SET artist_name = ?
+            WHERE trim(COALESCE(artist_name, '')) = ''
+            """.trimIndent(),
+            arrayOf(fallbackArtistName)
+        )
+        writableDatabase.execSQL(
+            """
+            UPDATE song_play_counts
+            SET artist_name = ?
+            WHERE trim(COALESCE(artist_name, '')) = ''
+            """.trimIndent(),
+            arrayOf(fallbackArtistName)
+        )
+        writableDatabase.execSQL(
+            """
+            UPDATE listening_history
+            SET artist_name = trim(substr(artist_name, 1, instr(artist_name || ',', ',') - 1))
+            WHERE instr(artist_name, ',') > 0
+            """.trimIndent()
+        )
+        writableDatabase.execSQL(
+            """
+            UPDATE song_play_counts
+            SET artist_name = trim(substr(artist_name, 1, instr(artist_name || ',', ',') - 1))
+            WHERE instr(artist_name, ',') > 0
+            """.trimIndent()
+        )
+        writableDatabase.execSQL(
+            """
+            UPDATE artist_play_counts
+            SET artist_name = ?
+            WHERE trim(COALESCE(artist_name, '')) = ''
+            """.trimIndent(),
+            arrayOf(fallbackArtistName)
+        )
+    }
+
+    fun purgeRowsMissingArtistId() {
+        writableDatabase.execSQL(
+            """
+            DELETE FROM listening_history
+            WHERE trim(COALESCE(artist_id, '')) = ''
+            """.trimIndent()
+        )
+        writableDatabase.execSQL(
+            """
+            DELETE FROM song_play_counts
+            WHERE trim(COALESCE(artist_id, '')) = ''
+            """.trimIndent()
+        )
+    }
+
+    fun pruneSongPlayCounts(keepTop: Int) {
+        val safeKeep = keepTop.coerceAtLeast(1)
+        writableDatabase.execSQL(
+            """
+            DELETE FROM song_play_counts
+            WHERE video_id IN (
+                SELECT video_id FROM song_play_counts
+                ORDER BY play_count DESC, last_played_at DESC
+                LIMIT -1 OFFSET ?
+            )
+            """.trimIndent(),
+            arrayOf(safeKeep)
+        )
+    }
+
     fun pruneListeningHistory(keepLatest: Int) {
         val safeKeep = keepLatest.coerceAtLeast(1)
         writableDatabase.execSQL(
@@ -602,7 +676,7 @@ class SQLiteDatabaseHelper(context: Context) : SQLiteOpenHelper(
                 video_id TEXT NOT NULL,
                 title TEXT NOT NULL,
                 artist_name TEXT NOT NULL,
-                artist_id TEXT,
+                artist_id TEXT NOT NULL,
                 thumbnail_url TEXT,
                 played_at INTEGER NOT NULL
             )
@@ -615,7 +689,7 @@ class SQLiteDatabaseHelper(context: Context) : SQLiteOpenHelper(
                 video_id TEXT PRIMARY KEY,
                 title TEXT NOT NULL,
                 artist_name TEXT NOT NULL,
-                artist_id TEXT,
+                artist_id TEXT NOT NULL,
                 thumbnail_url TEXT,
                 play_count INTEGER NOT NULL DEFAULT 0,
                 last_played_at INTEGER NOT NULL
@@ -640,6 +714,75 @@ class SQLiteDatabaseHelper(context: Context) : SQLiteOpenHelper(
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_listening_history_video_id ON listening_history(video_id)")
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_song_play_counts_play_count ON song_play_counts(play_count DESC)")
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_artist_play_counts_play_count ON artist_play_counts(play_count DESC)")
+    }
+
+    private fun migrateListeningHistoryTablesToRequireArtistId(db: SQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS listening_history_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                video_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                artist_name TEXT NOT NULL,
+                artist_id TEXT NOT NULL,
+                thumbnail_url TEXT,
+                played_at INTEGER NOT NULL
+            )
+            """.trimIndent()
+        )
+        db.execSQL(
+            """
+            INSERT INTO listening_history_new (video_id, title, artist_name, artist_id, thumbnail_url, played_at)
+            SELECT
+                video_id,
+                title,
+                trim(substr(COALESCE(artist_name, ''), 1, instr(COALESCE(artist_name, '') || ',', ',') - 1)),
+                trim(artist_id),
+                thumbnail_url,
+                played_at
+            FROM listening_history
+            WHERE trim(COALESCE(artist_id, '')) <> ''
+            """.trimIndent()
+        )
+        db.execSQL("DROP TABLE IF EXISTS listening_history")
+        db.execSQL("ALTER TABLE listening_history_new RENAME TO listening_history")
+
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS song_play_counts_new (
+                video_id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                artist_name TEXT NOT NULL,
+                artist_id TEXT NOT NULL,
+                thumbnail_url TEXT,
+                play_count INTEGER NOT NULL DEFAULT 0,
+                last_played_at INTEGER NOT NULL
+            )
+            """.trimIndent()
+        )
+        db.execSQL(
+            """
+            INSERT INTO song_play_counts_new (video_id, title, artist_name, artist_id, thumbnail_url, play_count, last_played_at)
+            SELECT
+                video_id,
+                title,
+                trim(substr(COALESCE(artist_name, ''), 1, instr(COALESCE(artist_name, '') || ',', ',') - 1)),
+                trim(artist_id),
+                thumbnail_url,
+                play_count,
+                last_played_at
+            FROM song_play_counts
+            WHERE trim(COALESCE(artist_id, '')) <> ''
+            """.trimIndent()
+        )
+        db.execSQL("DROP TABLE IF EXISTS song_play_counts")
+        db.execSQL("ALTER TABLE song_play_counts_new RENAME TO song_play_counts")
+
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS idx_listening_history_played_at ON listening_history(played_at DESC)"
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_listening_history_video_id ON listening_history(video_id)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_song_play_counts_play_count ON song_play_counts(play_count DESC)")
     }
 
     private fun Cursor.readAllSongs(): List<SongDbRecord> = buildList {
@@ -774,6 +917,6 @@ class SQLiteDatabaseHelper(context: Context) : SQLiteOpenHelper(
 
     companion object {
         private const val DATABASE_NAME = "musicality_library.db"
-        private const val DATABASE_VERSION = 2
+        private const val DATABASE_VERSION = 3
     }
 }

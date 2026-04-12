@@ -17,13 +17,29 @@ object StreamParser {
         val player = response.playerResponse
             ?: PlayerResponse(
                 streamingData = response.streamingData,
-                videoDetails = response.videoDetails
+                videoDetails = response.videoDetails,
+                playabilityStatus = response.playabilityStatus
             )
 
         val hasPlayerResponse = response.playerResponse != null
         val hasStreamingData = player.streamingData != null
         val hasVideoDetails = player.videoDetails != null
         Log.d(TAG, "extractSongDetails: playerResponse=$hasPlayerResponse, streamingData=$hasStreamingData, videoDetails=$hasVideoDetails")
+
+        // Short-circuit on explicit playability errors so we don't waste a retry
+        // + VR fallback on something YT already said is unplayable.
+        val playability = player.playabilityStatus
+        if (playability?.status != null && playability.status != "OK") {
+            Log.w(TAG, "extractSongDetails: playability=${playability.status} reason='${playability.reason}' — returning empty details")
+            return SongPlaybackDetails(
+                streamUrl = null,
+                expiry = null,
+                viewCount = player.videoDetails?.viewCount ?: "0",
+                lengthSeconds = player.videoDetails?.lengthSeconds?.toLongOrNull() ?: 0L,
+                channelId = player.videoDetails?.channelId ?: "",
+                description = player.videoDetails?.shortDescription ?: ""
+            )
+        }
 
         val streamingData = player.streamingData
         val formats = (streamingData?.adaptiveFormats ?: emptyList()) + (streamingData?.formats ?: emptyList())

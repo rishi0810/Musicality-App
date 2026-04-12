@@ -62,7 +62,7 @@ fun ExpressiveBottomNavBar(
     val safeSelectedIndex = selectedIndex.coerceIn(0, items.lastIndex)
     val playbackUiPalette = LocalPlaybackUiPalette.current
     val activeIndicatorColor = playbackUiPalette?.navIndicator ?: indicatorColor
-    val selectedContentColor = playbackUiPalette?.onAccent ?: MaterialTheme.colorScheme.onPrimaryContainer
+    val selectedContentColor = if (playbackUiPalette != null) Color.White else MaterialTheme.colorScheme.onPrimaryContainer
 
     Box(modifier = modifier, contentAlignment = Alignment.BottomCenter) {
         val count = items.size.coerceAtLeast(1)

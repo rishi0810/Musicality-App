@@ -94,7 +94,7 @@ object ExploreParser {
         val col1Runs = cols.getOrNull(1)
             ?.musicResponsiveListItemFlexColumnRenderer?.text?.runs
             ?: emptyList()
-        val artistRun = col1Runs.firstOrNull { it.navigationEndpoint?.browseEndpoint != null }
+        val artistRun = col1Runs.primaryArtistRun()
         val plays = col1Runs.firstOrNull { it.text != " • " && it.navigationEndpoint == null }?.text
 
         val col2Runs = cols.getOrNull(2)
@@ -106,8 +106,8 @@ object ExploreParser {
             videoId = videoId,
             playlistId = playEndpoint?.playlistId,
             title = title,
-            artistName = artistRun?.text ?: "",
-            artistId = artistRun?.navigationEndpoint?.browseEndpoint?.browseId,
+            artistName = artistRun?.text?.primaryArtistName().orEmpty(),
+            artistId = artistRun?.artistBrowseIdOrNull(),
             albumName = albumRun?.text,
             albumId = albumRun?.navigationEndpoint?.browseEndpoint?.browseId,
             plays = plays,
