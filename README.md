@@ -14,6 +14,19 @@ A modern, feature-rich Android music player that brings millions of songs, album
   <img src="https://raw.githubusercontent.com/NeoApplications/Neo-Backup/034b226cea5c1b30eb4f6a6f313e4dadcbb0ece4/badge_github.png" alt="Download on GitHub" height="60"/>
 </a>
 
+<br/><br/>
+
+<p>
+  <img src="screenshots/home_screen.png" width="30%" />
+  <img src="screenshots/explore.png" width="30%" />
+  <img src="screenshots/library.png" width="30%" />
+</p>
+<p>
+  <img src="screenshots/songscreen.png" width="30%" />
+  <img src="screenshots/lyrics.png" width="30%" />
+  <img src="screenshots/artist.png" width="30%" />
+</p>
+
 </div>
 
 ---
@@ -57,21 +70,6 @@ Musicality is built around the idea that your music experience should feel effor
 - "Play Next" and "Add to Queue" from anywhere in the app
 - Offline caching for faster load times
 - Dynamic dark theme with colors pulled from album art
-
----
-
-## Screenshots
-
-<p align="center">
-  <img src="screenshots/home_screen.png" width="30%" />
-  <img src="screenshots/explore.png" width="30%" />
-  <img src="screenshots/library.png" width="30%" />
-</p>
-<p align="center">
-  <img src="screenshots/songscreen.png" width="30%" />
-  <img src="screenshots/lyrics.png" width="30%" />
-  <img src="screenshots/artist.png" width="30%" />
-</p>
 
 ---
 
