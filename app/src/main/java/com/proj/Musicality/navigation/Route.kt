@@ -2,6 +2,7 @@ package com.proj.Musicality.navigation
 
 import kotlinx.serialization.Serializable
 
+@Serializable
 sealed interface Route {
 
     @Serializable
