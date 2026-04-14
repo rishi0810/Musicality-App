@@ -35,7 +35,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Album
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Share
@@ -80,6 +83,9 @@ import coil3.request.ImageRequest
 import coil3.request.crossfade
 import coil3.size.Size
 import com.proj.Musicality.data.local.LibraryRepository
+import com.proj.Musicality.data.local.MediaLibraryState
+import com.proj.Musicality.data.local.SavedEntry
+import com.proj.Musicality.data.local.SavedEntryType
 import com.proj.Musicality.data.model.ArtistContent
 import com.proj.Musicality.data.model.ArtistDetails
 import com.proj.Musicality.data.model.ArtistRelated
@@ -222,6 +228,9 @@ fun ArtistScreen(
                 )
             }
 
+            val librarySnapshot by repository.snapshot.collectAsStateWithLifecycle()
+            val savedArtistEntry = librarySnapshot.artists.firstOrNull { it.id == seed.browseId }
+            val isArtistSaved = savedArtistEntry != null
             ArtistHeroHeader(
                 name = artistName,
                 subtitle = subscribers,
@@ -229,17 +238,22 @@ fun ArtistScreen(
                 allowNetworkFetch = !hasReusableSeedThumb,
                 surfaceColor = surfaceColor,
                 statusBarTop = statusBarTop,
+                isSaved = isArtistSaved,
                 onAdd = {
                     scope.launch {
-                        repository.rememberArtist(
-                            artistId = seed.browseId,
-                            name = loadedDetails?.name ?: seed.name,
-                            thumbnailUrl = loadedDetails
-                                ?.thumbnails
-                                ?.maxByOrNull { it.width }
-                                ?.url
-                                ?: seed.thumbnailUrl
-                        )
+                        if (isArtistSaved && savedArtistEntry != null) {
+                            repository.removeSavedEntry(savedArtistEntry)
+                        } else {
+                            repository.rememberArtist(
+                                artistId = seed.browseId,
+                                name = loadedDetails?.name ?: seed.name,
+                                thumbnailUrl = loadedDetails
+                                    ?.thumbnails
+                                    ?.maxByOrNull { it.width }
+                                    ?.url
+                                    ?: seed.thumbnailUrl
+                            )
+                        }
                     }
                 },
                 heroModifier = heroModifier
@@ -423,9 +437,28 @@ fun ArtistScreen(
     }
 
     selectedTopSongMenu?.let { menu ->
+        val mediaState by remember(menu.videoId) {
+            repository.observeMediaState(menu.videoId)
+        }.collectAsStateWithLifecycle(initialValue = MediaLibraryState())
+        val menuMediaItem = MediaItem(
+            videoId = menu.videoId,
+            title = menu.title,
+            artistName = menu.artistName,
+            artistId = menu.artistId,
+            albumName = menu.albumName,
+            albumId = menu.albumId,
+            thumbnailUrl = menu.thumb,
+            durationText = null,
+            musicVideoType = "MUSIC_VIDEO_TYPE_ATV"
+        )
         ArtistTopSongActionsSheet(
             model = menu,
+            isLiked = mediaState.isLiked,
             onDismiss = { selectedTopSongMenu = null },
+            onToggleLike = {
+                scope.launch { repository.toggleLike(menuMediaItem) }
+                selectedTopSongMenu = null
+            },
             onViewArtist = {
                 onSimilarArtistTap(menu.artistName, menu.artistId, null)
                 selectedTopSongMenu = null
@@ -490,7 +523,9 @@ fun ArtistScreen(
 @Composable
 private fun ArtistTopSongActionsSheet(
     model: ArtistTopSongMenuModel,
+    isLiked: Boolean,
     onDismiss: () -> Unit,
+    onToggleLike: () -> Unit,
     onViewArtist: () -> Unit,
     onViewAlbum: () -> Unit,
     onShare: () -> Unit,
@@ -517,6 +552,12 @@ private fun ArtistTopSongActionsSheet(
 
             HorizontalDivider(modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
 
+            ArtistTopSongActionItem(
+                label = if (isLiked) "Remove from liked songs" else "Add to liked songs",
+                icon = if (isLiked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                enabled = true,
+                onClick = onToggleLike
+            )
             ArtistTopSongActionItem(
                 label = "View Artist",
                 icon = Icons.Rounded.Person,
@@ -595,6 +636,7 @@ private fun ArtistHeroHeader(
     allowNetworkFetch: Boolean,
     surfaceColor: Color,
     statusBarTop: androidx.compose.ui.unit.Dp,
+    isSaved: Boolean,
     onAdd: () -> Unit,
     heroModifier: Modifier = Modifier
 ) {
@@ -665,8 +707,8 @@ private fun ArtistHeroHeader(
                     onClick = onAdd
                 ) {
                     Icon(
-                        imageVector = Icons.Rounded.Add,
-                        contentDescription = "Add"
+                        imageVector = if (isSaved) Icons.Rounded.Check else Icons.Rounded.Add,
+                        contentDescription = if (isSaved) "Remove from library" else "Add to library"
                     )
                 }
             }

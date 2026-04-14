@@ -89,6 +89,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
+import com.proj.Musicality.ui.theme.LocalPlaybackBackdropPalette
 import com.proj.Musicality.ui.theme.LocalPlaybackUiPalette
 import com.proj.Musicality.data.local.DateSortOrder
 import com.proj.Musicality.data.local.LibraryCollectionType
@@ -291,11 +292,10 @@ private fun SavedLibrarySection(
     modifier: Modifier = Modifier
 ) {
     var showSortMenu by remember { mutableStateOf(false) }
-    val playbackUiPalette = LocalPlaybackUiPalette.current
-    val segmentedActiveContainerColor = playbackUiPalette?.navIndicator
+    val backdropPalette = LocalPlaybackBackdropPalette.current
+    val segmentedActiveContainerColor = backdropPalette?.middle
         ?: MaterialTheme.colorScheme.secondaryContainer
-    val segmentedActiveContentColor = playbackUiPalette?.onAccent
-        ?: MaterialTheme.colorScheme.onSecondaryContainer
+    val segmentedActiveContentColor = Color.White
 
     val filteredEntries = remember(snapshot, selectedSavedFilter, sortOrder) {
         val base = snapshot.entriesFor(selectedSavedFilter)
@@ -325,8 +325,7 @@ private fun SavedLibrarySection(
                             shape = SegmentedButtonDefaults.itemShape(index = index, count = SavedFilter.entries.size),
                             colors = SegmentedButtonDefaults.colors(
                                 activeContainerColor = segmentedActiveContainerColor,
-                                activeContentColor = segmentedActiveContentColor,
-                                activeBorderColor = segmentedActiveContainerColor
+                                activeContentColor = segmentedActiveContentColor
                             ),
                             label = {
                                 Text(

@@ -28,6 +28,7 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.DeleteForever
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Share
@@ -65,6 +66,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.proj.Musicality.R
 import com.proj.Musicality.data.local.LibraryCollectionType
 import com.proj.Musicality.data.local.LibraryRepository
+import com.proj.Musicality.data.local.MediaLibraryState
 import com.proj.Musicality.data.model.PlaybackQueue
 import com.proj.Musicality.data.model.QueueSource
 import com.proj.Musicality.ui.components.SongListItem
@@ -303,9 +305,17 @@ fun LibraryCollectionScreen(
     }
 
     selectedTrackMenu?.let { menu ->
+        val mediaState by remember(menu.mediaItem.videoId) {
+            repository.observeMediaState(menu.mediaItem.videoId)
+        }.collectAsStateWithLifecycle(initialValue = MediaLibraryState())
         LibraryTrackActionsSheet(
             model = menu,
+            isLiked = mediaState.isLiked,
             onDismiss = { selectedTrackMenu = null },
+            onToggleLike = {
+                scope.launch { repository.toggleLike(menu.mediaItem) }
+                selectedTrackMenu = null
+            },
             onRemoveFromCollection = {
                 scope.launch {
                     repository.removeFromCollection(collectionType, menu.mediaItem)
@@ -366,7 +376,9 @@ fun LibraryCollectionScreen(
 @Composable
 private fun LibraryTrackActionsSheet(
     model: LibraryTrackMenuModel,
+    isLiked: Boolean,
     onDismiss: () -> Unit,
+    onToggleLike: () -> Unit,
     onRemoveFromCollection: () -> Unit,
     onPlayNext: () -> Unit,
     onAddToQueue: () -> Unit,
@@ -382,6 +394,13 @@ private fun LibraryTrackActionsSheet(
         sheetState = sheetState
     ) {
         Column(modifier = Modifier.padding(bottom = 16.dp)) {
+            if (hasVideoId) {
+                LibraryActionItem(
+                    label = if (isLiked) "Remove from liked songs" else "Add to liked songs",
+                    icon = if (isLiked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                    onClick = onToggleLike
+                )
+            }
             LibraryActionItem(
                 label = "Remove song",
                 icon = Icons.Rounded.DeleteForever,

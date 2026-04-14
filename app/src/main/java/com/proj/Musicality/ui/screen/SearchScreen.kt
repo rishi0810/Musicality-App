@@ -6,17 +6,22 @@ import android.util.Log
 import android.view.inputmethod.InputMethodManager
 import android.widget.Toast
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.ExperimentalAnimationApi
+import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -30,7 +35,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -42,6 +46,8 @@ import androidx.compose.material.icons.rounded.Clear
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Search
@@ -83,6 +89,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.proj.Musicality.api.SearchType
 import com.proj.Musicality.data.local.LibraryRepository
+import com.proj.Musicality.data.local.MediaLibraryState
 import com.proj.Musicality.data.model.AlbumResult
 import com.proj.Musicality.data.model.AllResult
 import com.proj.Musicality.data.model.ArtistResult
@@ -96,7 +103,8 @@ import com.proj.Musicality.data.model.VideoResult
 import com.proj.Musicality.data.model.toMediaItem
 import com.proj.Musicality.data.parser.MoodCategoryParser
 import com.proj.Musicality.ui.components.SongListItem
-import com.proj.Musicality.ui.theme.LocalPlaybackUiPalette
+import com.proj.Musicality.ui.theme.LocalPlaybackBackdropPalette
+import com.proj.Musicality.ui.theme.LocalSharedTransitionScope
 import com.proj.Musicality.util.upscaleThumbnail
 import com.proj.Musicality.viewmodel.SearchViewModel
 import kotlinx.coroutines.launch
@@ -115,11 +123,10 @@ private data class SearchResultMenuModel(
     val mediaItem: MediaItem? = null
 )
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalAnimationApi::class)
+@OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalAnimationApi::class, ExperimentalSharedTransitionApi::class)
 @Composable
 fun SearchScreen(
     animatedVisibilityScope: AnimatedVisibilityScope,
-    onBackToHome: () -> Unit,
     onSongTap: (MediaItem, PlaybackQueue) -> Unit,
     onPlayNext: (MediaItem) -> Unit,
     onAddToQueue: (MediaItem) -> Unit,
@@ -141,11 +148,10 @@ fun SearchScreen(
     val results by viewModel.results.collectAsStateWithLifecycle()
 
     val motionScheme = MaterialTheme.motionScheme
-    val playbackUiPalette = LocalPlaybackUiPalette.current
-    val selectedChipContainerColor = playbackUiPalette?.navIndicator
+    val backdropPalette = LocalPlaybackBackdropPalette.current
+    val selectedChipContainerColor = backdropPalette?.middle
         ?: MaterialTheme.colorScheme.secondaryContainer
-    val selectedChipLabelColor = playbackUiPalette?.onAccent
-        ?: MaterialTheme.colorScheme.onSecondaryContainer
+    val selectedChipLabelColor = Color.White
     val context = LocalContext.current
     val repository = remember(context.applicationContext) {
         LibraryRepository.getInstance(context.applicationContext)
@@ -172,48 +178,48 @@ fun SearchScreen(
         suggestions.filter { it.type != SuggestionType.SUGGESTION && it.type != SuggestionType.UNKNOWN }
     }
     val isInExploreDefaultState = query.isBlank() && !isSearchMode && !isSearchFieldFocused
-    val onSearchBarBack = remember(
-        isInExploreDefaultState,
-        dismissKeyboard,
-        onBackToHome,
-        viewModel
-    ) {
-        {
-            if (isInExploreDefaultState) {
-                dismissKeyboard()
-                onBackToHome()
-            } else {
-                // Return to embedded Explore default state from any active search state.
-                viewModel.onQueryChange("")
-                dismissKeyboard()
-                isSearchFieldFocused = false
-            }
-        }
+    val sharedTransitionScope = LocalSharedTransitionScope.current
+    val searchBarOverlayModifier = with(sharedTransitionScope) {
+        Modifier.renderInSharedTransitionScopeOverlay(zIndexInOverlay = 1f)
     }
 
     Column(modifier = modifier.fillMaxSize()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .then(searchBarOverlayModifier)
+                .background(MaterialTheme.colorScheme.surface)
                 .padding(horizontal = 14.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(
-                modifier = Modifier
-                    .size(50.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-                    .clickable(onClick = onSearchBarBack),
-                contentAlignment = Alignment.Center
+            AnimatedVisibility(
+                visible = !isInExploreDefaultState,
+                enter = expandHorizontally() + fadeIn(),
+                exit = shrinkHorizontally() + fadeOut()
             ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
-                    contentDescription = "Back to Home",
-                    modifier = Modifier.size(24.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Row {
+                    Box(
+                        modifier = Modifier
+                            .size(50.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                            .clickable {
+                                viewModel.onQueryChange("")
+                                dismissKeyboard()
+                                isSearchFieldFocused = false
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
+                            contentDescription = "Clear search",
+                            modifier = Modifier.size(24.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Spacer(Modifier.width(8.dp))
+                }
             }
-            Spacer(Modifier.width(8.dp))
             TextField(
                 value = query,
                 onValueChange = { viewModel.onQueryChange(it) },
@@ -224,6 +230,7 @@ fun SearchScreen(
                     Text(
                         "Search songs, artists, albums...",
                         color = MaterialTheme.colorScheme.onSurfaceVariant
+
                     )
                 },
                 trailingIcon = {
@@ -238,7 +245,7 @@ fun SearchScreen(
                     }
                 },
                 singleLine = true,
-                shape = RoundedCornerShape(28.dp),
+                shape = RoundedCornerShape(22.dp),
                 colors = TextFieldDefaults.colors(
                     unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
                     focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
@@ -342,6 +349,9 @@ fun SearchScreen(
                                                 title = result.title,
                                                 subtitle = result.subtitle,
                                                 thumbnailUrl = result.thumb,
+                                                onOverflowClick = {
+                                                    selectedResultMenu = buildAllResultMenuModel(result)
+                                                },
                                                 onClick = {
                                                     handleAllResultTap(
                                                         result, onSongTap, onVideoTap, onArtistTap, onAlbumTap, onPlaylistTap
@@ -365,6 +375,9 @@ fun SearchScreen(
                                                 title = result.title,
                                                 subtitle = result.subtitle,
                                                 thumbnailUrl = result.thumb,
+                                                onOverflowClick = {
+                                                    selectedResultMenu = buildAllResultMenuModel(result)
+                                                },
                                                 onClick = {
                                                     handleAllResultTap(
                                                         result, onSongTap, onVideoTap, onArtistTap, onAlbumTap, onPlaylistTap
@@ -760,9 +773,20 @@ fun SearchScreen(
     }
 
     selectedResultMenu?.let { menu ->
+        val likedVideoId = menu.mediaItem?.videoId
+        val mediaState by remember(likedVideoId) {
+            if (likedVideoId != null) repository.observeMediaState(likedVideoId)
+            else kotlinx.coroutines.flow.flowOf(MediaLibraryState())
+        }.collectAsStateWithLifecycle(initialValue = MediaLibraryState())
         SearchResultActionsSheet(
             model = menu,
+            isLiked = mediaState.isLiked,
             onDismiss = { selectedResultMenu = null },
+            onToggleLike = {
+                val media = menu.mediaItem ?: return@SearchResultActionsSheet
+                scope.launch { repository.toggleLike(media) }
+                selectedResultMenu = null
+            },
             onPlayNext = {
                 val media = menu.mediaItem ?: return@SearchResultActionsSheet
                 onPlayNext(media)
@@ -832,6 +856,48 @@ fun SearchScreen(
 }
 
 
+private fun buildAllResultMenuModel(result: AllResult): SearchResultMenuModel {
+    val typeLower = result.type.lowercase()
+    val isVideoType = typeLower.contains("video")
+    val isArtistType = typeLower.contains("artist")
+    val isAlbumType = typeLower.contains("album") || typeLower.contains("single") || typeLower.contains("ep")
+    val isPlaylistType = typeLower.contains("playlist")
+    val isPlayable = isVideoType || (!isArtistType && !isAlbumType && !isPlaylistType)
+
+    val shareUrl = when {
+        isArtistType || isAlbumType -> "https://music.youtube.com/browse/${result.id}"
+        isPlaylistType -> "https://music.youtube.com/playlist?list=${result.id}"
+        else -> "https://music.youtube.com/watch?v=${result.id}"
+    }
+
+    val mediaItem = if (isPlayable) {
+        MediaItem(
+            videoId = result.id,
+            title = result.title,
+            artistName = "",
+            artistId = null,
+            albumName = null,
+            albumId = null,
+            thumbnailUrl = result.thumb,
+            durationText = null,
+            musicVideoType = if (isVideoType) "MUSIC_VIDEO_TYPE_OMV" else "MUSIC_VIDEO_TYPE_ATV"
+        )
+    } else null
+
+    return SearchResultMenuModel(
+        typeLabel = result.type.replaceFirstChar { it.uppercase() },
+        title = result.title,
+        subtitle = result.subtitle,
+        thumb = result.thumb,
+        shareUrl = shareUrl,
+        mediaItem = mediaItem,
+        metadata = buildList {
+            if (result.type.isNotBlank()) add("Type: ${result.type}")
+            if (result.subtitle.isNotBlank()) add("Info: ${result.subtitle}")
+        }
+    )
+}
+
 private fun handleAllResultTap(
     result: AllResult,
     onSongTap: (MediaItem, PlaybackQueue) -> Unit,
@@ -870,7 +936,9 @@ private fun handleAllResultTap(
 @Composable
 private fun SearchResultActionsSheet(
     model: SearchResultMenuModel,
+    isLiked: Boolean,
     onDismiss: () -> Unit,
+    onToggleLike: () -> Unit,
     onPlayNext: () -> Unit,
     onAddToQueue: () -> Unit,
     onViewArtist: () -> Unit,
@@ -888,6 +956,12 @@ private fun SearchResultActionsSheet(
     ) {
         Column(modifier = Modifier.padding(bottom = 16.dp)) {
             if (hasPlayableMedia) {
+                SearchActionItem(
+                    label = if (isLiked) "Remove from liked songs" else "Add to liked songs",
+                    icon = if (isLiked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                    enabled = true,
+                    onClick = onToggleLike
+                )
                 SearchActionItem(
                     label = "Play next",
                     icon = Icons.Rounded.PlayArrow,

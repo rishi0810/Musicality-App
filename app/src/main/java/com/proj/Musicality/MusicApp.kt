@@ -428,15 +428,6 @@ fun MusicApp() {
                         SearchScreen(
                         modifier = Modifier.statusBarsPadding(),
                         animatedVisibilityScope = this@composable,
-                        onBackToHome = {
-                            navController.navigate(Route.Home) {
-                                popUpTo(navController.graph.findStartDestination().id) {
-                                    saveState = true
-                                }
-                                launchSingleTop = true
-                                restoreState = true
-                            }
-                        },
                         collapsedMiniPlayerHeight = floatingControlsHeight + 3.dp,
                         onSongTap = onSongTap,
                         onPlayNext = onPlayNext,

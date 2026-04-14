@@ -16,7 +16,10 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -39,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.proj.Musicality.data.local.LibraryRepository
+import com.proj.Musicality.data.local.MediaLibraryState
 import com.proj.Musicality.data.model.*
 import com.proj.Musicality.navigation.Route
 import com.proj.Musicality.ui.components.*
@@ -81,6 +85,7 @@ fun PlaylistScreen(
     val repository = remember(context.applicationContext) {
         LibraryRepository.getInstance(context.applicationContext)
     }
+    val librarySnapshot by repository.snapshot.collectAsStateWithLifecycle()
     val viewModel: PlaylistViewModel = viewModel(
         key = seed.browseId,
         factory = PlaylistViewModelFactory(seed.browseId)
@@ -218,6 +223,8 @@ fun PlaylistScreen(
                 val saveTitle = playlist.title.ifBlank { seed.title }
                 val saveAuthor = playlist.author ?: seed.author
                 val saveThumb = playlist.thumbnails.maxByOrNull { it.width }?.url ?: seed.thumbnailUrl
+                val savedPlaylistEntry = librarySnapshot.playlists.firstOrNull { it.id == seed.browseId }
+                val isPlaylistSaved = savedPlaylistEntry != null
 
                 // Meta info
                 item(key = "meta") {
@@ -264,12 +271,16 @@ fun PlaylistScreen(
                             OutlinedButton(
                                 onClick = {
                                     scope.launch {
-                                        repository.rememberPlaylist(
-                                            playlistId = seed.browseId,
-                                            title = saveTitle,
-                                            author = saveAuthor,
-                                            thumbnailUrl = saveThumb
-                                        )
+                                        if (isPlaylistSaved && savedPlaylistEntry != null) {
+                                            repository.removeSavedEntry(savedPlaylistEntry)
+                                        } else {
+                                            repository.rememberPlaylist(
+                                                playlistId = seed.browseId,
+                                                title = saveTitle,
+                                                author = saveAuthor,
+                                                thumbnailUrl = saveThumb
+                                            )
+                                        }
                                     }
                                 },
                                 modifier = Modifier.size(52.dp),
@@ -281,8 +292,8 @@ fun PlaylistScreen(
                                 border = BorderStroke(1.dp, mediaPalette.outline.copy(alpha = 0.5f))
                             ) {
                                 Icon(
-                                    Icons.Rounded.Add,
-                                    contentDescription = "Add playlist",
+                                    if (isPlaylistSaved) Icons.Rounded.Check else Icons.Rounded.Add,
+                                    contentDescription = if (isPlaylistSaved) "Remove playlist" else "Add playlist",
                                     modifier = Modifier.size(20.dp)
                                 )
                             }
@@ -435,9 +446,17 @@ fun PlaylistScreen(
     } // Box
 
     selectedTrackMenu?.let { menu ->
+        val mediaState by remember(menu.mediaItem.videoId) {
+            repository.observeMediaState(menu.mediaItem.videoId)
+        }.collectAsStateWithLifecycle(initialValue = MediaLibraryState())
         PlaylistTrackActionsSheet(
             model = menu,
+            isLiked = mediaState.isLiked,
             onDismiss = { selectedTrackMenu = null },
+            onToggleLike = {
+                scope.launch { repository.toggleLike(menu.mediaItem) }
+                selectedTrackMenu = null
+            },
             onPlayNext = {
                 onPlayNext(menu.mediaItem)
                 selectedTrackMenu = null
@@ -491,7 +510,9 @@ fun PlaylistScreen(
 @Composable
 private fun PlaylistTrackActionsSheet(
     model: PlaylistTrackMenuModel,
+    isLiked: Boolean,
     onDismiss: () -> Unit,
+    onToggleLike: () -> Unit,
     onPlayNext: () -> Unit,
     onAddToQueue: () -> Unit,
     onViewArtist: () -> Unit,
@@ -507,6 +528,11 @@ private fun PlaylistTrackActionsSheet(
     ) {
         Column(modifier = Modifier.padding(bottom = 16.dp)) {
             if (hasVideoId) {
+                PlaylistActionItem(
+                    label = if (isLiked) "Remove from liked songs" else "Add to liked songs",
+                    icon = if (isLiked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                    onClick = onToggleLike
+                )
                 PlaylistActionItem(
                     label = "Play next",
                     icon = Icons.Rounded.PlayArrow,

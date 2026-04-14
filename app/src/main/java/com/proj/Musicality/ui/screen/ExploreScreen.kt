@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -23,8 +24,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowForward
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -41,6 +46,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -53,6 +61,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.request.crossfade
+import com.proj.Musicality.R
 import com.proj.Musicality.data.model.HomeItem
 import com.proj.Musicality.data.model.HomeSection
 import com.proj.Musicality.data.parser.MoodCategoryParser
@@ -124,9 +133,18 @@ fun ExploreScreen(
                 is ExploreViewModel.UiState.Loaded -> {
                     val data = s.data
 
-                    // ── 1. Moods & Genres CTAs (3 per column) ────────────────
+                    // ── 1a. Genres (image cards) ──────────────────────────────
+                    item(key = "genres-header") {
+                        SectionHeader("Genres")
+                    }
+                    item(key = "genres-row") {
+                        GenresRow(onMoodTap = onMoodTap)
+                        Spacer(Modifier.height(14.dp))
+                    }
+
+                    // ── 1b. Moods (chips, remaining) ──────────────────────────
                     item(key = "moods-header") {
-                        SectionHeader("Moods & Genres")
+                        SectionHeader("Moods")
                     }
                     item(key = "moods-row") {
                         MoodsRow(onMoodTap = onMoodTap)
@@ -252,11 +270,136 @@ fun ExploreScreen(
     }
 }
 
+// ── Genre cards ───────────────────────────────────────────────────────────────
+
+private val genreMoods = setOf(
+    MoodCategoryParser.Mood.PARTY,
+    MoodCategoryParser.Mood.ROMANCE,
+    MoodCategoryParser.Mood.WORKOUT,
+    MoodCategoryParser.Mood.ENERGIZE,
+    MoodCategoryParser.Mood.CHILL,
+    MoodCategoryParser.Mood.SAD,
+    MoodCategoryParser.Mood.FOCUS
+)
+
+private val genreMoodList = listOf(
+    MoodCategoryParser.Mood.PARTY,
+    MoodCategoryParser.Mood.ROMANCE,
+    MoodCategoryParser.Mood.WORKOUT,
+    MoodCategoryParser.Mood.ENERGIZE,
+    MoodCategoryParser.Mood.CHILL,
+    MoodCategoryParser.Mood.SAD,
+    MoodCategoryParser.Mood.FOCUS
+)
+
+private fun MoodCategoryParser.Mood.genreDrawable(): Int = when (this) {
+    MoodCategoryParser.Mood.PARTY    -> R.drawable.party
+    MoodCategoryParser.Mood.ROMANCE  -> R.drawable.romantic
+    MoodCategoryParser.Mood.WORKOUT  -> R.drawable.workout
+    MoodCategoryParser.Mood.ENERGIZE -> R.drawable.energize
+    MoodCategoryParser.Mood.CHILL    -> R.drawable.chill
+    MoodCategoryParser.Mood.SAD      -> R.drawable.sad
+    MoodCategoryParser.Mood.FOCUS    -> R.drawable.focus
+    else -> error("No genre drawable for $this")
+}
+
+@Composable
+private fun GenresRow(onMoodTap: (MoodCategoryParser.Mood) -> Unit) {
+    LazyRow(
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        contentPadding = PaddingValues(horizontal = 16.dp)
+    ) {
+        items(genreMoodList, key = { it.name }) { mood ->
+            GenreCard(mood = mood, onClick = { onMoodTap(mood) })
+        }
+    }
+}
+
+@Composable
+private fun GenreCard(mood: MoodCategoryParser.Mood, onClick: () -> Unit) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val shape = RoundedCornerShape(14.dp)
+    // Strong scrim covering bottom ~50% of card
+    val scrim = remember {
+        Brush.verticalGradient(
+            colorStops = arrayOf(
+                0.0f to Color.Transparent,
+                0.35f to Color(0x99000000),
+                1.0f to Color(0xF2000000)
+            )
+        )
+    }
+
+    Box(
+        modifier = Modifier
+            .width(195.dp)
+            .height(260.dp)
+            .shadow(elevation = 6.dp, shape = shape, clip = false)
+            .clip(shape)
+            .pressScale(interactionSource)
+            .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
+    ) {
+        // Image
+        AsyncImage(
+            model = mood.genreDrawable(),
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize()
+        )
+        // Subtle full-card dim to reduce image noise
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0x28000000))
+        )
+        // Strong gradient scrim — bottom 50%
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(130.dp)
+                .align(Alignment.BottomStart)
+                .background(scrim)
+        )
+        // Genre name + Explore affordance
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .align(Alignment.BottomStart)
+                .padding(horizontal = 12.dp, vertical = 12.dp)
+        ) {
+            Text(
+                text = mood.label().uppercase(),
+                style = MaterialTheme.typography.titleLarge,
+                color = Color.White,
+                fontWeight = FontWeight.ExtraBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(Modifier.height(4.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "Explore",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = Color.White.copy(alpha = 0.75f)
+                )
+                Icon(
+                    imageVector = Icons.AutoMirrored.Rounded.ArrowForward,
+                    contentDescription = null,
+                    tint = Color.White.copy(alpha = 0.75f),
+                    modifier = Modifier
+                        .padding(start = 3.dp)
+                        .size(14.dp)
+                )
+            }
+        }
+    }
+}
+
 // ── Moods row (3 chips per column) ────────────────────────────────────────────
 
 @Composable
 private fun MoodsRow(onMoodTap: (MoodCategoryParser.Mood) -> Unit) {
-    val groups = remember { MoodCategoryParser.Mood.entries.chunked(3) }
+    val groups = remember { MoodCategoryParser.Mood.entries.filter { it !in genreMoods }.chunked(3) }
     LazyRow(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         contentPadding = PaddingValues(horizontal = 16.dp)

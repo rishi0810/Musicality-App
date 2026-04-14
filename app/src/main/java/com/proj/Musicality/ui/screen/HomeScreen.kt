@@ -33,6 +33,8 @@ import androidx.compose.material.icons.automirrored.rounded.TrendingUp
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Album
 import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -79,6 +81,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.proj.Musicality.data.local.LibraryRepository
+import com.proj.Musicality.data.local.MediaLibraryState
 import coil3.compose.AsyncImage
 import com.proj.Musicality.data.model.HomeItem
 import com.proj.Musicality.data.model.HomeMoreEndpoint
@@ -258,9 +261,17 @@ fun HomeScreen(
     }
 
     selectedSongMenu?.let { menu ->
+        val mediaState by remember(menu.mediaItem.videoId) {
+            repository.observeMediaState(menu.mediaItem.videoId)
+        }.collectAsStateWithLifecycle(initialValue = MediaLibraryState())
         HomeSongActionsSheet(
             model = menu,
+            isLiked = mediaState.isLiked,
             onDismiss = { selectedSongMenu = null },
+            onToggleLike = {
+                scope.launch { repository.toggleLike(menu.mediaItem) }
+                selectedSongMenu = null
+            },
             onPlayNext = {
                 onPlayNext(menu.mediaItem)
                 selectedSongMenu = null
@@ -918,7 +929,9 @@ private fun SongFeaturedMix(
 @Composable
 private fun HomeSongActionsSheet(
     model: HomeSongMenuModel,
+    isLiked: Boolean,
     onDismiss: () -> Unit,
+    onToggleLike: () -> Unit,
     onPlayNext: () -> Unit,
     onAddToQueue: () -> Unit,
     onViewArtist: () -> Unit,
@@ -953,6 +966,11 @@ private fun HomeSongActionsSheet(
 
             Spacer(Modifier.height(12.dp))
 
+            HomeSongActionItem(
+                label = if (isLiked) "Remove from liked songs" else "Add to liked songs",
+                icon = if (isLiked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                onClick = onToggleLike
+            )
             HomeSongActionItem(
                 label = "Play next",
                 icon = Icons.Rounded.PlayArrow,
