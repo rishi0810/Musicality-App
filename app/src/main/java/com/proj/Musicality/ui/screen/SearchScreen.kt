@@ -179,9 +179,11 @@ fun SearchScreen(
     }
     val isInExploreDefaultState = query.isBlank() && !isSearchMode && !isSearchFieldFocused
     val sharedTransitionScope = LocalSharedTransitionScope.current
-    val searchBarOverlayModifier = with(sharedTransitionScope) {
-        Modifier.renderInSharedTransitionScopeOverlay(zIndexInOverlay = 1f)
-    }
+    val searchBarOverlayModifier = if (!isInExploreDefaultState) {
+        with(sharedTransitionScope) {
+            Modifier.renderInSharedTransitionScopeOverlay(zIndexInOverlay = 1f)
+        }
+    } else Modifier
 
     Column(modifier = modifier.fillMaxSize()) {
         Row(

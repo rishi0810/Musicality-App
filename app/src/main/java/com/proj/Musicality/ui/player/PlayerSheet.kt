@@ -2,6 +2,7 @@ package com.proj.Musicality.ui.player
 
 import android.content.Intent
 import android.util.Log
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Animatable
@@ -152,6 +153,7 @@ import kotlin.math.roundToInt
 private const val TAG = "PlayerSheet"
 private const val CROSSFADE_UI_LEAD_MS = 10_000L
 private val QueueSheetContainerColor = Color(0xFF18181B)
+private val PlayerHorizontalPadding = 20.dp
 
 // Spring spec matching the nav transitions – no bounce, medium-low stiffness
 private val lyricsSpring = spring<Float>(
@@ -264,6 +266,13 @@ fun PlayerSheet(
                 else -> onCollapse()
             }
         } catch (_: CancellationException) {
+        }
+    }
+
+    BackHandler(enabled = isExpanded) {
+        when {
+            lyricsAnim.value > 0.01f -> closeLyrics()
+            else -> onCollapse()
         }
     }
 
@@ -526,7 +535,7 @@ fun PlayerSheet(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 20.dp),
+                                .padding(horizontal = PlayerHorizontalPadding),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             AnimatedContent(
@@ -537,7 +546,7 @@ fun PlayerSheet(
                                 },
                                 contentKey = { it.videoId },
                                 label = "song-title",
-                                modifier = Modifier.fillMaxWidth(0.65f)
+                                modifier = Modifier.weight(1f)
                             ) { animItem ->
                                 Text(
                                     text = animItem.title,
@@ -548,7 +557,6 @@ fun PlayerSheet(
                                     modifier = Modifier.basicMarquee()
                                 )
                             }
-                            Spacer(modifier = Modifier.weight(1f))
                             IconButton(
                                 onClick = {
                                     coroutineScope.launch { libraryRepository.toggleLike(item) }
@@ -559,7 +567,9 @@ fun PlayerSheet(
                                     if (mediaLibraryState.isLiked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
                                     contentDescription = if (mediaLibraryState.isLiked) "Unlike" else "Like",
                                     tint = if (mediaLibraryState.isLiked) playbackAccent else onSurfaceVariant,
-                                    modifier = Modifier.size(26.dp)
+                                    modifier = Modifier
+                                        .size(26.dp)
+                                        .offset(x = 3.dp)
                                 )
                             }
                             IconButton(
@@ -569,7 +579,8 @@ fun PlayerSheet(
                                 Icon(
                                     Icons.Rounded.MoreVert,
                                     contentDescription = "More options",
-                                    tint = onSurface
+                                    tint = onSurface,
+                                    modifier = Modifier.offset(x = 10.dp)
                                 )
                             }
                         }
@@ -587,7 +598,7 @@ fun PlayerSheet(
                             label = "song-artist",
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 20.dp)
+                                .padding(horizontal = PlayerHorizontalPadding)
                         ) { animItem ->
                             Text(
                                 text = animItem.artistName,
@@ -616,7 +627,7 @@ fun PlayerSheet(
                             onSurface = onSurface,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 20.dp)
+                                .padding(horizontal = PlayerHorizontalPadding)
                         )
 
                         Spacer(Modifier.height(18.dp))
@@ -625,7 +636,7 @@ fun PlayerSheet(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 20.dp),
+                                .padding(horizontal = PlayerHorizontalPadding),
                             horizontalArrangement = Arrangement.Center,
                             verticalAlignment = Alignment.CenterVertically
                         ) {

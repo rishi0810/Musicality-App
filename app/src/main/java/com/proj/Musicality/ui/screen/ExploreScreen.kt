@@ -399,7 +399,7 @@ private fun GenreCard(mood: MoodCategoryParser.Mood, onClick: () -> Unit) {
 
 @Composable
 private fun MoodsRow(onMoodTap: (MoodCategoryParser.Mood) -> Unit) {
-    val groups = remember { MoodCategoryParser.Mood.entries.filter { it !in genreMoods }.chunked(3) }
+    val groups = remember { MoodCategoryParser.Mood.entries.filter { it !in genreMoods }.chunked(2) }
     LazyRow(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         contentPadding = PaddingValues(horizontal = 16.dp)
