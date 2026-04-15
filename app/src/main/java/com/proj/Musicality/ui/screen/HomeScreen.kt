@@ -793,9 +793,7 @@ private fun SongFeaturedMix(
     val iconTintColor = if (darkTheme) Color(0xFFA0A0A0) else Color(0xFF888888)
 
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp)
+        modifier = Modifier.fillMaxWidth()
     ) {
         val featuredItem = featured.toMediaItem()
         Surface(
@@ -803,6 +801,7 @@ private fun SongFeaturedMix(
             color = cardColor,
             border = BorderStroke(1.dp, cardBorderColor),
             modifier = Modifier
+                .padding(horizontal = 16.dp)
                 .fillMaxWidth()
                 .clickable {
                     onSongTap(
@@ -896,7 +895,7 @@ private fun SongFeaturedMix(
             LazyRow(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
-                contentPadding = PaddingValues(horizontal = 0.dp)
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp)
             ) {
                 itemsIndexed(
                     followUps,
@@ -1201,6 +1200,15 @@ private fun HeroContinuePlaying(
 ) {
     val song = section.items.firstOrNull() as? HomeItem.Song ?: return
     val mediaItem = remember(song) { song.toMediaItem() }
+    val bottomScrim = remember {
+        Brush.verticalGradient(
+            colorStops = arrayOf(
+                0.0f to Color.Transparent,
+                0.35f to Color(0x99000000),
+                1.0f to Color(0xF2000000)
+            )
+        )
+    }
     val queueItems = remember(section.items) {
         section.items.filterIsInstance<HomeItem.Song>().map { it.toMediaItem() }
     }
@@ -1229,18 +1237,19 @@ private fun HeroContinuePlaying(
             contentScale = ContentScale.Crop,
             modifier = Modifier.fillMaxSize()
         )
-
-        // Bottom gradient scrim
+        // Subtle full-card dim to reduce image noise
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0x28000000))
+        )
+        // Strong gradient scrim — bottom area
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(120.dp)
                 .align(Alignment.BottomCenter)
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.7f))
-                    )
-                )
+                .background(bottomScrim)
         )
 
         // Bottom-left text

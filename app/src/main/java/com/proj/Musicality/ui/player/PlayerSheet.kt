@@ -187,7 +187,8 @@ fun PlayerSheet(
     crossfadeEnabled: Boolean = false,
     onToggleCrossfade: () -> Unit = {},
     miniPlayerHeight: Dp = 70.dp,
-    onLyricsOpenChange: (Boolean) -> Unit = {}
+    onLyricsOpenChange: (Boolean) -> Unit = {},
+    onProgressBarInteractingChange: (Boolean) -> Unit = {}
 ) {
     val item = state.currentItem ?: return
     val queue = state.queue
@@ -623,6 +624,7 @@ fun PlayerSheet(
                             crossfadeEnabled = crossfadeEnabled,
                             hasNextTrack = queue.currentIndex + 1 < queue.items.size,
                             onSeek = onSeek,
+                            onProgressBarInteractingChange = onProgressBarInteractingChange,
                             playbackAccent = playbackAccent,
                             onSurface = onSurface,
                             modifier = Modifier
@@ -908,6 +910,7 @@ fun PlayerSheet(
                 backgroundColor = mediaPalette.bottom,
                 playbackAccent = playbackAccent,
                 playbackButton = playbackAccent,
+                onProgressBarInteractingChange = onProgressBarInteractingChange,
                 modifier = Modifier
                     .fillMaxSize()
                     .zIndex(3f)
@@ -928,6 +931,7 @@ private fun ExpandedPlaybackProgressSection(
     crossfadeEnabled: Boolean,
     hasNextTrack: Boolean,
     onSeek: (Long) -> Unit,
+    onProgressBarInteractingChange: (Boolean) -> Unit,
     playbackAccent: Color,
     onSurface: Color,
     modifier: Modifier = Modifier
@@ -940,6 +944,7 @@ private fun ExpandedPlaybackProgressSection(
             progress = playbackProgress,
             durationMs = durationMs,
             onSeek = onSeek,
+            onInteractingChange = onProgressBarInteractingChange,
             modifier = Modifier.fillMaxWidth(),
             color = playbackAccent,
             trackColor = Color(0xFF4A4A4A),
@@ -1195,7 +1200,7 @@ private fun QueueActionSheet(
         modifier = Modifier.statusBarsPadding(),
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        shape = RectangleShape,
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
         containerColor = QueueSheetContainerColor,
         scrimColor = Color.Black.copy(alpha = 0.32f),
         tonalElevation = 0.dp,
@@ -1378,6 +1383,7 @@ private fun LyricsPanel(
     onSkipPrev: () -> Unit,
     onSkipNext: () -> Unit,
     onPlayPause: () -> Unit,
+    onProgressBarInteractingChange: (Boolean) -> Unit,
     backgroundColor: Color,
     playbackAccent: Color,
     playbackButton: Color,
@@ -1433,26 +1439,19 @@ private fun LyricsPanel(
             .systemBarsPadding()
     ) {
         // ── Header ──
-        Row(
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically
+            contentAlignment = Alignment.Center
         ) {
             Text(
                 text = "Lyrics",
                 color = Color.White,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.SemiBold
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center
             )
-            Spacer(Modifier.weight(1f))
-            IconButton(onClick = onClose) {
-                Icon(
-                    imageVector = Icons.Rounded.KeyboardArrowDown,
-                    contentDescription = "Close",
-                    tint = Color.White
-                )
-            }
         }
 
         // ── Lyrics body ──
@@ -1546,10 +1545,26 @@ private fun LyricsPanel(
                 .padding(horizontal = 20.dp)
                 .padding(bottom = 56.dp, top = 4.dp)
         ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 6.dp),
+                horizontalArrangement = Arrangement.End
+            ) {
+                IconButton(onClick = onClose) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.collapse_all_24px),
+                        contentDescription = "Close lyrics",
+                        tint = Color.White,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+            }
             SeekablePlaybackBar(
                 progress = playbackProgress,
                 durationMs = durationMs,
                 onSeek = onSeek,
+                onInteractingChange = onProgressBarInteractingChange,
                 modifier = Modifier.fillMaxWidth(),
                 color = playbackAccent,
                 trackColor = Color.White.copy(alpha = 0.18f),
@@ -1631,6 +1646,7 @@ private fun SeekablePlaybackBar(
     progress: Float,
     durationMs: Long,
     onSeek: (Long) -> Unit,
+    onInteractingChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
     color: Color,
     trackColor: Color,
@@ -1645,6 +1661,9 @@ private fun SeekablePlaybackBar(
         if (!isSeeking) {
             seekPosition = progress.coerceIn(0f, 1f)
         }
+    }
+    LaunchedEffect(isSeeking) {
+        onInteractingChange(isSeeking)
     }
 
     val expandedHeight = expandedTrackHeight

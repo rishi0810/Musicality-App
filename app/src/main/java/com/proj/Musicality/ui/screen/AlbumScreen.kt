@@ -261,7 +261,7 @@ fun AlbumScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 16.dp, vertical = 12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(18.dp, Alignment.CenterHorizontally),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                             OutlinedButton(
@@ -303,17 +303,19 @@ fun AlbumScreen(
                                 )
                                 onTrackTap(queue)
                             },
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.size(76.dp),
                             shape = CircleShape,
-                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
+                            contentPadding = PaddingValues(0.dp),
                             colors = ButtonDefaults.filledTonalButtonColors(
                                 containerColor = mediaPalette.accent,
                                 contentColor = mediaPalette.onAccent
                             )
                         ) {
-                            Icon(Icons.Rounded.PlayArrow, contentDescription = null, modifier = Modifier.size(20.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text("Play")
+                            Icon(
+                                Icons.Rounded.PlayArrow,
+                                contentDescription = "Play album",
+                                modifier = Modifier.size(34.dp)
+                            )
                         }
                         OutlinedButton(
                             onClick = {
@@ -341,13 +343,8 @@ fun AlbumScreen(
                         }
                     }
                 }
-
-                // Divider
-                item(key = "divider") {
-                    HorizontalDivider(
-                        modifier = Modifier.padding(horizontal = 16.dp),
-                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
-                    )
+                item(key = "action-buttons-spacing") {
+                    Spacer(modifier = Modifier.height(14.dp))
                 }
 
                 // Track list
