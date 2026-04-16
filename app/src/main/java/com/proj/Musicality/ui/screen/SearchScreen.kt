@@ -102,6 +102,8 @@ import com.proj.Musicality.data.model.SuggestionType
 import com.proj.Musicality.data.model.VideoResult
 import com.proj.Musicality.data.model.toMediaItem
 import com.proj.Musicality.data.parser.MoodCategoryParser
+import com.proj.Musicality.ui.components.HapticIconButton
+import com.proj.Musicality.ui.components.hapticClickable
 import com.proj.Musicality.ui.components.SongListItem
 import com.proj.Musicality.ui.theme.LocalPlaybackBackdropPalette
 import com.proj.Musicality.ui.theme.LocalSharedTransitionScope
@@ -237,7 +239,7 @@ fun SearchScreen(
                 },
                 trailingIcon = {
                     if (query.isNotEmpty()) {
-                        IconButton(onClick = { viewModel.onQueryChange("") }) {
+                        HapticIconButton(onClick = { viewModel.onQueryChange("") }) {
                             Icon(
                                 Icons.Rounded.Clear,
                                 contentDescription = "Clear",
@@ -1055,6 +1057,6 @@ private fun SearchActionItem(
             )
         },
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-        modifier = Modifier.clickable(enabled = enabled, onClick = onClick)
+        modifier = Modifier.hapticClickable(enabled = enabled, onClick = onClick)
     )
 }

@@ -1,6 +1,5 @@
 package com.proj.Musicality.ui.theme
 
-import android.os.Build
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -22,21 +21,10 @@ fun MusicAppTheme(content: @Composable () -> Unit) {
 
     val appBackground = if (darkTheme) Color(0xFF000000) else Color(0xFFFFFBF5)
 
-    val colorScheme = when {
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            if (darkTheme) dynamicDarkColorScheme(context).copy(background = appBackground, surface = appBackground)
-            else dynamicLightColorScheme(context).copy(background = appBackground, surface = appBackground)
-        }
-        darkTheme -> darkColorScheme(
-            primary = Color(0xFFBB86FC),
-            background = appBackground,
-            surface = appBackground,
-            surfaceContainerHigh = Color(0xFF1E1E1E)
-        )
-        else -> lightColorScheme(
-            background = appBackground,
-            surface = appBackground
-        )
+    val colorScheme = if (darkTheme) {
+        dynamicDarkColorScheme(context).copy(background = appBackground, surface = appBackground)
+    } else {
+        dynamicLightColorScheme(context).copy(background = appBackground, surface = appBackground)
     }
 
     MaterialExpressiveTheme(

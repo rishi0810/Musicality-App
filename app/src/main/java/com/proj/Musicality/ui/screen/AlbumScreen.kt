@@ -16,6 +16,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.MoreVert
@@ -264,10 +266,10 @@ fun AlbumScreen(
                         horizontalArrangement = Arrangement.spacedBy(18.dp, Alignment.CenterHorizontally),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                            OutlinedButton(
+                            HapticOutlinedButton(
                                 onClick = {
                                     scope.launch {
-                                        if (isAlbumSaved && savedAlbumEntry != null) {
+                                        if (savedAlbumEntry != null) {
                                             repository.removeSavedEntry(savedAlbumEntry)
                                         } else {
                                             repository.rememberAlbum(
@@ -294,7 +296,7 @@ fun AlbumScreen(
                                 modifier = Modifier.size(20.dp)
                             )
                         }
-                        FilledTonalButton(
+                        HapticFilledTonalButton(
                             onClick = {
                                 val queue = PlaybackQueue(
                                     items = album.tracks.map { it.toMediaItem(album) },
@@ -317,7 +319,7 @@ fun AlbumScreen(
                                 modifier = Modifier.size(34.dp)
                             )
                         }
-                        OutlinedButton(
+                        HapticOutlinedButton(
                             onClick = {
                                 val shuffledTracks = album.tracks.shuffled()
                                 val queue = PlaybackQueue(
@@ -395,7 +397,7 @@ fun AlbumScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                        IconButton(
+                        HapticIconButton(
                             onClick = {
                                 val mediaItem = track.toMediaItem(album)
                                 selectedTrackMenu = AlbumTrackMenuModel(
@@ -501,6 +503,16 @@ private fun AlbumTrackActionsSheet(
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val hasVideoId = model.mediaItem.videoId.isNotBlank()
+    var showMoreInfo by remember(model.mediaItem.videoId, model.title) { mutableStateOf(false) }
+    val infoLines = remember(model) {
+        listOfNotNull(
+            "Title: ${model.title}",
+            model.artistName.takeIf { it.isNotBlank() }?.let { "Artist: $it" },
+            model.mediaItem.albumName?.takeIf { it.isNotBlank() }?.let { "Album: $it" },
+            model.mediaItem.durationText?.takeIf { it.isNotBlank() }?.let { "Duration: $it" },
+            model.mediaItem.videoId.takeIf { it.isNotBlank() }?.let { "Video ID: $it" }
+        )
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -545,6 +557,30 @@ private fun AlbumTrackActionsSheet(
                     onClick = onDownload
                 )
             }
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            ListItem(
+                headlineContent = { Text(text = "More Info") },
+                trailingContent = {
+                    Icon(
+                        imageVector = if (showMoreInfo) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                        contentDescription = if (showMoreInfo) "Collapse more info" else "Expand more info"
+                    )
+                },
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                modifier = Modifier.clickable { showMoreInfo = !showMoreInfo }
+            )
+
+            if (showMoreInfo && infoLines.isNotEmpty()) {
+                infoLines.forEach { line ->
+                    Text(
+                        text = line,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 2.dp)
+                    )
+                }
+            }
         }
     }
 }
@@ -571,6 +607,6 @@ private fun AlbumActionItem(
             )
         },
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-        modifier = Modifier.clickable(onClick = onClick)
+        modifier = Modifier.hapticClickable(onClick = onClick)
     )
 }

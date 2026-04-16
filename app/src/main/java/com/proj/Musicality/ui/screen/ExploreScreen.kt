@@ -67,6 +67,7 @@ import com.proj.Musicality.data.model.HomeSection
 import com.proj.Musicality.data.parser.MoodCategoryParser
 import com.proj.Musicality.ui.components.ContentCard
 import com.proj.Musicality.ui.components.ErrorMessage
+import com.proj.Musicality.ui.components.hapticClickable
 import com.proj.Musicality.ui.components.pressScale
 import com.proj.Musicality.ui.components.SectionHeader
 import com.proj.Musicality.ui.components.ShimmerSection
@@ -337,7 +338,7 @@ private fun GenreCard(mood: MoodCategoryParser.Mood, onClick: () -> Unit) {
             .shadow(elevation = 6.dp, shape = shape, clip = false)
             .clip(shape)
             .pressScale(interactionSource)
-            .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
+            .hapticClickable(interactionSource = interactionSource, indication = null, onClick = onClick)
     ) {
         // Image
         AsyncImage(
@@ -421,7 +422,7 @@ private fun MoodChip(mood: MoodCategoryParser.Mood, onClick: () -> Unit) {
     Surface(
         modifier = Modifier
             .width(172.dp)
-            .clickable(
+            .hapticClickable(
                 interactionSource = interactionSource,
                 indication = null,
                 onClick = onClick
@@ -603,7 +604,7 @@ private fun ArtistTallCard(
         modifier = Modifier
             .width(142.dp)
             .pressScale(interactionSource)
-            .clickable(
+            .hapticClickable(
                 interactionSource = interactionSource,
                 indication = null,
                 onClick = onClick

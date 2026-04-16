@@ -98,6 +98,9 @@ import com.proj.Musicality.data.local.LibrarySnapshot
 import com.proj.Musicality.data.local.SavedEntry
 import com.proj.Musicality.data.local.SavedFilter
 import com.proj.Musicality.R
+import com.proj.Musicality.ui.components.HapticFilledTonalButton
+import com.proj.Musicality.ui.components.HapticIconButton
+import com.proj.Musicality.ui.components.hapticClickable
 import com.proj.Musicality.ui.theme.LocalSharedTransitionScope
 import kotlinx.coroutines.launch
 
@@ -146,7 +149,7 @@ fun LibraryScreen(
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.align(Alignment.TopStart)
                 )
-                FilledTonalButton(
+                HapticFilledTonalButton(
                     onClick = {
                         if (selectedPrimaryTab != 1) {
                             selectedPrimaryTab = 1
@@ -339,7 +342,7 @@ private fun SavedLibrarySection(
                 }
 
                 Box {
-                    IconButton(onClick = { showSortMenu = true }) {
+                    HapticIconButton(onClick = { showSortMenu = true }) {
                         Icon(
                             imageVector = Icons.Rounded.MoreVert,
                             contentDescription = "Sort options"
@@ -573,7 +576,7 @@ private fun MasonryCard(
             }
 
             if (isEditMode) {
-                IconButton(
+                HapticIconButton(
                     onClick = { onRequestRemove(entry) },
                     modifier = Modifier
                         .align(Alignment.TopEnd)
@@ -631,7 +634,7 @@ private fun CollectionSummaryCard(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .hapticClickable(onClick = onClick)
     ) {
         Card(
             modifier = Modifier

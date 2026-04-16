@@ -89,6 +89,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -116,12 +117,16 @@ import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
@@ -135,6 +140,8 @@ import com.proj.Musicality.data.model.LyricsState
 import com.proj.Musicality.data.model.MediaItem
 import com.proj.Musicality.data.model.PlaybackQueue
 import com.proj.Musicality.ui.components.pressScale
+import com.proj.Musicality.ui.components.HapticIconButton
+import com.proj.Musicality.ui.components.hapticClickable
 import com.proj.Musicality.ui.theme.LocalPlaybackBackdropPalette
 import com.proj.Musicality.ui.theme.LocalPlaybackUiPalette
 import com.proj.Musicality.ui.theme.rememberMediaBackdropPalette
@@ -152,6 +159,7 @@ import kotlin.math.roundToInt
 
 private const val TAG = "PlayerSheet"
 private const val CROSSFADE_UI_LEAD_MS = 10_000L
+private const val DEFAULT_MINI_SWIPE_SENSITIVITY = 0.73f
 private val QueueSheetContainerColor = Color(0xFF18181B)
 private val PlayerHorizontalPadding = 20.dp
 
@@ -208,7 +216,8 @@ fun PlayerSheet(
     // and extract the same artwork colors twice in parallel.
     val mediaPalette = sharedBackdropPalette ?: rememberMediaBackdropPalette(
         imageUrl = artworkUrl,
-        fallbackSurface = surface
+        fallbackSurface = surface,
+        animateTransitions = false
     )
     val primary = mediaPalette.accent
     val onSurface = mediaPalette.title
@@ -277,11 +286,12 @@ fun PlayerSheet(
         }
     }
 
-    // Fade the mesh/gradient out faster on drag-to-close, and keep it fully off in the collapsed mini state
-    // so the navbar + mini-player pills feel detached (no shared background strip).
+    // Keep collapsed state fully off, but start tinting immediately once expansion begins.
+    // This avoids a visible "nothing, then sudden color" threshold while dragging.
     val playerBackgroundAlpha = run {
-        val t = ((clampedExpandProgress - 0.06f) / 0.94f).coerceIn(0f, 1f)
-        t * t
+        val t = clampedExpandProgress.coerceIn(0f, 1f)
+        val smoothstep = t * t * (3f - 2f * t)
+        smoothstep * 0.96f
     }
 
     Box(
@@ -306,34 +316,32 @@ fun PlayerSheet(
         }
         val meshTintColor = remember(mediaPalette.bottom) { mediaPalette.bottom.copy(alpha = 0.12f) }
 
-        if (playerBackgroundAlpha > 0.001f) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .drawBehind {
-                        // Opaque surface base — gradient colors have alpha < 1, so this prevents bleed-through
-                        drawRect(surface)
-                        drawRect(
-                            brush = Brush.linearGradient(
-                                colors = meshGradientColors,
-                                start = Offset(0f, 0f),
-                                end = Offset(size.width, size.height)
-                            )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .drawBehind {
+                    // Opaque surface base — gradient colors have alpha < 1, so this prevents bleed-through
+                    drawRect(surface)
+                    drawRect(
+                        brush = Brush.linearGradient(
+                            colors = meshGradientColors,
+                            start = Offset(0f, 0f),
+                            end = Offset(size.width, size.height)
                         )
-                        drawCircle(
-                            brush = Brush.radialGradient(
-                                colors = meshGlowColors,
-                                center = Offset(size.width, size.height),
-                                radius = size.maxDimension * 0.7f
-                            ),
+                    )
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = meshGlowColors,
                             center = Offset(size.width, size.height),
                             radius = size.maxDimension * 0.7f
-                        )
-                        drawRect(meshTintColor)
-                    }
-                    .graphicsLayer { alpha = playerBackgroundAlpha }
-            )
-        }
+                        ),
+                        center = Offset(size.width, size.height),
+                        radius = size.maxDimension * 0.7f
+                    )
+                    drawRect(meshTintColor)
+                }
+                .graphicsLayer { alpha = playerBackgroundAlpha }
+        )
 
         // ── Invisible bounds tracker for full art (always composed during expand morph) ──
         // Mirrors the real art geometry: edge-to-edge, square, starts right below the status bar.
@@ -369,7 +377,7 @@ fun PlayerSheet(
             }
         }
 
-        val effectiveFullContentAlpha = if (isExpanded) 1f else fullContentAlpha
+        val effectiveFullContentAlpha = fullContentAlpha
         if (effectiveFullContentAlpha > 0.001f) {
             Column(
                 modifier = Modifier
@@ -394,7 +402,7 @@ fun PlayerSheet(
                                 .fillMaxWidth()
                                 .padding(start = 4.dp, top = 4.dp)
                         ) {
-                            IconButton(
+                            HapticIconButton(
                                 onClick = {
                                     when {
                                         lyricsAnim.value > 0.01f -> closeLyrics()
@@ -475,7 +483,7 @@ fun PlayerSheet(
                                     modifier = Modifier
                                         .weight(1f)
                                         .fillMaxHeight()
-                                        .clickable { if (isLyricsOpen) closeLyrics() else openLyrics() }
+                                        .hapticClickable { if (isLyricsOpen) closeLyrics() else openLyrics() }
                                         .padding(horizontal = 20.dp),
                                     horizontalArrangement = Arrangement.Center,
                                     verticalAlignment = Alignment.CenterVertically
@@ -508,7 +516,7 @@ fun PlayerSheet(
                                     modifier = Modifier
                                         .weight(1f)
                                         .fillMaxHeight()
-                                        .clickable { showQueueSheet = true }
+                                        .hapticClickable { showQueueSheet = true }
                                         .padding(horizontal = 20.dp),
                                     horizontalArrangement = Arrangement.Center,
                                     verticalAlignment = Alignment.CenterVertically
@@ -536,7 +544,7 @@ fun PlayerSheet(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = PlayerHorizontalPadding),
+                                .padding(start = 24.dp, end = 12.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             AnimatedContent(
@@ -558,31 +566,33 @@ fun PlayerSheet(
                                     modifier = Modifier.basicMarquee()
                                 )
                             }
-                            IconButton(
-                                onClick = {
-                                    coroutineScope.launch { libraryRepository.toggleLike(item) }
-                                },
-                                modifier = Modifier.size(44.dp)
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(
-                                    if (mediaLibraryState.isLiked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
-                                    contentDescription = if (mediaLibraryState.isLiked) "Unlike" else "Like",
-                                    tint = if (mediaLibraryState.isLiked) playbackAccent else onSurfaceVariant,
-                                    modifier = Modifier
-                                        .size(26.dp)
-                                        .offset(x = 3.dp)
-                                )
-                            }
-                            IconButton(
-                                onClick = { showOptionsSheet = true },
-                                modifier = Modifier.size(44.dp)
-                            ) {
-                                Icon(
-                                    Icons.Rounded.MoreVert,
-                                    contentDescription = "More options",
-                                    tint = onSurface,
-                                    modifier = Modifier.offset(x = 10.dp)
-                                )
+                                HapticIconButton(
+                                    onClick = {
+                                        coroutineScope.launch { libraryRepository.toggleLike(item) }
+                                    },
+                                    modifier = Modifier.size(48.dp)
+                                ) {
+                                    Icon(
+                                        if (mediaLibraryState.isLiked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                                        contentDescription = if (mediaLibraryState.isLiked) "Unlike" else "Like",
+                                        tint = if (mediaLibraryState.isLiked) playbackAccent else onSurfaceVariant,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
+                                HapticIconButton(
+                                    onClick = { showOptionsSheet = true },
+                                    modifier = Modifier.size(48.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Rounded.MoreVert,
+                                        contentDescription = "More options",
+                                        tint = onSurface
+                                    )
+                                }
                             }
                         }
 
@@ -599,19 +609,30 @@ fun PlayerSheet(
                             label = "song-artist",
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = PlayerHorizontalPadding)
+                                .padding(horizontal = 24.dp)
                         ) { animItem ->
-                            Text(
-                                text = animItem.artistName,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = onSurface.copy(alpha = 0.78f),
-                                fontWeight = FontWeight.Medium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.clickable {
-                                    animItem.artistId?.let { onArtistTap(it, animItem.artistName, null) }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.Start
+                            ) {
+                                val artistClickModifier = if (animItem.artistId != null) {
+                                    Modifier.clickable {
+                                        animItem.artistId?.let { onArtistTap(it, animItem.artistName, null) }
+                                    }
+                                } else {
+                                    Modifier
                                 }
-                            )
+
+                                Text(
+                                    text = animItem.artistName,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = onSurface.copy(alpha = 0.78f),
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = artistClickModifier
+                                )
+                            }
                         }
 
                         Spacer(Modifier.height(14.dp))
@@ -629,7 +650,7 @@ fun PlayerSheet(
                             onSurface = onSurface,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = PlayerHorizontalPadding)
+                                .padding(horizontal = 24.dp)
                         )
 
                         Spacer(Modifier.height(18.dp))
@@ -646,7 +667,7 @@ fun PlayerSheet(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                IconButton(onClick = onSkipPrev, modifier = Modifier.size(64.dp)) {
+                                HapticIconButton(onClick = onSkipPrev, modifier = Modifier.size(64.dp)) {
                                     Icon(
                                         Icons.Rounded.SkipPrevious,
                                         contentDescription = "Previous",
@@ -660,7 +681,7 @@ fun PlayerSheet(
                                     modifier = Modifier
                                         .size(96.dp)
                                         .pressScale(playInteraction)
-                                        .clickable(
+                                        .hapticClickable(
                                             interactionSource = playInteraction,
                                             indication = null
                                         ) { onPlayPause() },
@@ -674,7 +695,7 @@ fun PlayerSheet(
                                     )
                                 }
 
-                                IconButton(onClick = onSkipNext, modifier = Modifier.size(64.dp)) {
+                                HapticIconButton(onClick = onSkipNext, modifier = Modifier.size(64.dp)) {
                                     Icon(
                                         Icons.Rounded.SkipNext,
                                         contentDescription = "Next",
@@ -878,6 +899,8 @@ fun PlayerSheet(
             onPlayPause = onPlayPause,
             onSkipNext = onSkipNext,
             onSkipPrev = onSkipPrev,
+            canSkipNext = queue.currentIndex < queue.items.lastIndex,
+            canSkipPrevious = queue.currentIndex > 0,
             onMiniArtPositioned = { coordinates ->
                 miniArtBounds = boundsInContainer(shellCoordinates, coordinates)
             }
@@ -1037,15 +1060,30 @@ private fun BoxScope.MiniPlayerBar(
     onPlayPause: () -> Unit,
     onSkipNext: () -> Unit,
     onSkipPrev: () -> Unit,
+    canSkipNext: Boolean,
+    canSkipPrevious: Boolean,
     onMiniArtPositioned: (LayoutCoordinates) -> Unit
 ) {
     val positionMs by positionMsFlow.collectAsStateWithLifecycle()
     val progress = playbackProgress(positionMs, durationMs)
-    val density = LocalDensity.current
-    val swipeThresholdPx = with(density) { 80.dp.toPx() }
     val miniSwipeOffset = remember { Animatable(0f) }
     val coroutineScope = rememberCoroutineScope()
+    val layoutDirection = LocalLayoutDirection.current
     val miniInteractionsEnabled = !isExpanded
+    var dragStartTime by remember { mutableLongStateOf(0L) }
+    var totalDragDistance by remember { mutableFloatStateOf(0f) }
+    val miniSwipeAnimationSpec = remember {
+        spring<Float>(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessLow
+        )
+    }
+    val autoSwipeThresholdPx = remember {
+        (
+            600f /
+                (1f + kotlin.math.exp(-(-11.44748f * DEFAULT_MINI_SWIPE_SENSITIVITY + 9.04945f)))
+            )
+    }
 
     Row(
         modifier = Modifier
@@ -1057,31 +1095,59 @@ private fun BoxScope.MiniPlayerBar(
                 alpha = miniContentAlpha
                 translationX = miniSwipeOffset.value
             }
-            .pointerInput(miniInteractionsEnabled) {
+            .pointerInput(miniInteractionsEnabled, canSkipNext, canSkipPrevious, layoutDirection) {
                 if (!miniInteractionsEnabled) return@pointerInput
                 detectHorizontalDragGestures(
+                    onDragStart = {
+                        dragStartTime = System.currentTimeMillis()
+                        totalDragDistance = 0f
+                    },
                     onDragEnd = {
-                        coroutineScope.launch {
-                            if (miniSwipeOffset.value.absoluteValue > swipeThresholdPx) {
-                                val goingLeft = miniSwipeOffset.value < 0
-                                miniSwipeOffset.animateTo(
-                                    targetValue = if (goingLeft) -size.width.toFloat() else size.width.toFloat(),
-                                    animationSpec = tween(150)
-                                )
-                                if (goingLeft) onSkipNext() else onSkipPrev()
-                                miniSwipeOffset.snapTo(if (goingLeft) size.width.toFloat() else -size.width.toFloat())
-                                miniSwipeOffset.animateTo(0f, animationSpec = tween(200))
-                            } else {
-                                miniSwipeOffset.animateTo(0f, animationSpec = spring())
+                        val dragDurationMs = System.currentTimeMillis() - dragStartTime
+                        val velocityPxPerMs =
+                            if (dragDurationMs > 0L) totalDragDistance / dragDurationMs else 0f
+                        val currentOffset = miniSwipeOffset.value
+                        val velocityThreshold =
+                            (DEFAULT_MINI_SWIPE_SENSITIVITY * -8.25f) + 8.5f
+                        val shouldChangeSong =
+                            (
+                                currentOffset.absoluteValue > 50f &&
+                                    velocityPxPerMs > velocityThreshold
+                                ) ||
+                                (currentOffset.absoluteValue > autoSwipeThresholdPx)
+
+                        if (shouldChangeSong) {
+                            if (currentOffset > 0f && canSkipPrevious) {
+                                onSkipPrev()
+                            } else if (currentOffset <= 0f && canSkipNext) {
+                                onSkipNext()
                             }
+                        }
+                        coroutineScope.launch {
+                            miniSwipeOffset.animateTo(0f, animationSpec = miniSwipeAnimationSpec)
                         }
                     },
                     onDragCancel = {
-                        coroutineScope.launch { miniSwipeOffset.animateTo(0f, spring()) }
+                        coroutineScope.launch {
+                            miniSwipeOffset.animateTo(0f, animationSpec = miniSwipeAnimationSpec)
+                        }
                     },
                     onHorizontalDrag = { _, dragAmount ->
-                        coroutineScope.launch {
-                            miniSwipeOffset.snapTo(miniSwipeOffset.value + dragAmount)
+                        val adjustedDragAmount =
+                            if (layoutDirection == LayoutDirection.Rtl) -dragAmount else dragAmount
+                        val tryingToSwipeRight = adjustedDragAmount > 0f
+                        val tryingToSwipeLeft = adjustedDragAmount < 0f
+                        val allowLeft = tryingToSwipeLeft && canSkipNext
+                        val allowRight = tryingToSwipeRight && canSkipPrevious
+                        val canReturnToCenter =
+                            (tryingToSwipeRight && !canSkipPrevious && miniSwipeOffset.value < 0f) ||
+                                (tryingToSwipeLeft && !canSkipNext && miniSwipeOffset.value > 0f)
+
+                        if (allowLeft || allowRight || canReturnToCenter) {
+                            totalDragDistance += adjustedDragAmount.absoluteValue
+                            coroutineScope.launch {
+                                miniSwipeOffset.snapTo(miniSwipeOffset.value + adjustedDragAmount)
+                            }
                         }
                     }
                 )
@@ -1104,7 +1170,7 @@ private fun BoxScope.MiniPlayerBar(
                 Row(
                     modifier = Modifier
                         .weight(1f)
-                        .clickable(
+                        .hapticClickable(
                             enabled = miniInteractionsEnabled,
                             indication = null,
                             interactionSource = remember { MutableInteractionSource() },
@@ -1162,14 +1228,14 @@ private fun BoxScope.MiniPlayerBar(
                         }
                     }
                 }
-                IconButton(onClick = onPlayPause, enabled = miniInteractionsEnabled) {
+                HapticIconButton(onClick = onPlayPause, enabled = miniInteractionsEnabled) {
                     Icon(
                         imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                         contentDescription = "Play/Pause",
                         tint = miniTitleColor
                     )
                 }
-                IconButton(onClick = onSkipNext, enabled = miniInteractionsEnabled) {
+                HapticIconButton(onClick = onSkipNext, enabled = miniInteractionsEnabled) {
                     Icon(
                         Icons.Rounded.SkipNext,
                         contentDescription = "Next",
@@ -1225,7 +1291,7 @@ private fun QueueActionSheet(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Spacer(modifier = Modifier.weight(1f))
-                    IconButton(
+                    HapticIconButton(
                         onClick = onDismiss,
                         modifier = Modifier.size(32.dp)
                     ) {
@@ -1291,11 +1357,22 @@ private fun AlbumArtPager(
         beyondViewportPageCount = 1
     ) { page ->
         val pageItem = queue.items[page]
+        val pageOffset = ((pagerState.currentPage - page) + pagerState.currentPageOffsetFraction)
+            .absoluteValue
+        val interpolation = (1f - pageOffset.coerceIn(0f, 1f))
+        val pageScale = lerpFloat(0.92f, 1f, interpolation)
+        val pageAlpha = lerpFloat(0.7f, 1f, interpolation)
+
         AsyncImage(
             model = upscaleThumbnail(pageItem.thumbnailUrl),
             contentDescription = pageItem.title,
             modifier = Modifier
                 .fillMaxSize()
+                .graphicsLayer {
+                    scaleX = pageScale
+                    scaleY = pageScale
+                    alpha = pageAlpha
+                }
                 .clip(RoundedCornerShape(24.dp)),
             contentScale = ContentScale.Crop
         )
@@ -1508,7 +1585,7 @@ private fun LyricsPanel(
                             val lineModifier = if (ls.isSynced) {
                                 Modifier
                                     .fillMaxWidth()
-                                    .clickable(
+                                    .hapticClickable(
                                         indication = null,
                                         interactionSource = remember { MutableInteractionSource() }
                                     ) {
@@ -1551,7 +1628,7 @@ private fun LyricsPanel(
                     .padding(bottom = 6.dp),
                 horizontalArrangement = Arrangement.End
             ) {
-                IconButton(onClick = onClose) {
+                HapticIconButton(onClick = onClose) {
                     Icon(
                         painter = painterResource(id = R.drawable.collapse_all_24px),
                         contentDescription = "Close lyrics",
@@ -1595,7 +1672,7 @@ private fun LyricsPanel(
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(onClick = onSkipPrev, modifier = Modifier.size(48.dp)) {
+                HapticIconButton(onClick = onSkipPrev, modifier = Modifier.size(48.dp)) {
                     Icon(
                         Icons.Rounded.SkipPrevious,
                         contentDescription = "Previous",
@@ -1615,7 +1692,7 @@ private fun LyricsPanel(
                             spotColor = playbackButton.copy(alpha = 0.3f)
                         )
                         .background(playbackButton, CircleShape)
-                        .clickable(
+                        .hapticClickable(
                             interactionSource = playInteraction,
                             indication = null
                         ) { onPlayPause() },
@@ -1628,7 +1705,7 @@ private fun LyricsPanel(
                         modifier = Modifier.size(32.dp)
                     )
                 }
-                IconButton(onClick = onSkipNext, modifier = Modifier.size(48.dp)) {
+                HapticIconButton(onClick = onSkipNext, modifier = Modifier.size(48.dp)) {
                     Icon(
                         Icons.Rounded.SkipNext,
                         contentDescription = "Next",
@@ -1655,6 +1732,8 @@ private fun SeekablePlaybackBar(
 ) {
     var isSeeking by remember { mutableStateOf(false) }
     var seekPosition by remember { mutableFloatStateOf(progress.coerceIn(0f, 1f)) }
+    var lastDragHapticBucket by remember { mutableIntStateOf(-1) }
+    val haptics = LocalHapticFeedback.current
     val displayProgress = if (isSeeking) seekPosition else progress.coerceIn(0f, 1f)
 
     LaunchedEffect(progress, isSeeking) {
@@ -1685,6 +1764,8 @@ private fun SeekablePlaybackBar(
                         if (tryAwaitRelease()) {
                             if (durationMs > 0L) {
                                 onSeek((seekPosition * durationMs).toLong())
+                                // Stronger confirmation haptic for discrete tap-to-seek.
+                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                             }
                             isSeeking = false
                         }
@@ -1697,16 +1778,27 @@ private fun SeekablePlaybackBar(
                     onDragStart = { offset ->
                         isSeeking = true
                         seekPosition = (offset.x / width).coerceIn(0f, 1f)
+                        lastDragHapticBucket = (seekPosition * 50f).toInt()
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     },
                     onDragEnd = {
                         if (durationMs > 0L) {
                             onSeek((seekPosition * durationMs).toLong())
                         }
                         isSeeking = false
+                        lastDragHapticBucket = -1
                     },
-                    onDragCancel = { isSeeking = false },
+                    onDragCancel = {
+                        isSeeking = false
+                        lastDragHapticBucket = -1
+                    },
                     onHorizontalDrag = { change, _ ->
                         seekPosition = (change.position.x / width).coerceIn(0f, 1f)
+                        val bucket = (seekPosition * 50f).toInt()
+                        if (bucket != lastDragHapticBucket) {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            lastDragHapticBucket = bucket
+                        }
                     }
                 )
             },
@@ -1723,6 +1815,7 @@ private fun SeekablePlaybackBar(
                 modifier = Modifier
                     .fillMaxHeight()
                     .fillMaxWidth(displayProgress)
+                    .clip(RoundedCornerShape(50))
                     .background(color)
             )
         }

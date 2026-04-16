@@ -5,7 +5,10 @@ import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
@@ -33,6 +36,8 @@ import androidx.compose.material.icons.automirrored.rounded.TrendingUp
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Album
 import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.MoreVert
@@ -46,7 +51,9 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.LinearProgressIndicator
@@ -70,9 +77,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -93,9 +103,14 @@ import com.proj.Musicality.data.model.QueueSource
 import com.proj.Musicality.data.model.SectionLayout
 import com.proj.Musicality.ui.components.ContentCard
 import com.proj.Musicality.ui.components.ErrorMessage
+import com.proj.Musicality.ui.components.HapticIconButton
+import com.proj.Musicality.ui.components.HapticTextButton
 import com.proj.Musicality.ui.components.SectionHeader
 import com.proj.Musicality.ui.components.SongListItem
 import com.proj.Musicality.ui.components.Thumbnail
+import com.proj.Musicality.ui.components.hapticClickable
+import com.proj.Musicality.ui.components.hapticCombinedClickable
+import com.proj.Musicality.ui.components.pressScale
 import com.proj.Musicality.ui.theme.LocalPlaybackUiPalette
 import com.proj.Musicality.ui.theme.rememberMediaBackdropPalette
 import com.proj.Musicality.util.upscaleThumbnail
@@ -389,7 +404,8 @@ private fun HomeSectionShelf(
             SectionLayout.HERO_WITH_TOP_PICKS -> {
                 HeroContinuePlayingWithTopPicks(
                     section = section,
-                    onSongTap = onSongTap
+                    onSongTap = onSongTap,
+                    onSongOverflowClick = onSongOverflowClick
                 )
                 Spacer(Modifier.height(14.dp))
                 return@Column
@@ -782,110 +798,153 @@ private fun SongFeaturedMix(
         fallbackSurface = MaterialTheme.colorScheme.surfaceContainerHigh,
         animateTransitions = false
     )
-    val featuredPlayTint = featuredPalette.accent
 
     val darkTheme = isSystemInDarkTheme()
-    val cardColor = if (darkTheme) Color(0xFF1C1C1C) else Color(0xFFFFFFFF)
-    val cardBorderColor = if (darkTheme) Color(0xFF2A2A2A) else Color(0xFFEAEAEA)
-    val titleColor = if (darkTheme) Color(0xFFF5F5F5) else Color(0xFF1A1A1A)
-    val secondaryTextColor = if (darkTheme) Color(0xFFA0A0A0) else Color(0xFF666666)
-    val iconSurfaceColor = if (darkTheme) Color(0xFF2A2A2A) else Color(0xFFF5F5F5)
-    val iconTintColor = if (darkTheme) Color(0xFFA0A0A0) else Color(0xFF888888)
+    val gradientTop = if (darkTheme) {
+        featuredPalette.top
+    } else {
+        lerp(featuredPalette.top, Color.White, 0.62f)
+    }
+    val gradientBottom = if (darkTheme) {
+        lerp(featuredPalette.bottom, Color.Black, 0.12f)
+    } else {
+        lerp(featuredPalette.bottom, Color.White, 0.78f)
+    }
+    val accent = featuredPalette.accent
+    val titleColor = if (darkTheme) featuredPalette.title else Color(0xFF111315)
+    val bodyColor = if (darkTheme) featuredPalette.body else Color(0xFF111315).copy(alpha = 0.62f)
+    val borderColor = if (darkTheme) {
+        Color.White.copy(alpha = 0.06f)
+    } else {
+        Color(0xFF111315).copy(alpha = 0.06f)
+    }
+    val overflowBg = if (darkTheme) {
+        Color.White.copy(alpha = 0.08f)
+    } else {
+        Color(0xFF111315).copy(alpha = 0.05f)
+    }
+    val cardGradient = Brush.verticalGradient(listOf(gradientTop, gradientBottom))
+    val haptics = LocalHapticFeedback.current
+    val cardInteraction = remember { MutableInteractionSource() }
 
-    Column(
-        modifier = Modifier.fillMaxWidth()
-    ) {
+    Column(modifier = Modifier.fillMaxWidth()) {
         val featuredItem = featured.toMediaItem()
-        Surface(
-            shape = RoundedCornerShape(16.dp),
-            color = cardColor,
-            border = BorderStroke(1.dp, cardBorderColor),
+        val playTapped = {
+            onSongTap(
+                featuredItem,
+                buildHomeSectionQueue(
+                    section = section,
+                    tappedItem = featuredItem,
+                    queueItems = queueItems,
+                    currentIndex = 0
+                )
+            )
+        }
+
+        Box(
             modifier = Modifier
                 .padding(horizontal = 16.dp)
                 .fillMaxWidth()
-                .clickable {
-                    onSongTap(
-                        featuredItem,
-                        buildHomeSectionQueue(
-                            section = section,
-                            tappedItem = featuredItem,
-                            queueItems = queueItems,
-                            currentIndex = 0
+                .pressScale(cardInteraction)
+                .clip(RoundedCornerShape(22.dp))
+                .background(cardGradient)
+                .border(
+                    BorderStroke(1.dp, borderColor),
+                    RoundedCornerShape(22.dp)
+                )
+                .hapticCombinedClickable(
+                    interactionSource = cardInteraction,
+                    indication = null,
+                    onClick = { playTapped() },
+                    onLongClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onSongOverflowClick(featured)
+                    }
+                )
+        ) {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .background(
+                        Brush.radialGradient(
+                            colors = listOf(
+                                accent.copy(alpha = if (darkTheme) 0.18f else 0.14f),
+                                Color.Transparent
+                            ),
+                            center = androidx.compose.ui.geometry.Offset(140f, 140f),
+                            radius = 520f
                         )
                     )
-                }
-        ) {
-            Column(
+            )
+
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(16.dp)
+                    .padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Thumbnail(
-                        url = featured.thumbnailUrl,
-                        size = 72.dp,
-                        cornerRadius = 8.dp
+                Thumbnail(
+                    url = featured.thumbnailUrl,
+                    size = 84.dp,
+                    cornerRadius = 14.dp
+                )
+                Spacer(Modifier.width(14.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = featured.title,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = titleColor,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        lineHeight = 21.sp
                     )
-                    Spacer(Modifier.width(12.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = featured.title,
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = titleColor,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                    val meta = listOfNotNull(
+                        featured.artistName.takeIf { it.isNotBlank() },
+                        featured.plays
+                    ).joinToString(" • ")
+                    if (meta.isNotBlank()) {
                         Spacer(Modifier.height(4.dp))
                         Text(
-                            text = listOfNotNull(
-                                featured.artistName.takeIf { it.isNotBlank() },
-                                featured.plays
-                            ).joinToString(" • "),
+                            text = meta,
                             fontSize = 13.sp,
-                            color = secondaryTextColor,
+                            color = bodyColor,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
-                Spacer(Modifier.height(12.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
-                    verticalAlignment = Alignment.CenterVertically
+                Spacer(Modifier.width(10.dp))
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(CircleShape)
+                        .background(overflowBg)
+                        .clickable { onSongOverflowClick(featured) },
+                    contentAlignment = Alignment.Center
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .background(iconSurfaceColor, CircleShape)
-                            .clickable { onSongOverflowClick(featured) },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.MoreVert,
-                            contentDescription = "More actions for ${featured.title}",
-                            tint = iconTintColor,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                    Spacer(Modifier.width(8.dp))
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .background(iconSurfaceColor, CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.PlayArrow,
-                            contentDescription = "Play ${featured.title}",
-                            tint = iconTintColor,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
+                    Icon(
+                        imageVector = Icons.Rounded.MoreVert,
+                        contentDescription = "More actions for ${featured.title}",
+                        tint = bodyColor,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+                Spacer(Modifier.width(8.dp))
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .background(accent)
+                        .clickable { playTapped() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.PlayArrow,
+                        contentDescription = "Play ${featured.title}",
+                        tint = Color.White,
+                        modifier = Modifier.size(26.dp)
+                    )
                 }
             }
         }
@@ -916,6 +975,7 @@ private fun SongFeaturedMix(
                                 )
                             )
                         },
+                        onLongPress = { onSongOverflowClick(song) },
                         modifier = Modifier.width(122.dp)
                     )
                 }
@@ -939,32 +999,23 @@ private fun HomeSongActionsSheet(
     onDownload: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var showMoreInfo by remember(model.shareUrl, model.title) { mutableStateOf(false) }
+    val infoLines = remember(model) {
+        listOfNotNull(
+            "Title: ${model.title}",
+            model.subtitle?.takeIf { it.isNotBlank() }?.let { "Info: $it" },
+            model.artistName.takeIf { it.isNotBlank() }?.let { "Artist: $it" },
+            model.albumName?.takeIf { it.isNotBlank() }?.let { "Album: $it" },
+            model.mediaItem.durationText?.takeIf { it.isNotBlank() }?.let { "Duration: $it" },
+            "Video ID: ${model.mediaItem.videoId}"
+        )
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState
     ) {
         Column(modifier = Modifier.padding(bottom = 16.dp)) {
-            Text(
-                text = model.title,
-                style = MaterialTheme.typography.titleMedium,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp)
-            )
-            if (!model.subtitle.isNullOrBlank()) {
-                Text(
-                    text = model.subtitle,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(horizontal = 24.dp)
-                )
-            }
-
-            Spacer(Modifier.height(12.dp))
-
             HomeSongActionItem(
                 label = if (isLiked) "Remove from liked songs" else "Add to liked songs",
                 icon = if (isLiked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
@@ -1004,6 +1055,30 @@ private fun HomeSongActionsSheet(
                 icon = Icons.Rounded.Download,
                 onClick = onDownload
             )
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            ListItem(
+                headlineContent = { Text(text = "More Info") },
+                trailingContent = {
+                    Icon(
+                        imageVector = if (showMoreInfo) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                        contentDescription = if (showMoreInfo) "Collapse more info" else "Expand more info"
+                    )
+                },
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                modifier = Modifier.clickable { showMoreInfo = !showMoreInfo }
+            )
+
+            if (showMoreInfo && infoLines.isNotEmpty()) {
+                infoLines.forEach { line ->
+                    Text(
+                        text = line,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 2.dp)
+                    )
+                }
+            }
         }
     }
 }
@@ -1029,9 +1104,10 @@ private fun HomeSongActionItem(
                 contentDescription = null
             )
         },
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .hapticClickable(onClick = onClick)
     )
 }
 
@@ -1041,7 +1117,7 @@ private fun HomeMoreButton(
     onVideoTap: (MediaItem) -> Unit
 ) {
     val watchEndpoint = endpoint?.watchEndpoint ?: return
-    TextButton(onClick = { onVideoTap(watchEndpoint.toMediaItem("Home")) }) {
+    HapticTextButton(onClick = { onVideoTap(watchEndpoint.toMediaItem("Home")) }) {
         Text("Play all")
     }
 }
@@ -1055,7 +1131,7 @@ private fun HomeSongCard(
     Column(
         modifier = Modifier
             .width(160.dp)
-            .clickable(onClick = onClick)
+            .hapticClickable(onClick = onClick)
     ) {
         Box {
             Thumbnail(
@@ -1064,7 +1140,7 @@ private fun HomeSongCard(
                 cornerRadius = 8.dp
             )
             if (onOverflowClick != null) {
-                IconButton(
+                HapticIconButton(
                     onClick = onOverflowClick,
                     modifier = Modifier.align(Alignment.TopEnd)
                 ) {
@@ -1147,7 +1223,7 @@ private fun PodcastEpisodeCard(
     Row(
         modifier = Modifier
             .width(300.dp)
-            .clickable(onClick = onClick)
+            .hapticClickable(onClick = onClick)
     ) {
         Box(
             modifier = Modifier
@@ -1299,7 +1375,8 @@ private fun HeroContinuePlaying(
 @Composable
 private fun HeroContinuePlayingWithTopPicks(
     section: HomeSection,
-    onSongTap: (MediaItem, PlaybackQueue) -> Unit
+    onSongTap: (MediaItem, PlaybackQueue) -> Unit,
+    onSongOverflowClick: (HomeItem.Song) -> Unit
 ) {
     val queueItems = remember(section.items) {
         section.items.filterIsInstance<HomeItem.Song>().map { it.toMediaItem() }
@@ -1339,6 +1416,7 @@ private fun HeroContinuePlayingWithTopPicks(
                                 )
                             )
                         },
+                        onLongPress = { onSongOverflowClick(song) },
                         modifier = Modifier.weight(1f)
                     )
                 }
@@ -1380,11 +1458,28 @@ private fun buildHomeSectionQueue(
 private fun CompactSongCard(
     song: HomeItem.Song,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onLongPress: (() -> Unit)? = null
 ) {
+    val interaction = remember { MutableInteractionSource() }
+    val haptics = LocalHapticFeedback.current
+    val clickModifier = if (onLongPress != null) {
+        Modifier.hapticCombinedClickable(
+            interactionSource = interaction,
+            indication = null,
+            onClick = onClick,
+            onLongClick = {
+                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                onLongPress()
+            }
+        )
+    } else {
+        Modifier.hapticClickable(onClick = onClick)
+    }
     Surface(
         modifier = modifier
-            .clickable(onClick = onClick),
+            .pressScale(interaction)
+            .then(clickModifier),
         shape = RoundedCornerShape(8.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh
     ) {

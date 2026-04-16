@@ -49,7 +49,7 @@ fun ContentCard(
         modifier = modifier
             .width(cardWidth)
             .pressScale(interactionSource)
-            .clickable(
+            .hapticClickable(
                 interactionSource = interactionSource,
                 indication = null,
                 onClick = onClick
@@ -74,7 +74,7 @@ fun ContentCard(
                 modifier = thumbnailModifier
             )
             if (onOverflowClick != null) {
-                IconButton(
+                HapticIconButton(
                     onClick = onOverflowClick,
                     modifier = Modifier.align(Alignment.TopEnd)
                 ) {

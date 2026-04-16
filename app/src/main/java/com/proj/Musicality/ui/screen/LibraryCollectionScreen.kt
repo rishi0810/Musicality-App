@@ -27,6 +27,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.DeleteForever
 import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -36,6 +38,7 @@ import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
@@ -69,8 +72,11 @@ import com.proj.Musicality.data.local.LibraryRepository
 import com.proj.Musicality.data.local.MediaLibraryState
 import com.proj.Musicality.data.model.PlaybackQueue
 import com.proj.Musicality.data.model.QueueSource
+import com.proj.Musicality.ui.components.HapticFilledTonalButton
+import com.proj.Musicality.ui.components.HapticOutlinedButton
 import com.proj.Musicality.ui.components.SongListItem
 import com.proj.Musicality.ui.components.Thumbnail
+import com.proj.Musicality.ui.components.hapticClickable
 import com.proj.Musicality.ui.theme.rememberAlbumColors
 import kotlinx.coroutines.launch
 
@@ -221,7 +227,7 @@ fun LibraryCollectionScreen(
                             .padding(horizontal = 12.dp, vertical = 12.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)
                     ) {
-                        FilledTonalButton(
+                        HapticFilledTonalButton(
                             onClick = {
                                 onTrackTap(
                                     PlaybackQueue(
@@ -238,7 +244,7 @@ fun LibraryCollectionScreen(
                             Spacer(Modifier.size(6.dp))
                             Text("Play")
                         }
-                        OutlinedButton(
+                        HapticOutlinedButton(
                             onClick = {
                                 onTrackTap(
                                     PlaybackQueue(
@@ -388,6 +394,16 @@ private fun LibraryTrackActionsSheet(
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val hasVideoId = model.mediaItem.videoId.isNotBlank()
+    var showMoreInfo by remember(model.mediaItem.videoId, model.title) { mutableStateOf(false) }
+    val infoLines = remember(model) {
+        listOfNotNull(
+            "Title: ${model.title}",
+            model.artistName.takeIf { it.isNotBlank() }?.let { "Artist: $it" },
+            model.mediaItem.albumName?.takeIf { it.isNotBlank() }?.let { "Album: $it" },
+            model.mediaItem.durationText?.takeIf { it.isNotBlank() }?.let { "Duration: $it" },
+            model.mediaItem.videoId.takeIf { it.isNotBlank() }?.let { "Video ID: $it" }
+        )
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -439,6 +455,30 @@ private fun LibraryTrackActionsSheet(
                     onClick = onDownload
                 )
             }
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            ListItem(
+                headlineContent = { Text(text = "More Info") },
+                trailingContent = {
+                    Icon(
+                        imageVector = if (showMoreInfo) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                        contentDescription = if (showMoreInfo) "Collapse more info" else "Expand more info"
+                    )
+                },
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                modifier = Modifier.clickable { showMoreInfo = !showMoreInfo }
+            )
+
+            if (showMoreInfo && infoLines.isNotEmpty()) {
+                infoLines.forEach { line ->
+                    Text(
+                        text = line,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 2.dp)
+                    )
+                }
+            }
         }
     }
 }
@@ -465,6 +505,6 @@ private fun LibraryActionItem(
             )
         },
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-        modifier = Modifier.clickable(onClick = onClick)
+        modifier = Modifier.hapticClickable(onClick = onClick)
     )
 }

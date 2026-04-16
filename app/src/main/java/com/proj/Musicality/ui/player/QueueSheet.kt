@@ -64,6 +64,8 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -73,6 +75,8 @@ import com.proj.Musicality.data.local.LibraryRepository
 import com.proj.Musicality.data.model.MediaItem
 import com.proj.Musicality.data.model.PlaybackQueue
 import com.proj.Musicality.data.model.QueueSource
+import com.proj.Musicality.ui.components.hapticClickable
+import com.proj.Musicality.ui.components.hapticCombinedClickable
 import com.proj.Musicality.ui.theme.LocalPlaybackUiPalette
 import kotlinx.coroutines.launch
 
@@ -114,6 +118,7 @@ fun QueueContent(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val haptics = LocalHapticFeedback.current
     val playbackUiPalette = LocalPlaybackUiPalette.current
     val repository = remember(context.applicationContext) {
         LibraryRepository.getInstance(context.applicationContext)
@@ -216,7 +221,7 @@ fun QueueContent(
                             Row(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .combinedClickable(
+                                    .hapticCombinedClickable(
                                         enabled = draggedItemKey == null,
                                         onClick = { onSkipToIndex(index) },
                                         onLongClick = { selectedMenu = queueMenuModelFor(item, queue.source) }
@@ -310,6 +315,7 @@ fun QueueContent(
                                                         return@detectDragGestures
                                                     }
                                                     onMoveInQueue(draggedItemIndex, targetIndex)
+                                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                                     draggedItemIndex += 1
                                                     draggedOffsetY -= rowHeight
                                                 } else if (draggedOffsetY < -threshold && draggedItemIndex > 0) {
@@ -319,6 +325,7 @@ fun QueueContent(
                                                         return@detectDragGestures
                                                     }
                                                     onMoveInQueue(draggedItemIndex, targetIndex)
+                                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                                     draggedItemIndex -= 1
                                                     draggedOffsetY += rowHeight
                                                 }
@@ -454,7 +461,7 @@ fun QueueSheet(
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier
                         .size(32.dp)
-                        .clickable(onClick = onDismiss)
+                        .hapticClickable(onClick = onDismiss)
                         .padding(6.dp)
                 )
             }
@@ -565,7 +572,7 @@ private fun QueueActionItem(
             )
         },
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-        modifier = Modifier.clickable(enabled = enabled, onClick = onClick)
+        modifier = Modifier.hapticClickable(enabled = enabled, onClick = onClick)
     )
 }
 

@@ -133,7 +133,7 @@ fun ExpressiveBottomNavBar(
                                     .fillMaxSize()
                                     .clip(RoundedCornerShape(24.dp))
                                     .pressScale(interactionSource)
-                                    .clickable(
+                                    .hapticClickable(
                                         interactionSource = interactionSource,
                                         indication = null,
                                         onClick = item.onClick

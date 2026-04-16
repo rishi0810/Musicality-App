@@ -42,7 +42,7 @@ fun SongListItem(
         modifier = modifier
             .fillMaxWidth()
             .pressScale(interactionSource)
-            .clickable(
+            .hapticClickable(
                 interactionSource = interactionSource,
                 indication = null,
                 onClick = onClick
@@ -92,7 +92,7 @@ fun SongListItem(
             )
         }
         if (onOverflowClick != null) {
-            IconButton(onClick = onOverflowClick) {
+            HapticIconButton(onClick = onOverflowClick) {
                 Icon(
                     imageVector = Icons.Rounded.MoreVert,
                     contentDescription = "More actions for $title",

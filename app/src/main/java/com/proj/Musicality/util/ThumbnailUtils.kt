@@ -15,9 +15,6 @@ fun upscaleThumbnail(url: String?, size: Int = 544): String? {
 fun isGoogleusercontentUrl(url: String?): Boolean =
     url?.contains("googleusercontent.com", ignoreCase = true) == true
 
-fun isYtimgUrl(url: String?): Boolean =
-    url?.contains("i.ytimg.com", ignoreCase = true) == true
-
 fun albumArtUrlOrNull(url: String?, size: Int = 544): String? {
     if (!isGoogleusercontentUrl(url)) return null
     val base = url?.substringBefore("=") ?: return null

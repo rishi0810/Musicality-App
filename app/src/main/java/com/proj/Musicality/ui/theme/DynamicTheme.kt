@@ -46,24 +46,21 @@ data class MediaBackdropPalette(
 )
 
 @Composable
-fun rememberDominantColor(
-    imageUrl: String?,
-    fallback: Color = Color(0xFF121212)
-): Color {
-    val palette = rememberMediaBackdropPalette(
-        imageUrl = imageUrl,
-        fallbackSurface = fallback
-    )
-    return palette.middle
-}
-
-@Composable
 fun rememberAlbumColors(
     imageUrl: String?,
     fallbackPrimary: Color = Color(0xFF2C2C2C),
     fallbackSecondary: Color = Color(0xFF444444),
     allowNetworkFetch: Boolean = true
 ): AlbumColors {
+    if (imageUrl.isNullOrBlank()) {
+        return remember(fallbackPrimary, fallbackSecondary) {
+            AlbumColors(
+                primary = fallbackPrimary,
+                secondary = fallbackSecondary
+            )
+        }
+    }
+
     val palette = rememberMediaBackdropPalette(
         imageUrl = imageUrl,
         fallbackSurface = fallbackSecondary,
@@ -120,7 +117,14 @@ fun rememberMediaBackdropPalette(
         }
 
         val extracted = withContext(Dispatchers.Default) {
+            val insetX = (bitmap.width * 0.08f).toInt().coerceAtLeast(0)
+            val insetY = (bitmap.height * 0.08f).toInt().coerceAtLeast(0)
+            val left = insetX.coerceAtMost((bitmap.width - 1).coerceAtLeast(0))
+            val top = insetY.coerceAtMost((bitmap.height - 1).coerceAtLeast(0))
+            val right = (bitmap.width - insetX).coerceAtLeast(left + 1)
+            val bottom = (bitmap.height - insetY).coerceAtLeast(top + 1)
             val generatedPalette = Palette.from(bitmap)
+                .setRegion(left, top, right, bottom)
                 .maximumColorCount(16)
                 .generate()
             buildMediaBackdropPalette(
@@ -205,27 +209,61 @@ private fun buildMediaBackdropPalette(
     fallbackSurface: Color
 ): MediaBackdropPalette {
     val surface = fallbackSurface.copy(alpha = 1f)
-    val swatches = palette.swatches
-        .sortedByDescending { scoreSwatch(it) }
+    val allSwatches = palette.swatches
+    val expressiveSwatches = allSwatches.filter { saturationOf(Color(it.rgb)) >= 0.12f }
+    val swatches = (if (expressiveSwatches.isNotEmpty()) expressiveSwatches else allSwatches)
+    val maxPopulation = swatches.maxOfOrNull { it.population }?.coerceAtLeast(1) ?: 1
+    val sortedSwatches = swatches
+        .sortedByDescending { scoreSwatch(it, maxPopulation) }
 
-    val dominant = swatches
+    val dominantSeed = sortedSwatches
         .firstOrNull()
-        ?.let { normalizeBackdropColor(Color(it.rgb), surface, targetLightness = 0.38f, minSaturation = 0.22f) }
+        ?.let { Color(it.rgb) }
+
+    val dominant = dominantSeed
+        ?.let { normalizeBackdropColor(it, surface, targetLightness = 0.38f, minSaturation = 0.22f) }
         ?: darkenColor(surface, 0.08f)
 
-    val supportive = swatches
-        .firstOrNull { swatch ->
-            hueDistance(Color(swatch.rgb), dominant) >= 14f
+    val supportiveSeed = sortedSwatches
+        .asSequence()
+        .drop(1)
+        .mapNotNull { swatch ->
+            val candidate = Color(swatch.rgb)
+            val population = (swatch.population.toFloat() / maxPopulation.toFloat()).coerceIn(0f, 1f)
+            val saturation = saturationOf(candidate)
+            val lightness = lightnessOf(candidate)
+            if (population < 0.06f || saturation < 0.10f || lightness !in 0.12f..0.62f) return@mapNotNull null
+
+            val hueGap = hueDistance(candidate, dominant)
+            val hueHarmony = 1f - (abs(hueGap - 24f) / 24f).coerceIn(0f, 1f)
+            val score = scoreSwatch(swatch, maxPopulation) * 0.65f + hueHarmony * 0.35f
+            swatch to score
         }
-        ?.let { normalizeBackdropColor(Color(it.rgb), surface, targetLightness = 0.30f, minSaturation = 0.18f) }
+        .maxByOrNull { it.second }
+        ?.first
+        ?.let { Color(it.rgb) }
+        ?: sortedSwatches
+            .firstOrNull { swatch -> hueDistance(Color(swatch.rgb), dominant) >= 10f }
+            ?.let { Color(it.rgb) }
+        ?: dominantSeed
+
+    val supportiveBase = supportiveSeed
+        ?.let { normalizeBackdropColor(it, surface, targetLightness = 0.30f, minSaturation = 0.18f) }
         ?: darkenColor(dominant, 0.12f)
 
-    val highlightSeed = swatches
+    // Keep large hue jumps from producing muddy olive/brown backdrops when dominant is already strong.
+    val supportive = if (hueDistance(supportiveBase, dominant) > 42f) {
+        lerp(supportiveBase, dominant, 0.45f)
+    } else {
+        supportiveBase
+    }
+
+    val highlightSeed = sortedSwatches
         .filter { swatch ->
             val candidate = Color(swatch.rgb)
             hueDistance(candidate, dominant) >= 8f || saturationOf(candidate) > saturationOf(dominant) + 0.08f
         }
-        .maxByOrNull { accentScore(it) }
+        .maxByOrNull { accentScore(it, maxPopulation) }
         ?.let { Color(it.rgb) }
         ?: dominant
 
@@ -271,21 +309,28 @@ private fun defaultMediaBackdropPalette(surface: Color): MediaBackdropPalette {
     )
 }
 
-private fun scoreSwatch(swatch: Palette.Swatch): Float {
+private fun scoreSwatch(
+    swatch: Palette.Swatch,
+    maxPopulation: Int
+): Float {
     val color = Color(swatch.rgb)
+    val population = (swatch.population.toFloat() / maxPopulation.toFloat()).coerceIn(0f, 1f)
     val saturation = saturationOf(color)
     val lightness = lightnessOf(color)
     val lightnessScore = 1f - (abs(lightness - 0.42f) / 0.42f).coerceIn(0f, 1f)
-    return swatch.population * 0.58f + saturation * 200f * 0.28f + lightnessScore * 100f * 0.14f
+    return population * 0.38f + saturation * 0.42f + lightnessScore * 0.20f
 }
 
-private fun accentScore(swatch: Palette.Swatch): Float {
+private fun accentScore(
+    swatch: Palette.Swatch,
+    maxPopulation: Int
+): Float {
     val color = Color(swatch.rgb)
+    val population = (swatch.population.toFloat() / maxPopulation.toFloat()).coerceIn(0f, 1f)
     val saturation = saturationOf(color)
     val lightness = lightnessOf(color)
-    val pop = swatch.population.toFloat()
     val lightnessScore = 1f - abs(lightness - 0.52f)
-    return pop * 0.34f + saturation * 100f * 0.52f + lightnessScore * 100f * 0.14f
+    return population * 0.18f + saturation * 0.62f + lightnessScore * 0.20f
 }
 
 private fun normalizeBackdropColor(
@@ -295,7 +340,12 @@ private fun normalizeBackdropColor(
     minSaturation: Float
 ): Color {
     val hsl = color.toHsl()
-    hsl[1] = hsl[1].coerceAtLeast(minSaturation).coerceAtMost(0.72f)
+    val saturation = hsl[1].coerceIn(0f, 1f)
+    hsl[1] = if (saturation < minSaturation) {
+        (saturation + (minSaturation - saturation) * 0.68f).coerceAtMost(0.72f)
+    } else {
+        saturation.coerceAtMost(0.72f)
+    }
     hsl[2] = hsl[2].coerceIn(targetLightness - 0.12f, targetLightness + 0.12f)
     return lerp(surface, Color(ColorUtils.HSLToColor(hsl)), 0.86f).copy(alpha = 1f)
 }

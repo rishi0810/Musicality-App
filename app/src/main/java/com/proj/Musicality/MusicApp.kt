@@ -59,6 +59,7 @@ import com.proj.Musicality.data.model.PlaybackQueue
 import com.proj.Musicality.navigation.Route
 import com.proj.Musicality.ui.components.ExpressiveBottomNavBar
 import com.proj.Musicality.ui.components.ExpressiveBottomNavItem
+import com.proj.Musicality.ui.components.HapticIconButton
 import com.proj.Musicality.ui.player.PlayerSheet
 import com.proj.Musicality.ui.screen.*
 import com.proj.Musicality.ui.theme.LocalPlaybackBackdropPalette
@@ -545,7 +546,7 @@ fun MusicApp() {
                 }
 
                 if (showBackButton) {
-                    IconButton(
+                    HapticIconButton(
                         onClick = { navController.popBackStack() },
                         modifier = Modifier
                             .align(Alignment.TopStart)

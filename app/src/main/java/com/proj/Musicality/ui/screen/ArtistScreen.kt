@@ -37,6 +37,8 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Album
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.Person
@@ -98,6 +100,10 @@ import com.proj.Musicality.data.model.toMediaItem
 import com.proj.Musicality.navigation.Route
 import com.proj.Musicality.ui.components.ContentCard
 import com.proj.Musicality.ui.components.ErrorMessage
+import com.proj.Musicality.ui.components.HapticFilledTonalButton
+import com.proj.Musicality.ui.components.HapticFilledTonalIconButton
+import com.proj.Musicality.ui.components.HapticOutlinedButton
+import com.proj.Musicality.ui.components.hapticClickable
 import com.proj.Musicality.ui.components.SectionHeader
 import com.proj.Musicality.ui.components.ShimmerSection
 import com.proj.Musicality.ui.components.SongListItem
@@ -241,7 +247,7 @@ fun ArtistScreen(
                 isSaved = isArtistSaved,
                 onAdd = {
                     scope.launch {
-                        if (isArtistSaved && savedArtistEntry != null) {
+                        if (savedArtistEntry != null) {
                             repository.removeSavedEntry(savedArtistEntry)
                         } else {
                             repository.rememberArtist(
@@ -396,6 +402,22 @@ fun ArtistScreen(
                             thumbnailUrl = video.image,
                             sharedElementKey = "thumb-${video.videoId}",
                             animatedVisibilityScope = animatedVisibilityScope,
+                            onOverflowClick = {
+                                selectedTopSongMenu = ArtistTopSongMenuModel(
+                                    title = video.title,
+                                    subtitle = video.views,
+                                    artistName = details.name,
+                                    artistId = seed.browseId,
+                                    albumName = null,
+                                    thumb = video.image,
+                                    videoId = video.videoId,
+                                    metadata = listOfNotNull(
+                                        "Artist: ${details.name}",
+                                        video.views?.takeIf { it.isNotBlank() }?.let { "Views: $it" },
+                                        "Video ID: ${video.videoId}"
+                                    )
+                                )
+                            },
                             onClick = { onVideoTap(videoItem) }
                         )
                     }
@@ -532,26 +554,20 @@ private fun ArtistTopSongActionsSheet(
     onDownload: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var showMoreInfo by remember(model.videoId, model.title) { mutableStateOf(false) }
+    val infoLines = remember(model) {
+        buildList {
+            add("Title: ${model.title}")
+            model.subtitle?.takeIf { it.isNotBlank() }?.let { add("Info: $it") }
+            addAll(model.metadata)
+        }
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState
     ) {
         Column(modifier = Modifier.padding(bottom = 16.dp)) {
-            Text(
-                text = model.title,
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp)
-            )
-            Text(
-                text = "Song",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 24.dp)
-            )
-
-            HorizontalDivider(modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
-
             ArtistTopSongActionItem(
                 label = if (isLiked) "Remove from liked songs" else "Add to liked songs",
                 icon = if (isLiked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
@@ -583,9 +599,21 @@ private fun ArtistTopSongActionsSheet(
                 onClick = onDownload
             )
 
-            if (model.metadata.isNotEmpty()) {
-                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-                model.metadata.forEach { line ->
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            ListItem(
+                headlineContent = { Text(text = "More Info") },
+                trailingContent = {
+                    Icon(
+                        imageVector = if (showMoreInfo) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                        contentDescription = if (showMoreInfo) "Collapse more info" else "Expand more info"
+                    )
+                },
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                modifier = Modifier.clickable { showMoreInfo = !showMoreInfo }
+            )
+
+            if (showMoreInfo && infoLines.isNotEmpty()) {
+                infoLines.forEach { line ->
                     Text(
                         text = line,
                         style = MaterialTheme.typography.bodySmall,
@@ -624,7 +652,7 @@ private fun ArtistTopSongActionItem(
             )
         },
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-        modifier = Modifier.clickable(enabled = enabled, onClick = onClick)
+        modifier = Modifier.hapticClickable(enabled = enabled, onClick = onClick)
     )
 }
 
@@ -703,7 +731,7 @@ private fun ArtistHeroHeader(
                     modifier = Modifier.weight(1f)
                 )
                 Spacer(Modifier.width(12.dp))
-                FilledTonalIconButton(
+                HapticFilledTonalIconButton(
                     onClick = onAdd
                 ) {
                     Icon(
@@ -735,7 +763,7 @@ private fun ArtistActionButtons(
             .padding(horizontal = 16.dp, vertical = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        FilledTonalButton(
+        HapticFilledTonalButton(
             onClick = onPlay,
             modifier = Modifier.weight(1f),
             shape = CircleShape
@@ -744,7 +772,7 @@ private fun ArtistActionButtons(
             Spacer(Modifier.width(8.dp))
             Text("Play", fontWeight = FontWeight.SemiBold)
         }
-        OutlinedButton(
+        HapticOutlinedButton(
             onClick = onShuffle,
             modifier = Modifier.weight(1f),
             shape = CircleShape
