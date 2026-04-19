@@ -22,7 +22,7 @@ import okhttp3.Request
 object AppUpdateManager {
     private const val TAG = "AppUpdateManager"
     private const val MANIFEST_URL =
-        "https://cdn.jsdelivr.net/gh/rishi0810/Musicality-App@latest/static/manifest.json"
+        "https://cdn.jsdelivr.net/gh/rishi0810/Musicality-App@main/static/manifest.json"
     private const val CHANNEL_ID = "app_updates"
     private const val CHANNEL_NAME = "App updates"
     private const val PREFS = "app_update_prefs"
