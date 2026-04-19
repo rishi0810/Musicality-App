@@ -91,6 +91,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.proj.Musicality.data.local.LibraryRepository
+import com.proj.Musicality.data.local.MediaDownloadState
 import com.proj.Musicality.data.local.MediaLibraryState
 import coil3.compose.AsyncImage
 import com.proj.Musicality.data.model.HomeItem
@@ -154,6 +155,7 @@ fun HomeScreen(
     val viewModel: HomeViewModel = viewModel()
     val state by viewModel.state.collectAsStateWithLifecycle()
     val isLoadingMore by viewModel.isLoadingMore.collectAsStateWithLifecycle()
+    val downloadStates by repository.downloadStates.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     var isRefreshing by remember { mutableStateOf(false) }
     var selectedSongMenu by remember { mutableStateOf<HomeSongMenuModel?>(null) }
@@ -210,6 +212,7 @@ fun HomeScreen(
                 ) { _, section ->
                     HomeSectionShelf(
                         section = section,
+                        downloadStates = downloadStates,
                         animatedVisibilityScope = animatedVisibilityScope,
                         onSongTap = onSongTap,
                         onSongOverflowClick = { selectedSongMenu = it.toMenuModel() },
@@ -240,6 +243,7 @@ fun HomeScreen(
                     ) { _, section ->
                         HomeSectionShelf(
                             section = section,
+                            downloadStates = downloadStates,
                             animatedVisibilityScope = animatedVisibilityScope,
                             onSongTap = onSongTap,
                             onSongOverflowClick = { selectedSongMenu = it.toMenuModel() },
@@ -282,6 +286,7 @@ fun HomeScreen(
         HomeSongActionsSheet(
             model = menu,
             isLiked = mediaState.isLiked,
+            downloadState = downloadStates[menu.mediaItem.videoId],
             onDismiss = { selectedSongMenu = null },
             onToggleLike = {
                 scope.launch { repository.toggleLike(menu.mediaItem) }
@@ -337,8 +342,8 @@ fun HomeScreen(
                         if (result.isSuccess) "Downloaded: ${menu.title}" else "Download failed: ${menu.title}",
                         Toast.LENGTH_SHORT
                     ).show()
+                    selectedSongMenu = null
                 }
-                selectedSongMenu = null
             }
         )
     }
@@ -366,6 +371,7 @@ private fun HomeLoadingPlaceholder(
 @Composable
 private fun HomeSectionShelf(
     section: HomeSection,
+    downloadStates: Map<String, MediaDownloadState>,
     animatedVisibilityScope: AnimatedVisibilityScope,
     onSongTap: (MediaItem, PlaybackQueue) -> Unit,
     onSongOverflowClick: (HomeItem.Song) -> Unit,
@@ -495,6 +501,7 @@ private fun HomeSectionShelf(
                                             item.plays
                                         ).joinToString(" • "),
                                         thumbnailUrl = item.thumbnailUrl,
+                                        downloadState = downloadStates[item.videoId],
                                         sharedElementKey = "thumb-${item.videoId}",
                                         animatedVisibilityScope = animatedVisibilityScope,
                                         onOverflowClick = { onSongOverflowClick(item) },
@@ -630,6 +637,7 @@ private fun HomeSectionShelf(
                                     song.plays
                                 ).joinToString(" • "),
                                 thumbnailUrl = song.thumbnailUrl,
+                                downloadState = downloadStates[song.videoId],
                                 sharedElementKey = "thumb-${song.videoId}",
                                 animatedVisibilityScope = animatedVisibilityScope,
                                 onOverflowClick = { onSongOverflowClick(song) },
@@ -846,11 +854,11 @@ private fun SongFeaturedMix(
                 .padding(horizontal = 16.dp)
                 .fillMaxWidth()
                 .pressScale(cardInteraction)
-                .clip(RoundedCornerShape(22.dp))
+                .clip(RoundedCornerShape(8.dp))
                 .background(cardGradient)
                 .border(
                     BorderStroke(1.dp, borderColor),
-                    RoundedCornerShape(22.dp)
+                    RoundedCornerShape(8.dp)
                 )
                 .hapticCombinedClickable(
                     interactionSource = cardInteraction,
@@ -886,7 +894,7 @@ private fun SongFeaturedMix(
                 Thumbnail(
                     url = featured.thumbnailUrl,
                     size = 84.dp,
-                    cornerRadius = 14.dp
+                    cornerRadius = 8.dp
                 )
                 Spacer(Modifier.width(14.dp))
                 Column(modifier = Modifier.weight(1f)) {
@@ -989,6 +997,7 @@ private fun SongFeaturedMix(
 private fun HomeSongActionsSheet(
     model: HomeSongMenuModel,
     isLiked: Boolean,
+    downloadState: MediaDownloadState?,
     onDismiss: () -> Unit,
     onToggleLike: () -> Unit,
     onPlayNext: () -> Unit,
@@ -1051,9 +1060,14 @@ private fun HomeSongActionsSheet(
                 onClick = onShare
             )
             HomeSongActionItem(
-                label = "Download",
+                label = when {
+                    downloadState?.isDownloading == true -> "Downloading ${(downloadState.progress * 100).toInt()}%"
+                    downloadState?.isDownloaded == true -> "Downloaded"
+                    else -> "Download"
+                },
                 icon = Icons.Rounded.Download,
-                onClick = onDownload
+                onClick = onDownload,
+                enabled = downloadState?.isDownloading != true
             )
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
@@ -1087,27 +1101,31 @@ private fun HomeSongActionsSheet(
 private fun HomeSongActionItem(
     label: String,
     icon: ImageVector,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    enabled: Boolean = true
 ) {
+    val alpha = if (enabled) 1f else 0.5f
     ListItem(
         headlineContent = {
             Text(
                 text = label,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 2.dp)
+                    .padding(vertical = 2.dp),
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = alpha)
             )
         },
         leadingContent = {
             Icon(
                 imageVector = icon,
-                contentDescription = null
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha)
             )
         },
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
         modifier = Modifier
             .fillMaxWidth()
-            .hapticClickable(onClick = onClick)
+            .hapticClickable(enabled = enabled, onClick = onClick)
     )
 }
 

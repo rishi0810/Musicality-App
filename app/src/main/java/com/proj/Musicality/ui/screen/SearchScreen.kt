@@ -89,6 +89,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.proj.Musicality.api.SearchType
 import com.proj.Musicality.data.local.LibraryRepository
+import com.proj.Musicality.data.local.MediaDownloadState
 import com.proj.Musicality.data.local.MediaLibraryState
 import com.proj.Musicality.data.model.AlbumResult
 import com.proj.Musicality.data.model.AllResult
@@ -158,6 +159,7 @@ fun SearchScreen(
     val repository = remember(context.applicationContext) {
         LibraryRepository.getInstance(context.applicationContext)
     }
+    val downloadStates by repository.downloadStates.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -353,6 +355,7 @@ fun SearchScreen(
                                                 title = result.title,
                                                 subtitle = result.subtitle,
                                                 thumbnailUrl = result.thumb,
+                                                downloadState = downloadStates[result.id],
                                                 onOverflowClick = {
                                                     selectedResultMenu = buildAllResultMenuModel(result)
                                                 },
@@ -379,6 +382,7 @@ fun SearchScreen(
                                                 title = result.title,
                                                 subtitle = result.subtitle,
                                                 thumbnailUrl = result.thumb,
+                                                downloadState = downloadStates[result.id],
                                                 onOverflowClick = {
                                                     selectedResultMenu = buildAllResultMenuModel(result)
                                                 },
@@ -399,6 +403,7 @@ fun SearchScreen(
                                             subtitle = "${song.artist}${song.album?.let { " • $it" } ?: ""}",
                                             thumbnailUrl = song.thumb,
                                             trailingText = song.duration,
+                                            downloadState = downloadStates[song.videoId],
                                             sharedElementKey = "thumb-${song.videoId}",
                                             animatedVisibilityScope = animatedVisibilityScope,
                                             onOverflowClick = {
@@ -443,6 +448,7 @@ fun SearchScreen(
                                             subtitle = "${video.artist}${video.views?.let { " • $it" } ?: ""}",
                                             thumbnailUrl = video.thumb,
                                             trailingText = video.duration,
+                                            downloadState = downloadStates[video.videoId],
                                             sharedElementKey = "thumb-${video.videoId}",
                                             animatedVisibilityScope = animatedVisibilityScope,
                                             onOverflowClick = {
@@ -632,6 +638,7 @@ fun SearchScreen(
                                     title = suggestion.title,
                                     subtitle = suggestion.subtitle,
                                     thumbnailUrl = suggestionThumb,
+                                    downloadState = suggestion.id?.let { downloadStates[it] },
                                     onOverflowClick = {
                                         val item = MediaItem(
                                             videoId = suggestion.id ?: "",
@@ -693,6 +700,7 @@ fun SearchScreen(
                                     title = suggestion.title,
                                     subtitle = suggestion.subtitle,
                                     thumbnailUrl = suggestionThumb,
+                                    downloadState = suggestion.id?.let { downloadStates[it] },
                                     onClick = {
                                         dismissKeyboard()
                                         val item = MediaItem(
@@ -785,6 +793,7 @@ fun SearchScreen(
         SearchResultActionsSheet(
             model = menu,
             isLiked = mediaState.isLiked,
+            downloadState = menu.mediaItem?.videoId?.let { downloadStates[it] },
             onDismiss = { selectedResultMenu = null },
             onToggleLike = {
                 val media = menu.mediaItem ?: return@SearchResultActionsSheet
@@ -849,9 +858,9 @@ fun SearchScreen(
                             if (result.isSuccess) "Downloaded: ${menu.title}" else "Download failed: ${menu.title}",
                             Toast.LENGTH_SHORT
                         ).show()
+                        selectedResultMenu = null
                     }
                 }
-                selectedResultMenu = null
             }
         )
     }
@@ -941,6 +950,7 @@ private fun handleAllResultTap(
 private fun SearchResultActionsSheet(
     model: SearchResultMenuModel,
     isLiked: Boolean,
+    downloadState: MediaDownloadState?,
     onDismiss: () -> Unit,
     onToggleLike: () -> Unit,
     onPlayNext: () -> Unit,
@@ -998,9 +1008,13 @@ private fun SearchResultActionsSheet(
                 onClick = onShare
             )
             SearchActionItem(
-                label = "Download",
+                label = when {
+                    downloadState?.isDownloading == true -> "Downloading ${(downloadState.progress * 100).toInt()}%"
+                    downloadState?.isDownloaded == true -> "Downloaded"
+                    else -> "Download"
+                },
                 icon = Icons.Rounded.Download,
-                enabled = hasPlayableMedia,
+                enabled = hasPlayableMedia && downloadState?.isDownloading != true,
                 onClick = onDownload
             )
 

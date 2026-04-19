@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.proj.Musicality.data.local.LibraryRepository
+import com.proj.Musicality.data.local.MediaDownloadState
 import com.proj.Musicality.data.local.MediaLibraryState
 import com.proj.Musicality.data.model.*
 import com.proj.Musicality.navigation.Route
@@ -81,6 +82,7 @@ fun AlbumScreen(
         LibraryRepository.getInstance(context.applicationContext)
     }
     val librarySnapshot by repository.snapshot.collectAsStateWithLifecycle()
+    val downloadStates by repository.downloadStates.collectAsStateWithLifecycle()
     val viewModel: AlbumViewModel = viewModel(
         key = seed.browseId,
         factory = AlbumViewModelFactory(seed.browseId)
@@ -351,6 +353,8 @@ fun AlbumScreen(
 
                 // Track list
                 itemsIndexed(album.tracks, key = { _, track -> track.videoId ?: track.index }, contentType = { _, _ -> "track" }) { index, track ->
+                    val videoId = track.videoId.orEmpty()
+                    val downloadState = downloadStates[videoId]
                     Row(
                         modifier = Modifier
                             .animateItem()
@@ -388,6 +392,13 @@ fun AlbumScreen(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
+                            if (downloadState?.isDownloading == true) {
+                                Spacer(Modifier.height(6.dp))
+                                LinearProgressIndicator(
+                                    progress = { downloadState.progress },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
                         }
                         if (!track.duration.isNullOrBlank()) {
                             Spacer(Modifier.width(8.dp))
@@ -395,6 +406,14 @@ fun AlbumScreen(
                                 text = track.duration,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        if (downloadState?.isDownloaded == true) {
+                            Spacer(Modifier.width(8.dp))
+                            Icon(
+                                imageVector = Icons.Rounded.Check,
+                                contentDescription = "Downloaded",
+                                tint = MaterialTheme.colorScheme.primary
                             )
                         }
                         HapticIconButton(
@@ -434,6 +453,7 @@ fun AlbumScreen(
         AlbumTrackActionsSheet(
             model = menu,
             isLiked = mediaState.isLiked,
+            downloadState = downloadStates[menu.mediaItem.videoId],
             onDismiss = { selectedTrackMenu = null },
             onToggleLike = {
                 scope.launch { repository.toggleLike(menu.mediaItem) }
@@ -481,8 +501,8 @@ fun AlbumScreen(
                         if (result.isSuccess) "Downloaded: ${menu.title}" else "Download failed: ${menu.title}",
                         Toast.LENGTH_SHORT
                     ).show()
+                    selectedTrackMenu = null
                 }
-                selectedTrackMenu = null
             }
         )
     }
@@ -493,6 +513,7 @@ fun AlbumScreen(
 private fun AlbumTrackActionsSheet(
     model: AlbumTrackMenuModel,
     isLiked: Boolean,
+    downloadState: MediaDownloadState?,
     onDismiss: () -> Unit,
     onToggleLike: () -> Unit,
     onPlayNext: () -> Unit,
@@ -552,9 +573,14 @@ private fun AlbumTrackActionsSheet(
             }
             if (hasVideoId) {
                 AlbumActionItem(
-                    label = "Download",
+                    label = when {
+                        downloadState?.isDownloading == true -> "Downloading ${(downloadState.progress * 100).toInt()}%"
+                        downloadState?.isDownloaded == true -> "Downloaded"
+                        else -> "Download"
+                    },
                     icon = Icons.Rounded.Download,
-                    onClick = onDownload
+                    onClick = onDownload,
+                    enabled = downloadState?.isDownloading != true
                 )
             }
 
@@ -589,24 +615,28 @@ private fun AlbumTrackActionsSheet(
 private fun AlbumActionItem(
     label: String,
     icon: ImageVector,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    enabled: Boolean = true
 ) {
+    val alpha = if (enabled) 1f else 0.5f
     ListItem(
         headlineContent = {
             Text(
                 text = label,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 2.dp)
+                    .padding(vertical = 2.dp),
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = alpha)
             )
         },
         leadingContent = {
             Icon(
                 imageVector = icon,
-                contentDescription = null
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha)
             )
         },
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-        modifier = Modifier.hapticClickable(onClick = onClick)
+        modifier = Modifier.hapticClickable(enabled = enabled, onClick = onClick)
     )
 }

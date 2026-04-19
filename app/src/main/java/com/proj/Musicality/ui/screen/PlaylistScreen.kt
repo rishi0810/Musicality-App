@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.proj.Musicality.data.local.LibraryRepository
+import com.proj.Musicality.data.local.MediaDownloadState
 import com.proj.Musicality.data.local.MediaLibraryState
 import com.proj.Musicality.data.model.*
 import com.proj.Musicality.navigation.Route
@@ -88,6 +89,7 @@ fun PlaylistScreen(
         LibraryRepository.getInstance(context.applicationContext)
     }
     val librarySnapshot by repository.snapshot.collectAsStateWithLifecycle()
+    val downloadStates by repository.downloadStates.collectAsStateWithLifecycle()
     val viewModel: PlaylistViewModel = viewModel(
         key = seed.browseId,
         factory = PlaylistViewModelFactory(seed.browseId)
@@ -360,6 +362,7 @@ fun PlaylistScreen(
                     key = { index, track -> "${track.videoId}-$index" },
                     contentType = { _, _ -> "track" }
                 ) { index, track ->
+                    val downloadState = downloadStates[track.videoId]
                     Row(
                         modifier = Modifier
                             .animateItem()
@@ -404,6 +407,13 @@ fun PlaylistScreen(
                                     }
                                 )
                             }
+                            if (downloadState?.isDownloading == true) {
+                                Spacer(Modifier.height(6.dp))
+                                LinearProgressIndicator(
+                                    progress = { downloadState.progress },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
                         }
                         if (!track.duration.isNullOrBlank()) {
                             Spacer(Modifier.width(8.dp))
@@ -411,6 +421,14 @@ fun PlaylistScreen(
                                 text = track.duration,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        if (downloadState?.isDownloaded == true) {
+                            Spacer(Modifier.width(8.dp))
+                            Icon(
+                                imageVector = Icons.Rounded.Check,
+                                contentDescription = "Downloaded",
+                                tint = MaterialTheme.colorScheme.primary
                             )
                         }
                         HapticIconButton(
@@ -451,6 +469,7 @@ fun PlaylistScreen(
         PlaylistTrackActionsSheet(
             model = menu,
             isLiked = mediaState.isLiked,
+            downloadState = downloadStates[menu.mediaItem.videoId],
             onDismiss = { selectedTrackMenu = null },
             onToggleLike = {
                 scope.launch { repository.toggleLike(menu.mediaItem) }
@@ -498,8 +517,8 @@ fun PlaylistScreen(
                         if (result.isSuccess) "Downloaded: ${menu.title}" else "Download failed: ${menu.title}",
                         Toast.LENGTH_SHORT
                     ).show()
+                    selectedTrackMenu = null
                 }
-                selectedTrackMenu = null
             }
         )
     }
@@ -510,6 +529,7 @@ fun PlaylistScreen(
 private fun PlaylistTrackActionsSheet(
     model: PlaylistTrackMenuModel,
     isLiked: Boolean,
+    downloadState: MediaDownloadState?,
     onDismiss: () -> Unit,
     onToggleLike: () -> Unit,
     onPlayNext: () -> Unit,
@@ -569,9 +589,14 @@ private fun PlaylistTrackActionsSheet(
             }
             if (hasVideoId) {
                 PlaylistActionItem(
-                    label = "Download",
+                    label = when {
+                        downloadState?.isDownloading == true -> "Downloading ${(downloadState.progress * 100).toInt()}%"
+                        downloadState?.isDownloaded == true -> "Downloaded"
+                        else -> "Download"
+                    },
                     icon = Icons.Rounded.Download,
-                    onClick = onDownload
+                    onClick = onDownload,
+                    enabled = downloadState?.isDownloading != true
                 )
             }
 
@@ -606,24 +631,28 @@ private fun PlaylistTrackActionsSheet(
 private fun PlaylistActionItem(
     label: String,
     icon: ImageVector,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    enabled: Boolean = true
 ) {
+    val alpha = if (enabled) 1f else 0.5f
     ListItem(
         headlineContent = {
             Text(
                 text = label,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 2.dp)
+                    .padding(vertical = 2.dp),
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = alpha)
             )
         },
         leadingContent = {
             Icon(
                 imageVector = icon,
-                contentDescription = null
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha)
             )
         },
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-        modifier = Modifier.hapticClickable(onClick = onClick)
+        modifier = Modifier.hapticClickable(enabled = enabled, onClick = onClick)
     )
 }

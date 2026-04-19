@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.ComponentName
 import android.content.Intent
 import android.net.Uri
+import android.os.SystemClock
 import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
@@ -57,6 +58,7 @@ data class PlaybackState(
 class PlaybackViewModel(application: Application) : AndroidViewModel(application) {
     companion object {
         private const val TAG = "PlaybackViewModel"
+        private const val CROSSFADE_PREVIOUS_GRACE_MS = 10_000L
     }
 
     private val _state = MutableStateFlow(PlaybackState())
@@ -79,6 +81,8 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
     private var mediaController: MediaController? = null
     private var serviceStarted = false
     private var upNextJob: Job? = null
+    private var lastCrossfadeArrivalTrackId: String? = null
+    private var lastCrossfadeArrivalRealtimeMs: Long = 0L
     private val listeningHistoryRepository =
         ListeningHistoryRepository.getInstance(application.applicationContext)
 
@@ -97,7 +101,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
     fun toggleCrossfade() {
         val enabled = !_crossfadeEnabled.value
         _crossfadeEnabled.value = enabled
-        crossfadeManager.setEnabled(enabled)
+        crossfadeManager.setEnabled(enabled, getDelegatingPlayer())
     }
 
     private fun ensureServiceStarted() {
@@ -122,18 +126,12 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                     .onSuccess { controller ->
                         mediaController = controller
                         setupPlayerListener()
-                        _state.update {
-                            it.copy(
-                                isPlaying = controller.isPlaying,
-                                durationMs = controller.duration.takeIf { duration -> duration > 0 } ?: it.durationMs,
-                                repeatMode = controller.repeatMode
-                            )
-                        }
-                        _positionMs.value = controller.currentPosition.coerceAtLeast(0L)
-                        if (controller.isPlaying) startPositionPolling()
+                        syncStateFromPlayer(controller)
                     }
                     .onFailure { error ->
                         Log.e(TAG, "Failed to connect MediaController", error)
+                        controllerFuture = null
+                        mediaController = null
                     }
             },
             ContextCompat.getMainExecutor(app)
@@ -165,6 +163,13 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
 
             override fun onPlaybackStateChanged(playbackState: Int) {
                 Log.d(TAG, "onPlaybackStateChanged: $playbackState")
+                if (_crossfadeEnabled.value && crossfadeManager.isTransitioning()) {
+                    // During crossfade, callbacks can still come from the outgoing player.
+                    // Avoid syncing visual metadata from that stale source to prevent
+                    // brief artwork/gradient flicker back to the previous track.
+                    return
+                }
+                syncStateFromPlayer(player)
                 if (playbackState == Player.STATE_READY) {
                     val dur = player.duration
                     if (dur > 0) {
@@ -183,10 +188,99 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
             override fun onRepeatModeChanged(repeatMode: Int) {
                 _state.update { it.copy(repeatMode = repeatMode) }
             }
+
+            override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
+                if (_crossfadeEnabled.value && crossfadeManager.isTransitioning()) return
+                syncStateFromPlayer(player)
+            }
+
+            override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
+                if (_crossfadeEnabled.value && crossfadeManager.isTransitioning()) return
+                syncStateFromPlayer(player)
+            }
         }
         playerListener = listener
         observedPlayer = player
         player.addListener(listener)
+    }
+
+    /**
+     * Keep UI state in sync with the active MediaSession player.
+     * Important when app is reopened from notification after process/UI recreation.
+     */
+    fun syncPlaybackStateFromSession() {
+        syncPlaybackStateFromSessionWithRetry()
+    }
+
+    fun syncPlaybackStateFromSessionWithRetry(
+        timeoutMs: Long = 3_000L,
+        retryIntervalMs: Long = 100L
+    ) {
+        viewModelScope.launch {
+            connectToSession()
+            var waitedMs = 0L
+            while (activePlayer() == null && waitedMs < timeoutMs) {
+                delay(retryIntervalMs)
+                waitedMs += retryIntervalMs
+                connectToSession()
+            }
+            syncStateFromPlayer(activePlayer())
+        }
+    }
+
+    private fun syncStateFromPlayer(player: Player?) {
+        if (player == null) return
+        val sessionItem = player.currentMediaItem
+        val metadata = sessionItem?.mediaMetadata
+        val currentState = _state.value
+        val existingItem = currentState.currentItem
+
+        val mediaId = sessionItem?.mediaId?.takeIf { it.isNotBlank() }
+            ?: existingItem?.videoId
+            ?: return
+        val title = metadata?.title?.toString().orEmpty().ifBlank { existingItem?.title.orEmpty() }
+        val artist = metadata?.artist?.toString().orEmpty().ifBlank { existingItem?.artistName.orEmpty() }
+        val album = metadata?.albumTitle?.toString().orEmpty().ifBlank { existingItem?.albumName.orEmpty() }
+        val artwork = metadata?.artworkUri?.toString() ?: existingItem?.thumbnailUrl
+
+        val restored = MediaItem(
+            videoId = mediaId,
+            title = title.ifBlank { "Now Playing" },
+            artistName = artist.ifBlank { "Unknown Artist" },
+            artistId = existingItem?.artistId,
+            albumName = album.ifBlank { null },
+            albumId = existingItem?.albumId,
+            thumbnailUrl = artwork,
+            durationText = existingItem?.durationText,
+            musicVideoType = existingItem?.musicVideoType
+        )
+
+        val existingQueue = currentState.queue
+        val existingQueueIndex = existingQueue.items.indexOfFirst { it.videoId == mediaId }
+        val queue = when {
+            existingQueueIndex >= 0 -> {
+                val updatedItems = existingQueue.items.toMutableList()
+                updatedItems[existingQueueIndex] = restored
+                existingQueue.copy(items = updatedItems, currentIndex = existingQueueIndex)
+            }
+            else -> PlaybackQueue(
+                items = listOf(restored),
+                currentIndex = 0,
+                source = QueueSource.SINGLE
+            )
+        }
+
+        _state.update {
+            it.copy(
+                currentItem = restored,
+                queue = queue,
+                isPlaying = player.isPlaying,
+                durationMs = player.duration.takeIf { duration -> duration > 0 } ?: it.durationMs,
+                repeatMode = player.repeatMode
+            )
+        }
+        _positionMs.value = player.currentPosition.coerceAtLeast(0L)
+        if (player.isPlaying) startPositionPolling() else stopPositionPolling()
     }
 
     private fun currentCrossfadeIsPlaying(): Boolean {
@@ -195,6 +289,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun playQueue(queue: PlaybackQueue) {
+        cancelUserDrivenCrossfade(reason = "playQueue")
         viewModelScope.launch {
             val item = queue.items[queue.currentIndex]
             Log.d(TAG, "playQueue: index=${queue.currentIndex}, videoId='${item.videoId}', title='${item.title}'")
@@ -251,7 +346,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun skipNext() {
-        crossfadeManager.cancelTransition()
+        cancelUserDrivenCrossfade(reason = "skipNext")
         advanceToNextInternal()
     }
 
@@ -276,11 +371,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun skipToIndex(index: Int) {
-        if (_crossfadeEnabled.value && crossfadeManager.isTransitioning()) {
-            Log.d(TAG, "skipToIndex ignored during crossfade transition")
-            return
-        }
-        crossfadeManager.cancelTransition()
+        cancelUserDrivenCrossfade(reason = "skipToIndex")
         val current = _state.value
         if (index !in current.queue.items.indices || index == current.queue.currentIndex) return
         val targetItem = current.queue.items[index]
@@ -346,10 +437,16 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun skipPrev() {
-        crossfadeManager.cancelTransition()
+        val wasTransitioning = crossfadeManager.isTransitioning()
+        cancelUserDrivenCrossfade(reason = "skipPrev")
         val current = _state.value
+        val currentTrackId = current.currentItem?.videoId
         val effectivePlayer = activePlayer()
-        if (effectivePlayer != null && shouldRestartCurrentTrack(effectivePlayer.currentPosition)) {
+        val shouldForcePrevious =
+            wasTransitioning || isWithinCrossfadePreviousWindow(currentTrackId)
+
+        if (!shouldForcePrevious && effectivePlayer != null && shouldRestartCurrentTrack(effectivePlayer.currentPosition)) {
+            crossfadeManager.resetTriggerForTrack(currentTrackId)
             effectivePlayer.seekTo(0L)
             _positionMs.value = 0L
             return
@@ -368,6 +465,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
             }
             _positionMs.value = 0L
             fetchAndPlay(prevItem)
+            clearCrossfadePreviousWindow()
         }
     }
 
@@ -418,33 +516,23 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun togglePlayPause() {
-        val delegatingPlayer = getDelegatingPlayer()
-        if (_crossfadeEnabled.value && crossfadeManager.isTransitioning() && delegatingPlayer != null) {
-            val shouldPause = delegatingPlayer.activePlayer.isPlaying || delegatingPlayer.inactivePlayer.isPlaying
-            if (shouldPause) {
-                delegatingPlayer.activePlayer.pause()
-                delegatingPlayer.inactivePlayer.pause()
-            } else {
-                delegatingPlayer.activePlayer.play()
-                delegatingPlayer.inactivePlayer.play()
-            }
-            _state.update { it.copy(isPlaying = !shouldPause) }
-            if (shouldPause) stopPositionPolling() else startPositionPolling()
-            return
-        }
+        cancelUserDrivenCrossfade(reason = "togglePlayPause")
 
         val exo = activePlayer() ?: return
         if (exo.isPlaying) exo.pause() else exo.play()
     }
 
     fun seekTo(positionMs: Long) {
-        if (_crossfadeEnabled.value && crossfadeManager.isTransitioning()) {
-            Log.d(TAG, "seekTo ignored during crossfade transition")
-            return
-        }
+        cancelUserDrivenCrossfade(reason = "seekTo")
+        val current = _state.value
         val exo = activePlayer() ?: return
         exo.seekTo(positionMs)
         _positionMs.value = positionMs
+        crossfadeManager.onManualSeek(
+            trackId = current.currentItem?.videoId,
+            positionMs = positionMs,
+            durationMs = current.durationMs
+        )
     }
 
     fun toggleRepeatMode() {
@@ -480,6 +568,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
     }
 
     private fun fetchAndPlay(item: MediaItem) {
+        crossfadeManager.resetTriggerForTrack(item.videoId)
         fetchLyrics(item)
         ensureServiceStarted()
         viewModelScope.launch(Dispatchers.IO) {
@@ -521,6 +610,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
             Log.d(TAG, "startExoPlayback: setting URL (${url.length} chars) for '${item.title}'")
 
             val media3Item = androidx.media3.common.MediaItem.Builder()
+                .setMediaId(item.videoId)
                 .setUri(url)
                 .setMediaMetadata(
                     MediaMetadata.Builder()
@@ -549,6 +639,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         val file = AudioFileCache.getOrDownload(nextItem.videoId) ?: return null
         val uri = file.toURI().toString()
         val media3 = androidx.media3.common.MediaItem.Builder()
+            .setMediaId(nextItem.videoId)
             .setUri(uri)
             .setMediaMetadata(
                 MediaMetadata.Builder()
@@ -567,6 +658,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
             mediaItem = media3,
             onCrossfadeStart = {
                 // Switch UI to next song immediately when crossfade audio begins
+                noteCrossfadeArrival(nextItem.videoId)
                 _state.update {
                     it.copy(
                         currentItem = nextItem,
@@ -749,5 +841,29 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         controllerFuture = null
         mediaController = null
         observedPlayer = null
+    }
+
+    private fun cancelUserDrivenCrossfade(reason: String) {
+        crossfadeManager.cancelTransition(
+            delegatingPlayer = getDelegatingPlayer(),
+            commitToIncoming = true,
+            reason = reason
+        )
+    }
+
+    private fun noteCrossfadeArrival(trackId: String) {
+        lastCrossfadeArrivalTrackId = trackId
+        lastCrossfadeArrivalRealtimeMs = SystemClock.elapsedRealtime()
+    }
+
+    private fun clearCrossfadePreviousWindow() {
+        lastCrossfadeArrivalTrackId = null
+        lastCrossfadeArrivalRealtimeMs = 0L
+    }
+
+    private fun isWithinCrossfadePreviousWindow(trackId: String?): Boolean {
+        if (trackId == null || trackId != lastCrossfadeArrivalTrackId) return false
+        val elapsed = SystemClock.elapsedRealtime() - lastCrossfadeArrivalRealtimeMs
+        return elapsed in 0..CROSSFADE_PREVIOUS_GRACE_MS
     }
 }

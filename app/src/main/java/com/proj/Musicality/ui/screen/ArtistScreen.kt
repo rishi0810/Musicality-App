@@ -85,6 +85,7 @@ import coil3.request.ImageRequest
 import coil3.request.crossfade
 import coil3.size.Size
 import com.proj.Musicality.data.local.LibraryRepository
+import com.proj.Musicality.data.local.MediaDownloadState
 import com.proj.Musicality.data.local.MediaLibraryState
 import com.proj.Musicality.data.local.SavedEntry
 import com.proj.Musicality.data.local.SavedEntryType
@@ -190,6 +191,8 @@ fun ArtistScreen(
         .firstOrNull { !it.isNullOrBlank() }
         ?: "Artist"
     val subscribers = loadedDetails?.viewCount ?: seedStateAudience ?: seed.audienceText
+    val librarySnapshot by repository.snapshot.collectAsStateWithLifecycle()
+    val downloadStates by repository.downloadStates.collectAsStateWithLifecycle()
 
     val derivedCollections = remember(
         loadedDetails?.topSongs,
@@ -234,7 +237,6 @@ fun ArtistScreen(
                 )
             }
 
-            val librarySnapshot by repository.snapshot.collectAsStateWithLifecycle()
             val savedArtistEntry = librarySnapshot.artists.firstOrNull { it.id == seed.browseId }
             val isArtistSaved = savedArtistEntry != null
             ArtistHeroHeader(
@@ -330,6 +332,7 @@ fun ArtistScreen(
                             title = song.title,
                             subtitle = song.plays ?: song.album,
                             thumbnailUrl = song.image,
+                            downloadState = downloadStates[song.videoId],
                             sharedElementKey = "thumb-${song.videoId}",
                             animatedVisibilityScope = animatedVisibilityScope,
                             onOverflowClick = {
@@ -400,6 +403,7 @@ fun ArtistScreen(
                             title = video.title,
                             subtitle = video.views,
                             thumbnailUrl = video.image,
+                            downloadState = downloadStates[video.videoId],
                             sharedElementKey = "thumb-${video.videoId}",
                             animatedVisibilityScope = animatedVisibilityScope,
                             onOverflowClick = {
@@ -476,6 +480,7 @@ fun ArtistScreen(
         ArtistTopSongActionsSheet(
             model = menu,
             isLiked = mediaState.isLiked,
+            downloadState = downloadStates[menu.videoId],
             onDismiss = { selectedTopSongMenu = null },
             onToggleLike = {
                 scope.launch { repository.toggleLike(menuMediaItem) }
@@ -534,8 +539,8 @@ fun ArtistScreen(
                         if (result.isSuccess) "Downloaded: ${menu.title}" else "Download failed: ${menu.title}",
                         Toast.LENGTH_SHORT
                     ).show()
+                    selectedTopSongMenu = null
                 }
-                selectedTopSongMenu = null
             }
         )
     }
@@ -546,6 +551,7 @@ fun ArtistScreen(
 private fun ArtistTopSongActionsSheet(
     model: ArtistTopSongMenuModel,
     isLiked: Boolean,
+    downloadState: MediaDownloadState?,
     onDismiss: () -> Unit,
     onToggleLike: () -> Unit,
     onViewArtist: () -> Unit,
@@ -593,9 +599,13 @@ private fun ArtistTopSongActionsSheet(
                 onClick = onShare
             )
             ArtistTopSongActionItem(
-                label = "Download",
+                label = when {
+                    downloadState?.isDownloading == true -> "Downloading ${(downloadState.progress * 100).toInt()}%"
+                    downloadState?.isDownloaded == true -> "Downloaded"
+                    else -> "Download"
+                },
                 icon = Icons.Rounded.Download,
-                enabled = true,
+                enabled = downloadState?.isDownloading != true,
                 onClick = onDownload
             )
 

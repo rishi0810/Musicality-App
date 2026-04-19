@@ -41,6 +41,8 @@ class LibraryRepository private constructor(
 
     private val _snapshot = MutableStateFlow(LibrarySnapshot())
     val snapshot: StateFlow<LibrarySnapshot> = _snapshot.asStateFlow()
+    private val _downloadStates = MutableStateFlow<Map<String, MediaDownloadState>>(emptyMap())
+    val downloadStates: StateFlow<Map<String, MediaDownloadState>> = _downloadStates.asStateFlow()
 
     init {
         repositoryScope.launch {
@@ -107,6 +109,14 @@ class LibraryRepository private constructor(
         runCatching {
             writeMutex.withLock {
                 val now = System.currentTimeMillis()
+                setDownloadState(
+                    item.videoId,
+                    MediaDownloadState(
+                        progress = 0f,
+                        isDownloading = true,
+                        isDownloaded = false
+                    )
+                )
                 val streamUrl = resolveStreamUrl(item.videoId)
                 val downloadUrl = streamUrl.withFullRange()
                 val request = Request.Builder().url(downloadUrl).build()
@@ -117,9 +127,36 @@ class LibraryRepository private constructor(
                     val body = response.body ?: error("Download body is empty")
                     val ext = extensionFromContentType(response.header("Content-Type"))
                     val outputFile = File(audioDir, "${sanitize(item.videoId)}.$ext")
+                    val totalBytes = body.contentLength().takeIf { it > 0L }
+                    var downloadedBytes = 0L
+                    var lastEmittedProgress = 0f
                     body.byteStream().use { input ->
                         outputFile.outputStream().use { output ->
-                            input.copyTo(output)
+                            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                            while (true) {
+                                val read = input.read(buffer)
+                                if (read < 0) break
+                                output.write(buffer, 0, read)
+                                if (totalBytes != null) {
+                                    downloadedBytes += read
+                                    val nextProgress = (downloadedBytes.toFloat() / totalBytes.toFloat())
+                                        .coerceIn(0f, 1f)
+                                    if (
+                                        nextProgress >= 1f ||
+                                        nextProgress - lastEmittedProgress >= 0.01f
+                                    ) {
+                                        lastEmittedProgress = nextProgress
+                                        setDownloadState(
+                                            item.videoId,
+                                            MediaDownloadState(
+                                                progress = nextProgress,
+                                                isDownloading = true,
+                                                isDownloaded = false
+                                            )
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                     outputFile.extension
@@ -166,7 +203,17 @@ class LibraryRepository private constructor(
                 }
 
                 _snapshot.value = loadSnapshot()
+                setDownloadState(
+                    item.videoId,
+                    MediaDownloadState(
+                        progress = 1f,
+                        isDownloading = false,
+                        isDownloaded = true
+                    )
+                )
             }
+        }.onFailure {
+            setDownloadState(item.videoId, null)
         }
     }
 
@@ -287,6 +334,7 @@ class LibraryRepository private constructor(
                                 filePath = null
                             )
                         )
+                        setDownloadState(song.videoId, null)
                     } else if (video != null) {
                         video.filePath?.let { path ->
                             runCatching { File(path).delete() }
@@ -297,6 +345,7 @@ class LibraryRepository private constructor(
                                 filePath = null
                             )
                         )
+                        setDownloadState(video.videoId, null)
                     }
                 }
             }
@@ -433,6 +482,12 @@ class LibraryRepository private constructor(
     private fun sanitize(value: String): String {
         val decoded = runCatching { URLDecoder.decode(value, "UTF-8") }.getOrDefault(value)
         return decoded.replace(Regex("[^A-Za-z0-9._-]"), "_")
+    }
+
+    private fun setDownloadState(videoId: String, state: MediaDownloadState?) {
+        _downloadStates.value = _downloadStates.value.toMutableMap().apply {
+            if (state == null) remove(videoId) else put(videoId, state)
+        }
     }
 
     private fun MediaItem.isVideo(): Boolean {

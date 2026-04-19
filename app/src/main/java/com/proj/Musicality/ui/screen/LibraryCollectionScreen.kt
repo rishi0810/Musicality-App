@@ -68,6 +68,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.proj.Musicality.R
 import com.proj.Musicality.data.local.LibraryCollectionType
+import com.proj.Musicality.data.local.MediaDownloadState
 import com.proj.Musicality.data.local.LibraryRepository
 import com.proj.Musicality.data.local.MediaLibraryState
 import com.proj.Musicality.data.model.PlaybackQueue
@@ -104,6 +105,7 @@ fun LibraryCollectionScreen(
         LibraryRepository.getInstance(context.applicationContext)
     }
     val snapshot by repository.snapshot.collectAsStateWithLifecycle()
+    val downloadStates by repository.downloadStates.collectAsStateWithLifecycle()
     val items = when (collectionType) {
         LibraryCollectionType.LIKED -> snapshot.likedSongs
         LibraryCollectionType.TOP_SONGS -> snapshot.topSongs
@@ -115,6 +117,7 @@ fun LibraryCollectionScreen(
         LibraryCollectionType.TOP_SONGS -> "Top Songs"
         LibraryCollectionType.DOWNLOADED -> "Downloads"
     }
+    val isDownloadedCollection = collectionType == LibraryCollectionType.DOWNLOADED
     val artworkUrl = items.firstOrNull()?.thumbnailUrl
     val albumColors = rememberAlbumColors(
         imageUrl = artworkUrl,
@@ -284,6 +287,7 @@ fun LibraryCollectionScreen(
                         subtitle = item.artistName,
                         thumbnailUrl = item.thumbnailUrl,
                         trailingText = item.durationText,
+                        downloadState = downloadStates[item.videoId],
                         onClick = {
                             onTrackTap(
                                 PlaybackQueue(
@@ -317,6 +321,8 @@ fun LibraryCollectionScreen(
         LibraryTrackActionsSheet(
             model = menu,
             isLiked = mediaState.isLiked,
+            downloadState = downloadStates[menu.mediaItem.videoId],
+            showDownloadAction = !isDownloadedCollection,
             onDismiss = { selectedTrackMenu = null },
             onToggleLike = {
                 scope.launch { repository.toggleLike(menu.mediaItem) }
@@ -371,8 +377,8 @@ fun LibraryCollectionScreen(
                         if (result.isSuccess) "Downloaded: ${menu.title}" else "Download failed: ${menu.title}",
                         Toast.LENGTH_SHORT
                     ).show()
+                    selectedTrackMenu = null
                 }
-                selectedTrackMenu = null
             }
         )
     }
@@ -383,6 +389,8 @@ fun LibraryCollectionScreen(
 private fun LibraryTrackActionsSheet(
     model: LibraryTrackMenuModel,
     isLiked: Boolean,
+    downloadState: MediaDownloadState?,
+    showDownloadAction: Boolean,
     onDismiss: () -> Unit,
     onToggleLike: () -> Unit,
     onRemoveFromCollection: () -> Unit,
@@ -448,11 +456,16 @@ private fun LibraryTrackActionsSheet(
                     onClick = onShare
                 )
             }
-            if (hasVideoId) {
+            if (hasVideoId && showDownloadAction) {
                 LibraryActionItem(
-                    label = "Download",
+                    label = when {
+                        downloadState?.isDownloading == true -> "Downloading ${(downloadState.progress * 100).toInt()}%"
+                        downloadState?.isDownloaded == true -> "Downloaded"
+                        else -> "Download"
+                    },
                     icon = Icons.Rounded.Download,
-                    onClick = onDownload
+                    onClick = onDownload,
+                    enabled = downloadState?.isDownloading != true
                 )
             }
 
@@ -487,24 +500,28 @@ private fun LibraryTrackActionsSheet(
 private fun LibraryActionItem(
     label: String,
     icon: ImageVector,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    enabled: Boolean = true
 ) {
+    val alpha = if (enabled) 1f else 0.5f
     ListItem(
         headlineContent = {
             Text(
                 text = label,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 2.dp)
+                    .padding(vertical = 2.dp),
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = alpha)
             )
         },
         leadingContent = {
             Icon(
                 imageVector = icon,
-                contentDescription = null
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha)
             )
         },
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-        modifier = Modifier.hapticClickable(onClick = onClick)
+        modifier = Modifier.hapticClickable(enabled = enabled, onClick = onClick)
     )
 }

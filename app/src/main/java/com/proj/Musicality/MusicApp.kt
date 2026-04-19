@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.tappableElement
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -44,7 +45,12 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 import androidx.compose.ui.layout.layout
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -53,6 +59,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
+import com.proj.Musicality.NotificationOpenEventBus
 import com.proj.Musicality.data.local.LibraryCollectionType
 import com.proj.Musicality.data.model.MediaItem
 import com.proj.Musicality.data.model.PlaybackQueue
@@ -70,6 +77,7 @@ import com.proj.Musicality.ui.theme.rememberPlaybackUiPalette
 import com.proj.Musicality.util.upscaleThumbnail
 import com.proj.Musicality.viewmodel.PlaybackViewModel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class, ExperimentalSharedTransitionApi::class)
 @Composable
@@ -93,11 +101,17 @@ fun MusicApp() {
     )
     val playbackBackdropPalette = rememberPlaybackBackdropPalette(currentArtworkUrl)
     val playbackUiPalette = rememberPlaybackUiPalette(playbackBackdropPalette)
+    val lifecycleOwner = LocalLifecycleOwner.current
     val density = LocalDensity.current
     val configuration = LocalConfiguration.current
 
     val navBarMaxHeight = 84.dp
-    val navBarMaxHeightPx = with(density) { navBarMaxHeight.toPx() }
+    // Use tappableElement so we only reserve space where system navigation
+    // actually intercepts taps (3-button nav), while avoiding extra gap
+    // on fully gestural devices.
+    val navBarBottomInset = with(density) { WindowInsets.tappableElement.getBottom(density).toDp() }
+    val navBarContainerHeight = navBarMaxHeight + navBarBottomInset
+    val navBarContainerHeightPx = with(density) { navBarContainerHeight.toPx() }
     val miniPlayerHeight = 74.dp
     val screenWidth = configuration.screenWidthDp.dp
     // 3 nav items at 68 dp each + 32 dp padding = 236 dp, capped near screen width
@@ -105,7 +119,7 @@ fun MusicApp() {
     var hadMediaPreviously by rememberSaveable { mutableStateOf(playbackViewModel.state.value.hasMedia) }
     // Keep the collapsed mini player above the app navigation bar.
     // This also makes morph end-bounds line up with the visible mini art target.
-    val sheetPeekHeight = if (hasMedia) miniPlayerHeight + navBarMaxHeight else 0.dp
+    val sheetPeekHeight = if (hasMedia) miniPlayerHeight + navBarContainerHeight else 0.dp
     val sheetState = rememberBottomSheetScaffoldState(
         bottomSheetState = rememberHalfHeightBottomSheetState(
             peekHeight = sheetPeekHeight,
@@ -133,7 +147,7 @@ fun MusicApp() {
     val isPlayerExpanded by remember { derivedStateOf { expandProgressState.value > 0.5f } }
     // Let content render under the floating pills; only scroll containers should use this as bottom padding.
     val floatingControlsHeight = remember(hasMedia) {
-        if (hasMedia) miniPlayerHeight + navBarMaxHeight else navBarMaxHeight
+        if (hasMedia) miniPlayerHeight + navBarContainerHeight else navBarContainerHeight
     }
 
     // ── Remembered callbacks (stable across recompositions) ──
@@ -226,7 +240,34 @@ fun MusicApp() {
         }
         hadMediaPreviously = hasMedia
     }
-    val bottomNavItems = remember(navController) {
+    LaunchedEffect(playbackViewModel, bottomSheetState) {
+        NotificationOpenEventBus.openPlayerEvents.collect {
+            playbackViewModel.syncPlaybackStateFromSessionWithRetry(timeoutMs = 4_000L)
+            val syncedMediaReady = withTimeoutOrNull(4_000L) {
+                playbackViewModel.state
+                    .map { it.hasMedia }
+                    .first { it }
+            } ?: playbackViewModel.state.value.hasMedia
+            if (syncedMediaReady) {
+                val expanded = runCatching { bottomSheetState.expand() }.isSuccess
+                if (!expanded) {
+                    runCatching { bottomSheetState.partialExpand() }
+                }
+            }
+        }
+    }
+    DisposableEffect(lifecycleOwner, playbackViewModel) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_START) {
+                playbackViewModel.syncPlaybackStateFromSessionWithRetry()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+    val bottomNavItems = remember(navController, scope, bottomSheetState) {
         listOf(
             ExpressiveBottomNavItem(
                 label = "Home",
@@ -234,12 +275,14 @@ fun MusicApp() {
                 unselectedIcon = Icons.Outlined.Home
             ) {
                 selectedTab = 0
+                scope.launch { runCatching { bottomSheetState.partialExpand() } }
                 navController.navigate(Route.Home) {
                     popUpTo(navController.graph.findStartDestination().id) {
-                        saveState = true
+                        inclusive = false
+                        saveState = false
                     }
                     launchSingleTop = true
-                    restoreState = true
+                    restoreState = false
                 }
             },
             ExpressiveBottomNavItem(
@@ -248,12 +291,14 @@ fun MusicApp() {
                 unselectedIcon = Icons.Outlined.Search
             ) {
                 selectedTab = 1
+                scope.launch { runCatching { bottomSheetState.partialExpand() } }
                 navController.navigate(Route.Search) {
                     popUpTo(navController.graph.findStartDestination().id) {
-                        saveState = true
+                        inclusive = false
+                        saveState = false
                     }
                     launchSingleTop = true
-                    restoreState = true
+                    restoreState = false
                 }
             },
             ExpressiveBottomNavItem(
@@ -262,12 +307,14 @@ fun MusicApp() {
                 unselectedIcon = Icons.Rounded.LibraryMusic
             ) {
                 selectedTab = 2
+                scope.launch { runCatching { bottomSheetState.partialExpand() } }
                 navController.navigate(Route.Library) {
                     popUpTo(navController.graph.findStartDestination().id) {
-                        saveState = true
+                        inclusive = false
+                        saveState = false
                     }
                     launchSingleTop = true
-                    restoreState = true
+                    restoreState = false
                 }
             }
         )
@@ -286,7 +333,7 @@ fun MusicApp() {
                         .layout { measurable, constraints ->
                             // Read expandProgress in layout phase — avoids recomposition during drag
                             val fraction = (1f - expandProgressState.value).coerceIn(0f, 1f)
-                            val h = (navBarMaxHeightPx * fraction).roundToInt().coerceAtLeast(0)
+                            val h = (navBarContainerHeightPx * fraction).roundToInt().coerceAtLeast(0)
                             val placeable = measurable.measure(
                                 constraints.copy(minHeight = 0, maxHeight = h)
                             )
@@ -297,20 +344,38 @@ fun MusicApp() {
                         .clipToBounds(),
                     contentAlignment = Alignment.BottomCenter
                 ) {
+                    // Keep nav actions in their normal visual band and reserve
+                    // tappable/system inset space below as a buffer area.
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(navBarContainerHeight)
+                    ) {
+                        if (navBarBottomInset > 0.dp) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .fillMaxWidth()
+                                    .height(navBarBottomInset)
+                                    .background(MaterialTheme.colorScheme.surface)
+                            )
+                        }
                         ExpressiveBottomNavBar(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(navBarMaxHeight)
+                                .align(Alignment.TopCenter)
                                 .graphicsLayer {
                                     val fraction = (1f - expandProgressState.value).coerceIn(0f, 1f)
                                     alpha = fraction
-                                    translationY = navBarMaxHeightPx * (1f - fraction)
+                                    translationY = navBarContainerHeightPx * (1f - fraction)
                                 },
                             barHeight = navBarMaxHeight,
                             barWidth = navBarWidth,
                             selectedIndex = selectedTab,
                             items = bottomNavItems,
                         )
+                    }
                 }
             }
         ) {

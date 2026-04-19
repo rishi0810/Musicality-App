@@ -7,6 +7,7 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -49,15 +50,29 @@ class SimpleCrossfadeManager(private val context: Context) {
     private var enabled = false
     private var transitionJob: Job? = null
     private var lastTriggeredTrackId: String? = null
+    private var transitionState: TransitionState? = null
 
     private var outgoingEq: Equalizer? = null
     private var incomingEq: Equalizer? = null
     private var outgoingEqSession: Int? = null
     private var incomingEqSession: Int? = null
 
-    fun setEnabled(enabled: Boolean) {
+    private data class TransitionState(
+        val delegatingPlayer: CrossfadeDelegatingPlayer,
+        val outgoing: ExoPlayer,
+        val incoming: ExoPlayer,
+        var uiSwitchedToIncoming: Boolean = false
+    )
+
+    fun setEnabled(enabled: Boolean, delegatingPlayer: CrossfadeDelegatingPlayer? = null) {
         this.enabled = enabled
-        if (!enabled) cancelTransition()
+        if (!enabled) {
+            cancelTransition(
+                delegatingPlayer = delegatingPlayer,
+                commitToIncoming = true,
+                reason = "disabled"
+            )
+        }
     }
 
     fun isEnabled(): Boolean = enabled
@@ -82,26 +97,59 @@ class SimpleCrossfadeManager(private val context: Context) {
         val remaining = durationMs - positionMs
         if (remaining > TRIGGER_LEAD_MS) return
 
-        lastTriggeredTrackId = trackId
         transitionJob = scope.launch(Dispatchers.Main) {
             runCatching {
                 val nextTrack = prepareNext() ?: return@launch
+                lastTriggeredTrackId = trackId
                 executeCrossfade(delegatingPlayer, nextTrack)
             }.onFailure {
-                Log.e(TAG, "Crossfade failed", it)
+                if (it is CancellationException) {
+                    Log.d(TAG, "Crossfade cancelled")
+                } else {
+                    Log.e(TAG, "Crossfade failed", it)
+                }
             }
             transitionJob = null
         }
     }
 
-    fun cancelTransition() {
+    fun cancelTransition(
+        delegatingPlayer: CrossfadeDelegatingPlayer? = null,
+        commitToIncoming: Boolean = false,
+        reason: String = "manual"
+    ) {
+        Log.d(TAG, "cancelTransition: reason=$reason, commitToIncoming=$commitToIncoming")
         transitionJob?.cancel()
         transitionJob = null
+        val state = transitionState
+        if (state != null) {
+            abortTransition(state, commitToIncoming)
+        } else if (delegatingPlayer != null) {
+            ensureSingleActivePlayback(delegatingPlayer)
+        }
         releaseEqs()
+        transitionState = null
     }
 
     fun release() {
-        cancelTransition()
+        cancelTransition(reason = "release")
+    }
+
+    fun resetTriggerForTrack(trackId: String?) {
+        if (!trackId.isNullOrBlank() && lastTriggeredTrackId == trackId) {
+            Log.d(TAG, "resetTriggerForTrack: trackId=$trackId")
+            lastTriggeredTrackId = null
+        }
+    }
+
+    fun onManualSeek(trackId: String?, positionMs: Long, durationMs: Long) {
+        if (trackId.isNullOrBlank()) return
+        if (trackId != lastTriggeredTrackId || durationMs <= 0L) return
+        val retriggerBoundary = (durationMs - TRIGGER_LEAD_MS).coerceAtLeast(0L)
+        if (positionMs < retriggerBoundary) {
+            Log.d(TAG, "onManualSeek: re-arming crossfade for trackId=$trackId")
+            lastTriggeredTrackId = null
+        }
     }
 
     /**
@@ -118,59 +166,74 @@ class SimpleCrossfadeManager(private val context: Context) {
     ) {
         val outgoing = delegatingPlayer.activePlayer
         val incoming = delegatingPlayer.inactivePlayer
+        val state = TransitionState(
+            delegatingPlayer = delegatingPlayer,
+            outgoing = outgoing,
+            incoming = incoming
+        )
+        transitionState = state
 
-        // Prepare and start incoming at volume 0
-        incoming.volume = 0f
-        incoming.setMediaItem(nextTrack.mediaItem)
-        incoming.prepare()
-        incoming.play()
+        try {
+            // Prepare and start incoming at volume 0
+            incoming.volume = 0f
+            incoming.setMediaItem(nextTrack.mediaItem)
+            incoming.prepare()
+            incoming.play()
 
-        // Wait for incoming to actually start playing
-        var waited = 0L
-        while (!incoming.isPlaying && waited < 3000L) {
-            delay(STEP_MS)
-            waited += STEP_MS
+            // Wait for incoming to actually start playing
+            var waited = 0L
+            while (!incoming.isPlaying && waited < 3000L) {
+                delay(STEP_MS)
+                waited += STEP_MS
+            }
+
+            if (!incoming.isPlaying) {
+                Log.e(TAG, "Incoming player failed to start, aborting crossfade")
+                incoming.stop()
+                return
+            }
+
+            // Notify UI: switch to next song now
+            nextTrack.onCrossfadeStart()
+            state.uiSwitchedToIncoming = true
+
+            // Equal-power crossfade ramp
+            val steps = (FADE_DURATION_MS / STEP_MS).toInt().coerceAtLeast(1)
+            repeat(steps) { index ->
+                val progress = ((index + 1).toFloat() / steps.toFloat()).coerceIn(0f, 1f)
+
+                // Equal-power curves
+                val outGain = kotlin.math.cos(progress * Math.PI.toFloat() / 2f).coerceIn(0f, 1f)
+                val inGain = kotlin.math.sin(progress * Math.PI.toFloat() / 2f).coerceIn(0f, 1f)
+
+                outgoing.volume = lerp(1f, OUTGOING_FLOOR, 1f - outGain)
+                incoming.volume = inGain
+
+                applyEq(outgoing, progress, outgoing = true, primaryChain = true)
+                applyEq(incoming, progress, outgoing = false, primaryChain = false)
+
+                delay(STEP_MS)
+            }
+
+            // Fade complete: incoming is at full volume, outgoing is silent
+            incoming.volume = 1f
+            outgoing.volume = 0f
+
+            // Swap: incoming becomes the active player, outgoing stops
+            delegatingPlayer.swapActivePlayer()
+            releaseEqs()
+
+            Log.d(TAG, "Crossfade complete. New active player position: ${delegatingPlayer.activePlayer.currentPosition}ms")
+
+            // Notify ViewModel: crossfade is done, update any remaining state
+            nextTrack.onCrossfadeComplete()
+        } catch (cancelled: CancellationException) {
+            abortTransition(state, commitToIncoming = state.uiSwitchedToIncoming)
+            throw cancelled
+        } finally {
+            releaseEqs()
+            transitionState = null
         }
-
-        if (!incoming.isPlaying) {
-            Log.e(TAG, "Incoming player failed to start, aborting crossfade")
-            incoming.stop()
-            return
-        }
-
-        // Notify UI: switch to next song now
-        nextTrack.onCrossfadeStart()
-
-        // Equal-power crossfade ramp
-        val steps = (FADE_DURATION_MS / STEP_MS).toInt().coerceAtLeast(1)
-        repeat(steps) { index ->
-            val progress = ((index + 1).toFloat() / steps.toFloat()).coerceIn(0f, 1f)
-
-            // Equal-power curves
-            val outGain = kotlin.math.cos(progress * Math.PI.toFloat() / 2f).coerceIn(0f, 1f)
-            val inGain = kotlin.math.sin(progress * Math.PI.toFloat() / 2f).coerceIn(0f, 1f)
-
-            outgoing.volume = lerp(1f, OUTGOING_FLOOR, 1f - outGain)
-            incoming.volume = inGain
-
-            applyEq(outgoing, progress, outgoing = true, primaryChain = true)
-            applyEq(incoming, progress, outgoing = false, primaryChain = false)
-
-            delay(STEP_MS)
-        }
-
-        // Fade complete: incoming is at full volume, outgoing is silent
-        incoming.volume = 1f
-        outgoing.volume = 0f
-
-        // Swap: incoming becomes the active player, outgoing stops
-        delegatingPlayer.swapActivePlayer()
-        releaseEqs()
-
-        Log.d(TAG, "Crossfade complete. New active player position: ${delegatingPlayer.activePlayer.currentPosition}ms")
-
-        // Notify ViewModel: crossfade is done, update any remaining state
-        nextTrack.onCrossfadeComplete()
     }
 
     /**
@@ -250,6 +313,52 @@ class SimpleCrossfadeManager(private val context: Context) {
         incomingEq = null
         outgoingEqSession = null
         incomingEqSession = null
+    }
+
+    private fun abortTransition(
+        state: TransitionState,
+        commitToIncoming: Boolean
+    ) {
+        val delegatingPlayer = state.delegatingPlayer
+        val outgoing = state.outgoing
+        val incoming = state.incoming
+
+        if (commitToIncoming && state.uiSwitchedToIncoming) {
+            runCatching {
+                incoming.volume = 1f
+                outgoing.volume = 0f
+                if (delegatingPlayer.activePlayer !== incoming) {
+                    delegatingPlayer.swapActivePlayer()
+                }
+                if (!delegatingPlayer.activePlayer.isPlaying) {
+                    delegatingPlayer.activePlayer.play()
+                }
+            }
+            return
+        }
+
+        runCatching {
+            incoming.pause()
+            incoming.stop()
+            incoming.clearMediaItems()
+        }
+        runCatching {
+            outgoing.volume = 1f
+        }
+    }
+
+    private fun ensureSingleActivePlayback(delegatingPlayer: CrossfadeDelegatingPlayer) {
+        val active = delegatingPlayer.activePlayer
+        val inactive = delegatingPlayer.inactivePlayer
+
+        runCatching {
+            inactive.pause()
+            inactive.stop()
+            inactive.clearMediaItems()
+        }
+        runCatching {
+            active.volume = 1f
+        }
     }
 
     private fun lerp(start: Float, end: Float, t: Float): Float = start + (end - start) * t

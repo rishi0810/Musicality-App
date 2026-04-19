@@ -7,9 +7,12 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -17,6 +20,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.proj.Musicality.data.local.MediaDownloadState
 import com.proj.Musicality.ui.theme.LocalSharedTransitionScope
 import com.proj.Musicality.ui.theme.MediaBoundsSpring
 
@@ -30,6 +34,7 @@ fun SongListItem(
     modifier: Modifier = Modifier,
     trailingText: String? = null,
     onOverflowClick: (() -> Unit)? = null,
+    downloadState: MediaDownloadState? = null,
     sharedElementKey: String? = null,
     animatedVisibilityScope: AnimatedVisibilityScope? = null
 ) {
@@ -82,6 +87,13 @@ fun SongListItem(
                     overflow = TextOverflow.Ellipsis
                 )
             }
+            if (downloadState?.isDownloading == true) {
+                Spacer(Modifier.height(6.dp))
+                LinearProgressIndicator(
+                    progress = { downloadState.progress },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
         }
         if (!trailingText.isNullOrBlank()) {
             Spacer(Modifier.width(8.dp))
@@ -90,6 +102,24 @@ fun SongListItem(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+        }
+        when {
+            downloadState?.isDownloaded == true -> {
+                Spacer(Modifier.width(8.dp))
+                Icon(
+                    imageVector = Icons.Rounded.CheckCircle,
+                    contentDescription = "Downloaded",
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
+            downloadState?.isDownloading == true -> {
+                Spacer(Modifier.width(8.dp))
+                Icon(
+                    imageVector = Icons.Rounded.Download,
+                    contentDescription = "Downloading",
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
         }
         if (onOverflowClick != null) {
             HapticIconButton(onClick = onOverflowClick) {

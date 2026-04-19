@@ -9,7 +9,6 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import com.proj.Musicality.crossfade.CrossfadeDelegatingPlayer
-import com.proj.Musicality.util.shouldRestartCurrentTrack
 import kotlinx.coroutines.flow.MutableSharedFlow
 
 @UnstableApi
@@ -17,6 +16,8 @@ class PlaybackService : MediaSessionService() {
 
     companion object {
         private const val TAG = "PlaybackService"
+        const val ACTION_OPEN_PLAYER_FROM_NOTIFICATION =
+            "com.proj.Musicality.action.OPEN_PLAYER_FROM_NOTIFICATION"
         var delegatingPlayer: CrossfadeDelegatingPlayer? = null
             private set
         val skipEvents = MutableSharedFlow<Int>(extraBufferCapacity = 1)
@@ -33,13 +34,11 @@ class PlaybackService : MediaSessionService() {
 
         val forwarding = object : ForwardingPlayer(crossfadePlayer) {
             fun handlePreviousTransportCommand(source: String) {
-                if (shouldRestartCurrentTrack(currentPosition)) {
-                    Log.d(TAG, "$source: restart current track")
-                    seekTo(0)
-                } else {
-                    Log.d(TAG, "$source: previous track")
-                    skipEvents.tryEmit(-1)
-                }
+                // Keep transport controls consistent with in-app UI behavior.
+                // PlaybackViewModel.skipPrev() decides restart-vs-previous and
+                // applies crossfade cancellation/grace-window logic.
+                Log.d(TAG, "$source: previous track via ViewModel transport")
+                skipEvents.tryEmit(-1)
             }
 
             override fun seekToNext() {
@@ -80,7 +79,11 @@ class PlaybackService : MediaSessionService() {
         }
 
         val activityIntent = Intent(this, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            action = ACTION_OPEN_PLAYER_FROM_NOTIFICATION
+            flags =
+                Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                    Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
         val sessionActivity = PendingIntent.getActivity(
             this,

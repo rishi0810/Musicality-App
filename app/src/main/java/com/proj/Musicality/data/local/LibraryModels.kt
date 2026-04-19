@@ -44,6 +44,13 @@ data class MediaLibraryState(
 )
 
 @Immutable
+data class MediaDownloadState(
+    val progress: Float = 0f,
+    val isDownloading: Boolean = false,
+    val isDownloaded: Boolean = false
+)
+
+@Immutable
 data class LibrarySnapshot(
     val likedSongs: List<MediaItem> = emptyList(),
     val topSongs: List<MediaItem> = emptyList(),

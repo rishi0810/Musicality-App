@@ -54,6 +54,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Album
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.GraphicEq
@@ -122,6 +123,7 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
@@ -267,6 +269,15 @@ fun PlayerSheet(
     val isLooping = state.repeatMode == Player.REPEAT_MODE_ONE
     var showQueueSheet by remember { mutableStateOf(false) }
     var showOptionsSheet by remember { mutableStateOf(false) }
+    var dismissOptionsAfterDownload by remember(item.videoId) { mutableStateOf(false) }
+
+    LaunchedEffect(showOptionsSheet, dismissOptionsAfterDownload, mediaLibraryState.isDownloaded) {
+        if (showOptionsSheet && dismissOptionsAfterDownload && mediaLibraryState.isDownloaded) {
+            kotlinx.coroutines.delay(220)
+            showOptionsSheet = false
+            dismissOptionsAfterDownload = false
+        }
+    }
 
     PredictiveBackHandler(enabled = isExpanded) { progress: Flow<androidx.activity.BackEventCompat> ->
         try {
@@ -596,7 +607,7 @@ fun PlayerSheet(
                             }
                         }
 
-                        Spacer(Modifier.height(2.dp))
+                        Spacer(Modifier.height(0.dp))
 
                         // ── Artist name on its own line beneath the title ──
                         AnimatedContent(
@@ -628,6 +639,7 @@ fun PlayerSheet(
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = onSurface.copy(alpha = 0.78f),
                                     fontWeight = FontWeight.Medium,
+                                    textDecoration = TextDecoration.Underline,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                     modifier = artistClickModifier
@@ -736,7 +748,10 @@ fun PlayerSheet(
                 checkedIconColor = selectedControlOnAccent
             )
             ModalBottomSheet(
-                onDismissRequest = { showOptionsSheet = false },
+                onDismissRequest = {
+                    dismissOptionsAfterDownload = false
+                    showOptionsSheet = false
+                },
                 sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
             ) {
                 Column(modifier = Modifier.padding(bottom = 16.dp)) {
@@ -815,30 +830,39 @@ fun PlayerSheet(
                             Text(if (mediaLibraryState.isDownloaded) "Downloaded" else "Download song")
                         },
                         leadingContent = {
-                            Icon(
-                                painter = painterResource(id = R.drawable.download_24px),
-                                contentDescription = null,
-                                tint = if (mediaLibraryState.isDownloaded) primary else MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                            if (mediaLibraryState.isDownloaded) {
+                                Icon(
+                                    imageVector = Icons.Rounded.CheckCircle,
+                                    contentDescription = null,
+                                    tint = primary
+                                )
+                            } else {
+                                Icon(
+                                    painter = painterResource(id = R.drawable.download_24px),
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         },
                         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                         modifier = Modifier.clickable {
-                            showOptionsSheet = false
+                            if (mediaLibraryState.isDownloaded) {
+                                dismissOptionsAfterDownload = true
+                                return@clickable
+                            }
                             coroutineScope.launch {
-                                if (mediaLibraryState.isDownloaded) {
-                                    android.widget.Toast
-                                        .makeText(context, "Already downloaded", android.widget.Toast.LENGTH_SHORT)
-                                        .show()
-                                    return@launch
-                                }
                                 val result = libraryRepository.download(item)
-                                android.widget.Toast
-                                    .makeText(
-                                        context,
-                                        if (result.isSuccess) "Downloaded" else "Download failed",
-                                        android.widget.Toast.LENGTH_SHORT
-                                    )
-                                    .show()
+                                if (result.isSuccess) {
+                                    dismissOptionsAfterDownload = true
+                                } else {
+                                    android.widget.Toast
+                                        .makeText(
+                                            context,
+                                            "Download failed",
+                                            android.widget.Toast.LENGTH_SHORT
+                                        )
+                                        .show()
+                                }
                             }
                         }
                     )
