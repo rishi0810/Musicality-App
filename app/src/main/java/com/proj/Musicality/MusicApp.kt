@@ -181,7 +181,7 @@ fun MusicApp() {
         { item -> playbackViewModel.addToQueue(item.copy(thumbnailUrl = upscaleThumbnail(item.thumbnailUrl))) }
     }
     val navToArtist = remember<(String, String, String?) -> Unit> {
-        { name, id, thumb -> navController.navigate(Route.Artist(name, id, upscaleThumbnail(thumb))) }
+        { name, id, thumb -> navController.navigate(Route.Artist(name, id, thumb)) }
     }
     val navToArtistNoThumb = remember<(String, String, String?) -> Unit> {
         { name, id, _ -> navController.navigate(Route.Artist(name, id, null)) }
@@ -200,9 +200,9 @@ fun MusicApp() {
     }
     // Player-specific callbacks — remembered so PlayerSheet never sees new lambda instances
     val onArtistTapPlayer = remember(scope, bottomSheetState, navController) {
-        { artistId: String, name: String, _: String? ->
+        { artistId: String, name: String, thumb: String? ->
             scope.launch { bottomSheetState.partialExpand() }
-            navController.navigate(Route.Artist(name, artistId, null))
+            navController.navigate(Route.Artist(name, artistId, thumb))
         }
     }
     val onAlbumTapPlayer = remember(scope, bottomSheetState, navController) {
@@ -463,7 +463,16 @@ fun MusicApp() {
                             modifier = Modifier.statusBarsPadding(),
                             animatedVisibilityScope = this@composable,
                             collapsedMiniPlayerHeight = floatingControlsHeight + 3.dp,
-                            onArtistTap = navToArtist,
+                            onArtistTap = { name, id, thumb, audience ->
+                                navController.navigate(
+                                    Route.Artist(
+                                        name = name,
+                                        browseId = id,
+                                        thumbnailUrl = thumb,
+                                        audienceText = audience
+                                    )
+                                )
+                            },
                             onAlbumTap = navToAlbum,
                             onPlaylistTap = navToPlaylist,
                             onMoodTap = { mood ->
@@ -506,7 +515,7 @@ fun MusicApp() {
                                 Route.Artist(
                                     name = name,
                                     browseId = id,
-                                    thumbnailUrl = upscaleThumbnail(thumb),
+                                    thumbnailUrl = thumb,
                                     audienceText = audience
                                 )
                             )

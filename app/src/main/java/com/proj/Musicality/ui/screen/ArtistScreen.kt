@@ -5,6 +5,7 @@ import android.util.Log
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
@@ -24,6 +25,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -45,12 +47,14 @@ import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Shuffle
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.LoadingIndicator
@@ -68,8 +72,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -111,12 +118,13 @@ import com.proj.Musicality.ui.components.SongListItem
 import com.proj.Musicality.ui.components.Thumbnail
 import com.proj.Musicality.ui.theme.LocalSharedTransitionScope
 import com.proj.Musicality.ui.theme.MediaBoundsSpring
-import com.proj.Musicality.util.upscaleThumbnail
+import com.proj.Musicality.ui.theme.rememberMediaBackdropPalette
 import com.proj.Musicality.viewmodel.ArtistViewModel
 import com.proj.Musicality.viewmodel.ArtistViewModelFactory
 import kotlinx.coroutines.launch
 
 private const val TAG = "ArtistScreen"
+private val ArtistHeaderBaseHeight = 350.dp
 
 private data class ArtistDerivedCollections(
     val playableItems: List<MediaItem>,
@@ -168,18 +176,31 @@ fun ArtistScreen(
     val listState = rememberLazyListState()
     val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val surfaceColor = MaterialTheme.colorScheme.surface
+    val density = LocalDensity.current
 
-    val reusableSeedThumbUrl = upscaleThumbnail(seed.thumbnailUrl)
+    val reusableSeedThumbUrl = seed.thumbnailUrl
     val hasReusableSeedThumb = !reusableSeedThumbUrl.isNullOrBlank()
     val fetchedThumbUrl = when (val s = state) {
-        is ArtistViewModel.UiState.Seed -> upscaleThumbnail(s.thumbnailUrl, size = 1200)
-        is ArtistViewModel.UiState.Loaded -> upscaleThumbnail(
-            s.details.thumbnails.maxByOrNull { it.width }?.url,
-            size = 1200
-        )
+        is ArtistViewModel.UiState.Seed -> s.thumbnailUrl
+        is ArtistViewModel.UiState.Loaded -> s.details.thumbnails.maxByOrNull { it.width }?.url
         else -> null
     }
     val thumbUrl = reusableSeedThumbUrl ?: fetchedThumbUrl
+    val mediaPalette = rememberMediaBackdropPalette(
+        imageUrl = thumbUrl,
+        fallbackSurface = surfaceColor,
+        allowNetworkFetch = !hasReusableSeedThumb,
+        animateTransitions = false
+    )
+    val sortedPaletteByLightness = remember(mediaPalette) {
+        listOf(mediaPalette.top, mediaPalette.middle, mediaPalette.bottom)
+            .sortedByDescending { it.luminance() }
+    }
+    val gradientPrimary = sortedPaletteByLightness[0]
+    val gradientSecondary = sortedPaletteByLightness[1]
+    val gradientDarkBase = Color(0xFF0D0D0D)
+    val seamOverlapPx = with(density) { 6.dp.toPx() }
+    val contentGradientStartPx = with(density) { (ArtistHeaderBaseHeight + statusBarTop - 10.dp).toPx() }
     LaunchedEffect(thumbUrl) {
         Log.d(TAG, "Artist hero artwork url=$thumbUrl")
     }
@@ -190,7 +211,7 @@ fun ArtistScreen(
     val artistName = listOf(seed.name, seedStateName, loadedName)
         .firstOrNull { !it.isNullOrBlank() }
         ?: "Artist"
-    val subscribers = loadedDetails?.viewCount ?: seedStateAudience ?: seed.audienceText
+    val subscribers = seedStateAudience ?: seed.audienceText
     val librarySnapshot by repository.snapshot.collectAsStateWithLifecycle()
     val downloadStates by repository.downloadStates.collectAsStateWithLifecycle()
 
@@ -220,7 +241,31 @@ fun ArtistScreen(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(surfaceColor)
+            .drawBehind {
+                drawRect(surfaceColor)
+                drawRect(
+                    color = gradientPrimary,
+                    topLeft = Offset(
+                        x = 0f,
+                        y = (contentGradientStartPx - seamOverlapPx).coerceAtLeast(0f)
+                    ),
+                    size = androidx.compose.ui.geometry.Size(
+                        width = size.width,
+                        height = seamOverlapPx * 2f
+                    )
+                )
+                drawRect(
+                    brush = Brush.verticalGradient(
+                        colors = listOf(
+                            gradientPrimary,
+                            gradientSecondary.copy(alpha = 0.6f),
+                            gradientDarkBase
+                        ),
+                        startY = contentGradientStartPx,
+                        endY = size.height
+                    )
+                )
+            }
     ) {
     LazyColumn(
         state = listState,
@@ -228,14 +273,7 @@ fun ArtistScreen(
         contentPadding = PaddingValues(bottom = collapsedMiniPlayerHeight)
     ) {
         item(key = "hero-header") {
-            val sharedTransitionScope = LocalSharedTransitionScope.current
-            val heroModifier = with(sharedTransitionScope) {
-                Modifier.sharedElement(
-                    sharedContentState = rememberSharedContentState(key = "thumb-artist-${seed.browseId}"),
-                    animatedVisibilityScope = animatedVisibilityScope,
-                    boundsTransform = MediaBoundsSpring
-                )
-            }
+            val heroModifier = Modifier
 
             val savedArtistEntry = librarySnapshot.artists.firstOrNull { it.id == seed.browseId }
             val isArtistSaved = savedArtistEntry != null
@@ -245,6 +283,7 @@ fun ArtistScreen(
                 thumbnailUrl = thumbUrl,
                 allowNetworkFetch = !hasReusableSeedThumb,
                 surfaceColor = surfaceColor,
+                blendPrimaryColor = gradientPrimary,
                 statusBarTop = statusBarTop,
                 isSaved = isArtistSaved,
                 onAdd = {
@@ -673,11 +712,14 @@ private fun ArtistHeroHeader(
     thumbnailUrl: String?,
     allowNetworkFetch: Boolean,
     surfaceColor: Color,
+    blendPrimaryColor: Color,
     statusBarTop: androidx.compose.ui.unit.Dp,
     isSaved: Boolean,
     onAdd: () -> Unit,
     heroModifier: Modifier = Modifier
 ) {
+    val ctaContainerColor = Color(0xFF07080B)
+    val ctaContentColor = Color(0xFFF6F7FB)
     val context = LocalContext.current
     val heroRequest = remember(context, thumbnailUrl, allowNetworkFetch) {
         ImageRequest.Builder(context).apply {
@@ -690,7 +732,7 @@ private fun ArtistHeroHeader(
             .crossfade(false)
             .build()
     }
-    val imageHeight = 350.dp + statusBarTop
+    val imageHeight = ArtistHeaderBaseHeight + statusBarTop
 
     Box(
             modifier = Modifier
@@ -707,19 +749,29 @@ private fun ArtistHeroHeader(
                 .height(imageHeight)
         )
 
-        val artistGradientStops = remember(surfaceColor) {
+        val artistGradientStops = remember(blendPrimaryColor) {
             arrayOf(
                 0f to Color.Transparent,
-                0.55f to surfaceColor.copy(alpha = 0.75f),
-                1f to surfaceColor
+                0.4f to Color.Transparent,
+                0.6f to blendPrimaryColor.copy(alpha = 0.3f),
+                0.8f to blendPrimaryColor.copy(alpha = 0.7f),
+                1f to blendPrimaryColor
             )
         }
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .fillMaxHeight(0.5f)
+                .fillMaxHeight()
                 .align(Alignment.BottomCenter)
                 .background(Brush.verticalGradient(colorStops = artistGradientStops))
+        )
+        // Transition seam guard: masks sub-pixel gap flashes at the hero/content boundary.
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(4.dp)
+                .align(Alignment.BottomCenter)
+                .background(blendPrimaryColor)
         )
 
         Column(
@@ -742,7 +794,11 @@ private fun ArtistHeroHeader(
                 )
                 Spacer(Modifier.width(12.dp))
                 HapticFilledTonalIconButton(
-                    onClick = onAdd
+                    onClick = onAdd,
+                    colors = IconButtonDefaults.filledTonalIconButtonColors(
+                        containerColor = ctaContainerColor.copy(alpha = 0.92f),
+                        contentColor = ctaContentColor
+                    )
                 ) {
                     Icon(
                         imageVector = if (isSaved) Icons.Rounded.Check else Icons.Rounded.Add,
@@ -767,6 +823,10 @@ private fun ArtistActionButtons(
     onPlay: () -> Unit,
     onShuffle: () -> Unit
 ) {
+    val primaryContainerColor = Color(0xFF07080B)
+    val secondaryContainerColor = Color(0xCC090A0D)
+    val ctaContentColor = Color(0xFFF6F7FB)
+    val ctaBorderColor = Color.White.copy(alpha = 0.14f)
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -776,7 +836,12 @@ private fun ArtistActionButtons(
         HapticFilledTonalButton(
             onClick = onPlay,
             modifier = Modifier.weight(1f),
-            shape = CircleShape
+            shape = CircleShape,
+            colors = ButtonDefaults.filledTonalButtonColors(
+                containerColor = primaryContainerColor,
+                contentColor = ctaContentColor
+            ),
+            border = BorderStroke(1.dp, ctaBorderColor)
         ) {
             Icon(Icons.Rounded.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(8.dp))
@@ -785,7 +850,12 @@ private fun ArtistActionButtons(
         HapticOutlinedButton(
             onClick = onShuffle,
             modifier = Modifier.weight(1f),
-            shape = CircleShape
+            shape = CircleShape,
+            colors = ButtonDefaults.outlinedButtonColors(
+                containerColor = secondaryContainerColor,
+                contentColor = ctaContentColor
+            ),
+            border = BorderStroke(1.dp, ctaBorderColor)
         ) {
             Icon(Icons.Rounded.Shuffle, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(8.dp))

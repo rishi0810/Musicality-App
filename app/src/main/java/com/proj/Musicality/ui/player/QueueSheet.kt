@@ -362,7 +362,7 @@ fun QueueContent(
             onDismiss = { selectedMenu = null },
             onViewArtist = {
                 val artistId = menu.artistId ?: return@QueueItemActionsSheet
-                onArtistTap?.invoke(artistId, menu.artistName, null)
+                onArtistTap?.invoke(artistId, menu.artistName, menu.thumbnailUrl)
                 onQueueActionConsumed?.invoke()
                 selectedMenu = null
             },

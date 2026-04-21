@@ -628,7 +628,9 @@ fun PlayerSheet(
                             ) {
                                 val artistClickModifier = if (animItem.artistId != null) {
                                     Modifier.clickable {
-                                        animItem.artistId?.let { onArtistTap(it, animItem.artistName, null) }
+                                        animItem.artistId?.let {
+                                            onArtistTap(it, animItem.artistName, animItem.thumbnailUrl)
+                                        }
                                     }
                                 } else {
                                     Modifier
@@ -807,7 +809,7 @@ fun PlayerSheet(
                         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                         modifier = Modifier.clickable {
                             showOptionsSheet = false
-                            item.artistId?.let { onArtistTap(it, item.artistName, null) }
+                            item.artistId?.let { onArtistTap(it, item.artistName, item.thumbnailUrl) }
                         }
                     )
                     ListItem(

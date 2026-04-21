@@ -80,7 +80,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun ExploreScreen(
     animatedVisibilityScope: AnimatedVisibilityScope? = null,
-    onArtistTap: (String, String, String?) -> Unit,
+    onArtistTap: (String, String, String?, String?) -> Unit,
     onAlbumTap: (String, String, String?, String?) -> Unit,
     onPlaylistTap: (String, String, String?, String?) -> Unit,
     onMoodTap: (MoodCategoryParser.Mood) -> Unit,
@@ -470,7 +470,7 @@ private fun MoodCategoryParser.Mood.label(): String =
 private fun CardRow(
     section: HomeSection,
     animatedVisibilityScope: AnimatedVisibilityScope?,
-    onArtistTap: (String, String, String?) -> Unit,
+    onArtistTap: (String, String, String?, String?) -> Unit,
     onAlbumTap: (String, String, String?, String?) -> Unit,
     onPlaylistTap: (String, String, String?, String?) -> Unit
 ) {
@@ -498,7 +498,7 @@ private fun CardRow(
 private fun ArtistStackRow(
     section: HomeSection,
     animatedVisibilityScope: AnimatedVisibilityScope?,
-    onArtistTap: (String, String, String?) -> Unit,
+    onArtistTap: (String, String, String?, String?) -> Unit,
     onPlaylistTap: (String, String, String?, String?) -> Unit
 ) {
     val cards = remember(section.items) { section.items.filterIsInstance<HomeItem.Card>() }
@@ -531,7 +531,7 @@ private fun ArtistStackRow(
 
 private fun handleCardTap(
     card: HomeItem.Card,
-    onArtistTap: (String, String, String?) -> Unit,
+    onArtistTap: (String, String, String?, String?) -> Unit,
     onAlbumTap: (String, String, String?, String?) -> Unit,
     onPlaylistTap: (String, String, String?, String?) -> Unit
 ) {
@@ -550,7 +550,7 @@ private fun handleCardTap(
                 card.thumbnailUrl
             )
         "MUSIC_PAGE_TYPE_ARTIST", "MUSIC_PAGE_TYPE_USER_CHANNEL" ->
-            onArtistTap(card.title, id, card.thumbnailUrl)
+            onArtistTap(card.title, id, card.thumbnailUrl, card.artistAudienceText())
     }
 }
 
