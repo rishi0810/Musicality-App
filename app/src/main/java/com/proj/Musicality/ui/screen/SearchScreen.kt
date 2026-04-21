@@ -107,7 +107,6 @@ import com.proj.Musicality.ui.components.HapticIconButton
 import com.proj.Musicality.ui.components.hapticClickable
 import com.proj.Musicality.ui.components.SongListItem
 import com.proj.Musicality.ui.theme.LocalPlaybackBackdropPalette
-import com.proj.Musicality.ui.theme.LocalSharedTransitionScope
 import com.proj.Musicality.util.upscaleThumbnail
 import com.proj.Musicality.viewmodel.SearchViewModel
 import kotlinx.coroutines.launch
@@ -182,18 +181,11 @@ fun SearchScreen(
         suggestions.filter { it.type != SuggestionType.SUGGESTION && it.type != SuggestionType.UNKNOWN }
     }
     val isInExploreDefaultState = query.isBlank() && !isSearchMode && !isSearchFieldFocused
-    val sharedTransitionScope = LocalSharedTransitionScope.current
-    val searchBarOverlayModifier = if (!isInExploreDefaultState) {
-        with(sharedTransitionScope) {
-            Modifier.renderInSharedTransitionScopeOverlay(zIndexInOverlay = 1f)
-        }
-    } else Modifier
 
     Column(modifier = modifier.fillMaxSize()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .then(searchBarOverlayModifier)
                 .background(MaterialTheme.colorScheme.surface)
                 .padding(horizontal = 14.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -272,7 +264,7 @@ fun SearchScreen(
                 modifier = Modifier.weight(1f),
                 animatedVisibilityScope = animatedVisibilityScope,
                 collapsedMiniPlayerHeight = collapsedMiniPlayerHeight,
-                onArtistTap = { name, id, thumb -> onArtistTap(name, id, thumb, null) },
+                onArtistTap = { name, id, thumb, audience -> onArtistTap(name, id, thumb, audience) },
                 onAlbumTap = onAlbumTap,
                 onPlaylistTap = onPlaylistTap,
                 onMoodTap = onMoodTap
