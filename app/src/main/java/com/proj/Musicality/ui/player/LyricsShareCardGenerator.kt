@@ -71,6 +71,14 @@ object LyricsShareCardGenerator {
                 isFakeBoldText = true
                 textSize = LYRIC_TEXT_SIZE
             }
+            val latinLyricsPaint = TextPaint(lyricsPaint).apply {
+                typeface = shareTypefaceWeighted(context, 950)
+                isFakeBoldText = true
+                // Fill+stroke gives Latin glyphs a visibly stronger weight without changing size.
+                style = Paint.Style.FILL_AND_STROKE
+                strokeWidth = 2f
+                strokeJoin = Paint.Join.ROUND
+            }
             val lyricsTop = metadataTop + artworkSize + 78f
             val lyricsWidth = (WIDTH - edge * 2f).toInt()
             val wrappedLyricLines = wrapLyricLines(
@@ -149,7 +157,13 @@ object LyricsShareCardGenerator {
             val firstBaseline = lyricsTop - lyricsPaint.fontMetrics.top
             wrappedLyricLines.forEachIndexed { index, line ->
                 val baseline = firstBaseline + index * lyricLineHeight
-                canvas.drawText(line, edge, baseline, lyricsPaint)
+                val paint = if (line.containsLatinScript()) latinLyricsPaint else lyricsPaint
+                canvas.drawText(line, edge, baseline, paint)
+                if (paint === latinLyricsPaint) {
+                    // Extra pass to make Latin (English) text match the visual heaviness
+                    // of non-Latin glyphs in mixed-script lyric cards.
+                    canvas.drawText(line, edge, baseline, paint)
+                }
             }
 
             val brandPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -157,21 +171,12 @@ object LyricsShareCardGenerator {
                 textSize = 40f
                 typeface = normalTypeface
             }
-            val brandText = "Musicality"
-            val brandTextWidth = brandPaint.measureText(brandText)
-            val logoSpacing = 14f
-            val logoSize = 52f
+            val logoSize = 56f
             val logoTop = footerCenterY - logoSize / 2f
-            val logoLeft = WIDTH - edge - brandTextWidth - logoSpacing - logoSize
+            val logoLeft = WIDTH - edge - logoSize
             if (logo != null) {
                 canvas.drawBitmap(logo, logoLeft, logoTop, null)
             }
-            canvas.drawText(
-                brandText,
-                WIDTH - edge - brandTextWidth,
-                footerCenterY + 13f,
-                brandPaint
-            )
 
             val outputDir = File(context.cacheDir, "lyrics-share").apply { mkdirs() }
             cleanupOldCards(outputDir)
@@ -244,6 +249,8 @@ object LyricsShareCardGenerator {
         }
         return wrapped.ifEmpty { listOf("No lyrics selected") }
     }
+
+    private fun String.containsLatinScript(): Boolean = any { it in 'A'..'Z' || it in 'a'..'z' }
 
     private suspend fun loadArtworkBitmap(
         context: Context,
