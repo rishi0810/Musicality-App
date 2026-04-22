@@ -9,6 +9,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.ui.unit.IntOffset
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
@@ -143,8 +144,17 @@ fun MusicApp() {
             (1f - (offset / sheetTravelPx)).coerceIn(0f, 1f)
         }
     }
-    // Only recomposes MusicApp when the bool flips (not on every drag frame)
-    val isPlayerExpanded by remember { derivedStateOf { expandProgressState.value > 0.5f } }
+    // Back behavior should be based on actual sheet state (current/target),
+    // with progress as fallback while animating.
+    val isPlayerScreenOpen by remember {
+        derivedStateOf {
+            hasMedia && (
+                bottomSheetState.currentValue == SheetValue.Expanded ||
+                    bottomSheetState.targetValue == SheetValue.Expanded ||
+                    expandProgressState.value > 0.02f
+                )
+        }
+    }
     // Let content render under the floating pills; only scroll containers should use this as bottom padding.
     val floatingControlsHeight = remember(hasMedia) {
         if (hasMedia) miniPlayerHeight + navBarContainerHeight else navBarContainerHeight
@@ -224,6 +234,20 @@ fun MusicApp() {
             currentRoute.contains("LibraryCollection") ||
             currentRoute.contains("MoodCategory")
     val showBackButton = showRouteBackButton
+    val canNavigateBack = navController.previousBackStackEntry != null
+    var lyricsOpen by remember { mutableStateOf(false) }
+    var progressBarInteracting by remember { mutableStateOf(false) }
+
+    // Centralized system-back behavior:
+    // 1) If player (SongScreen) is expanded, collapse it back to the source screen.
+    // 2) Otherwise, navigate to the previous route when available.
+    BackHandler(enabled = (isPlayerScreenOpen && !lyricsOpen) || (!isPlayerScreenOpen && canNavigateBack)) {
+        when {
+            isPlayerScreenOpen -> scope.launch { runCatching { bottomSheetState.partialExpand() } }
+            canNavigateBack -> navController.popBackStack()
+        }
+    }
+
     LaunchedEffect(navBackStackEntry) {
         val route = navBackStackEntry?.destination?.route ?: return@LaunchedEffect
         when {
@@ -379,8 +403,6 @@ fun MusicApp() {
                 }
             }
         ) {
-            var lyricsOpen by remember { mutableStateOf(false) }
-            var progressBarInteracting by remember { mutableStateOf(false) }
             BottomSheetScaffold(
             scaffoldState = sheetState,
             sheetPeekHeight = sheetPeekHeight,
@@ -394,7 +416,7 @@ fun MusicApp() {
                     state = playbackState,
                     positionMsFlow = playbackViewModel.positionMs,
                     lyricsStateFlow = playbackViewModel.lyricsState,
-                    isExpanded = isPlayerExpanded,
+                    isExpanded = isPlayerScreenOpen,
                     expandProgressState = expandProgressState,
                     onCollapse = { scope.launch { bottomSheetState.partialExpand() } },
                     onExpand = { scope.launch { bottomSheetState.expand() } },
