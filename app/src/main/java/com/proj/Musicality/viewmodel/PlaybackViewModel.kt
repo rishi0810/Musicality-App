@@ -59,6 +59,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
     companion object {
         private const val TAG = "PlaybackViewModel"
         private const val CROSSFADE_PREVIOUS_GRACE_MS = 10_000L
+        private const val LIBRARY_EXTENSION_SEED_COUNT = 5
     }
 
     private val _state = MutableStateFlow(PlaybackState())
@@ -81,6 +82,9 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
     private var mediaController: MediaController? = null
     private var serviceStarted = false
     private var upNextJob: Job? = null
+    private var libraryQueueExtensionJob: Job? = null
+    private var librarySeedQueueSize: Int = 0
+    private var libraryTailExtensionRequested: Boolean = false
     private var lastCrossfadeArrivalTrackId: String? = null
     private var lastCrossfadeArrivalRealtimeMs: Long = 0L
     private val listeningHistoryRepository =
@@ -292,6 +296,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         cancelUserDrivenCrossfade(reason = "playQueue")
         viewModelScope.launch {
             val item = queue.items[queue.currentIndex]
+            resetLibraryTailExtensionContext(queue)
             Log.d(TAG, "playQueue: index=${queue.currentIndex}, videoId='${item.videoId}', title='${item.title}'")
             Log.d(
                 "TapTrace",
@@ -313,6 +318,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
             } else {
                 prefetchNext(queue)
             }
+            maybeExtendLibraryQueueFromCurrentPosition()
         }
     }
 
@@ -367,6 +373,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
             _positionMs.value = 0L
             fetchAndPlay(nextItem)
             prefetchNext(_state.value.queue)
+            maybeExtendLibraryQueueFromCurrentPosition()
         }
     }
 
@@ -385,6 +392,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         _positionMs.value = 0L
         fetchAndPlay(targetItem)
         prefetchNext(_state.value.queue)
+        maybeExtendLibraryQueueFromCurrentPosition()
     }
 
     fun playNext(item: MediaItem) {
@@ -673,6 +681,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                     runCatching { listeningHistoryRepository.recordPlayback(nextItem) }
                     HomePrefetchManager.prefetch(getApplication<Application>().applicationContext, forcePersonalization = true)
                 }
+                maybeExtendLibraryQueueFromCurrentPosition()
             },
             onCrossfadeComplete = {
                 // Crossfade is done. The new active player is already playing.
@@ -754,48 +763,118 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    private fun resetLibraryTailExtensionContext(queue: PlaybackQueue) {
+        libraryQueueExtensionJob?.cancel()
+        libraryQueueExtensionJob = null
+        if (queue.source == QueueSource.LIBRARY) {
+            librarySeedQueueSize = queue.items.size
+            libraryTailExtensionRequested = false
+        } else {
+            librarySeedQueueSize = 0
+            libraryTailExtensionRequested = false
+        }
+    }
+
+    private fun maybeExtendLibraryQueueFromCurrentPosition() {
+        val queue = _state.value.queue
+        if (queue.source != QueueSource.LIBRARY) return
+        if (libraryTailExtensionRequested) return
+
+        val seedSize = librarySeedQueueSize.coerceAtMost(queue.items.size)
+        if (seedSize < 2) return
+
+        val triggerIndex = seedSize - 2
+        if (queue.currentIndex < triggerIndex) return
+
+        val seedItems = queue.items.take(seedSize).filter { it.videoId.isNotBlank() }
+        if (seedItems.isEmpty()) return
+
+        libraryTailExtensionRequested = true
+        libraryQueueExtensionJob?.cancel()
+        libraryQueueExtensionJob = viewModelScope.launch(Dispatchers.IO) {
+            appendMashedUpNext(seedItems)
+        }
+    }
+
+    private suspend fun appendMashedUpNext(seedItems: List<MediaItem>) {
+        val pickedSeeds = seedItems.shuffled().take(minOf(LIBRARY_EXTENSION_SEED_COUNT, seedItems.size))
+        if (pickedSeeds.isEmpty()) return
+
+        val existingIds = _state.value.queue.items.mapTo(mutableSetOf()) { it.videoId }
+        val combined = mutableListOf<MediaItem>()
+        pickedSeeds.forEach { seed ->
+            val upNext = fetchUpNextQueue(seed.videoId) ?: return@forEach
+            upNext.items.forEach { candidate ->
+                val id = candidate.videoId
+                if (id.isBlank() || !existingIds.add(id)) return@forEach
+                combined.add(candidate)
+            }
+        }
+        if (combined.isEmpty()) return
+
+        _state.update { state ->
+            if (state.queue.source != QueueSource.LIBRARY) return@update state
+            val seen = state.queue.items.mapTo(mutableSetOf()) { it.videoId }
+            val dedupedAppend = combined.filter { it.videoId.isNotBlank() && seen.add(it.videoId) }
+            if (dedupedAppend.isEmpty()) {
+                state
+            } else {
+                state.copy(queue = state.queue.copy(items = state.queue.items + dedupedAppend))
+            }
+        }
+
+        // If extension finished after the original list already ended, continue playback immediately.
+        val player = activePlayer()
+        if (player?.playbackState == Player.STATE_ENDED) {
+            val snapshot = _state.value
+            if (snapshot.queue.currentIndex + 1 < snapshot.queue.items.size) {
+                withContext(Dispatchers.Main) { advanceToNextInternal() }
+            }
+        }
+    }
+
+    private suspend fun fetchUpNextQueue(seedVideoId: String): PlaybackQueue? {
+        val cacheKey = "next:$seedVideoId"
+        val cached = AppCache.browse.get(cacheKey) as? PlaybackQueue
+        if (cached != null) return cached
+
+        val visitorId = VisitorManager.ensureBrowseVisitorId()
+        if (visitorId.isBlank()) {
+            Log.e(TAG, "fetchUpNextQueue: browseVisitorId is blank for seed=$seedVideoId")
+            return null
+        }
+
+        val json = runCatching {
+            RequestExecutor.executeNextRequest(seedVideoId, visitorId)
+        }.onFailure { Log.e(TAG, "fetchUpNextQueue: executeNextRequest FAILED for seed=$seedVideoId", it) }
+            .getOrDefault("")
+
+        val recoveredJson = if (json.isBlank()) {
+            val refreshedId = VisitorManager.refreshBrowseVisitorId()
+            if (refreshedId.isBlank() || refreshedId == visitorId) {
+                ""
+            } else {
+                runCatching { RequestExecutor.executeNextRequest(seedVideoId, refreshedId) }
+                    .onFailure { Log.e(TAG, "fetchUpNextQueue: executeNextRequest retry FAILED for seed=$seedVideoId", it) }
+                    .getOrDefault("")
+            }
+        } else {
+            json
+        }
+
+        if (recoveredJson.isBlank()) return null
+        val queue = NextParser.extractUpNextQueue(recoveredJson) ?: return null
+        AppCache.browse.put(cacheKey, queue)
+        return queue
+    }
+
     private fun loadUpNextQueue(seedVideoId: String) {
         upNextJob?.cancel()
         upNextJob = viewModelScope.launch(Dispatchers.IO) {
-            val cacheKey = "next:$seedVideoId"
-            val cached = AppCache.browse.get(cacheKey) as? PlaybackQueue
-            if (cached != null) {
-                applyUpNextQueue(seedVideoId, cached)
+            val queue = fetchUpNextQueue(seedVideoId) ?: run {
+                Log.e(TAG, "loadUpNextQueue: failed to fetch queue for seed=$seedVideoId")
                 return@launch
             }
-
-            val visitorId = VisitorManager.ensureBrowseVisitorId()
-            if (visitorId.isBlank()) {
-                Log.e(TAG, "loadUpNextQueue: browseVisitorId is blank")
-                return@launch
-            }
-
-            val json = runCatching {
-                RequestExecutor.executeNextRequest(seedVideoId, visitorId)
-            }.onFailure { Log.e(TAG, "loadUpNextQueue: executeNextRequest FAILED", it) }
-                .getOrDefault("")
-
-            val recoveredJson = if (json.isBlank()) {
-                val refreshedId = VisitorManager.refreshBrowseVisitorId()
-                if (refreshedId.isBlank() || refreshedId == visitorId) {
-                    ""
-                } else {
-                    runCatching { RequestExecutor.executeNextRequest(seedVideoId, refreshedId) }
-                        .onFailure { Log.e(TAG, "loadUpNextQueue: executeNextRequest retry FAILED", it) }
-                        .getOrDefault("")
-                }
-            } else {
-                json
-            }
-
-            if (recoveredJson.isBlank()) return@launch
-
-            val queue = NextParser.extractUpNextQueue(recoveredJson) ?: run {
-                Log.e(TAG, "loadUpNextQueue: NextParser returned null")
-                return@launch
-            }
-
-            AppCache.browse.put(cacheKey, queue)
             applyUpNextQueue(seedVideoId, queue)
         }
     }
@@ -833,6 +912,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         super.onCleared()
         stopPositionPolling()
         upNextJob?.cancel()
+        libraryQueueExtensionJob?.cancel()
         crossfadeManager.release()
         observedPlayer?.let { player ->
             playerListener?.let { player.removeListener(it) }

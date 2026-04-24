@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.proj.Musicality.ui.theme.LocalSharedTransitionScope
 import com.proj.Musicality.ui.theme.MediaBoundsSpring
+import com.proj.Musicality.util.toCompactSongTitle
 
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
@@ -41,6 +42,7 @@ fun ContentCard(
     animatedVisibilityScope: AnimatedVisibilityScope? = null
 ) {
     val interactionSource = remember { MutableInteractionSource() }
+    val displayTitle = remember(title) { title.toCompactSongTitle() }
     val sharedTransitionScope = if (sharedElementKey != null && animatedVisibilityScope != null) {
         LocalSharedTransitionScope.current
     } else null
@@ -80,7 +82,7 @@ fun ContentCard(
                 ) {
                     Icon(
                         imageVector = Icons.Rounded.MoreVert,
-                        contentDescription = "More actions for $title",
+                        contentDescription = "More actions for $displayTitle",
                         tint = MaterialTheme.colorScheme.onSurface
                     )
                 }
@@ -89,7 +91,7 @@ fun ContentCard(
         Spacer(Modifier.height(8.dp))
         Column(modifier = Modifier.height(68.dp)) {
             Text(
-                text = title,
+                text = displayTitle,
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.fillMaxWidth(0.7f),
                 maxLines = 3,

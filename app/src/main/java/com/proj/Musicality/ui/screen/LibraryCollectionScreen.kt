@@ -117,6 +117,10 @@ fun LibraryCollectionScreen(
         LibraryCollectionType.TOP_SONGS -> "Top Songs"
         LibraryCollectionType.DOWNLOADED -> "Downloads"
     }
+    val queueSource = when (collectionType) {
+        LibraryCollectionType.LIKED, LibraryCollectionType.TOP_SONGS -> QueueSource.LIBRARY
+        LibraryCollectionType.DOWNLOADED -> QueueSource.SEARCH
+    }
     val isDownloadedCollection = collectionType == LibraryCollectionType.DOWNLOADED
     val artworkUrl = items.firstOrNull()?.thumbnailUrl
     val albumColors = rememberAlbumColors(
@@ -236,7 +240,7 @@ fun LibraryCollectionScreen(
                                     PlaybackQueue(
                                         items = items,
                                         currentIndex = 0,
-                                        source = QueueSource.SEARCH
+                                        source = queueSource
                                     )
                                 )
                             },
@@ -253,7 +257,7 @@ fun LibraryCollectionScreen(
                                     PlaybackQueue(
                                         items = items.shuffled(),
                                         currentIndex = 0,
-                                        source = QueueSource.SEARCH
+                                        source = queueSource
                                     )
                                 )
                             },
@@ -293,7 +297,7 @@ fun LibraryCollectionScreen(
                                 PlaybackQueue(
                                     items = items,
                                     currentIndex = index,
-                                    source = QueueSource.SEARCH
+                                    source = queueSource
                                 )
                             )
                         },

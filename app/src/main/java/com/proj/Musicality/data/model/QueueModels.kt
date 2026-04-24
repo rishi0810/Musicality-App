@@ -9,4 +9,4 @@ data class PlaybackQueue(
     val source: QueueSource
 )
 
-enum class QueueSource { HOME, SEARCH, ALBUM, PLAYLIST, ARTIST_TOP_SONGS, SINGLE, UP_NEXT }
+enum class QueueSource { HOME, SEARCH, ALBUM, PLAYLIST, ARTIST_TOP_SONGS, LIBRARY, SINGLE, UP_NEXT }

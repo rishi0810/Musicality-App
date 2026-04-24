@@ -581,7 +581,7 @@ fun MusicApp() {
                             onAddToQueue = onAddToQueue,
                             onArtistTap = navToArtistNoThumb,
                             collapsedMiniPlayerHeight = floatingControlsHeight + 3.dp,
-                            modifier = Modifier.statusBarsPadding()
+                            modifier = Modifier
                         )
                     }
 

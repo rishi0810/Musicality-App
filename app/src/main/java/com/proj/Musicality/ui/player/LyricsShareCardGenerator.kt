@@ -31,6 +31,8 @@ import kotlin.math.ceil
 private const val SHARE_CARD_MAX_LINES = 6
 private const val LYRIC_TEXT_SIZE = 60f
 private const val LYRIC_LINE_SPACING = 14f
+private const val WRAPPED_LYRIC_LINE_SPACING = 2f
+private const val SHARE_TITLE_MAX_CHARS = 54
 
 data class LyricsShareCardSpec(
     val title: String,
@@ -39,6 +41,11 @@ data class LyricsShareCardSpec(
     val lyricLines: List<String>,
     val backgroundColor: Int,
     val textColor: Int
+)
+
+private data class WrappedLyricSegment(
+    val text: String,
+    val isContinuation: Boolean
 )
 
 object LyricsShareCardGenerator {
@@ -78,6 +85,7 @@ object LyricsShareCardGenerator {
                 style = Paint.Style.FILL_AND_STROKE
                 strokeWidth = 2f
                 strokeJoin = Paint.Join.ROUND
+                letterSpacing = 0.015f
             }
             val lyricsTop = metadataTop + artworkSize + 78f
             val lyricsWidth = (WIDTH - edge * 2f).toInt()
@@ -86,9 +94,12 @@ object LyricsShareCardGenerator {
                 paint = lyricsPaint,
                 maxWidthPx = lyricsWidth.toFloat()
             )
-            val lyricLineHeight = lyricsPaint.fontMetrics.run { bottom - top } + LYRIC_LINE_SPACING
+            val lyricTextHeight = lyricsPaint.fontMetrics.run { bottom - top }
             val logo = loadLogoBitmap(context, 58)
-            val lyricHeight = lyricLineHeight * wrappedLyricLines.size
+            val lyricHeight = lyricBlockHeight(
+                lines = wrappedLyricLines,
+                lineHeight = lyricTextHeight
+            )
             val footerCenterY = lyricsTop + lyricHeight + 94f
 
             val cardHeight = ceil(footerCenterY + 74f).toInt()
@@ -139,7 +150,7 @@ object LyricsShareCardGenerator {
             val metadataWidth = WIDTH - metadataStartX - edge
             drawSingleLineEllipsized(
                 canvas = canvas,
-                text = spec.title.ifBlank { "Unknown song" },
+                text = prepareShareSongTitle(spec.title),
                 paint = titlePaint,
                 x = metadataStartX,
                 baseline = titleBaseline,
@@ -155,14 +166,20 @@ object LyricsShareCardGenerator {
             )
 
             val firstBaseline = lyricsTop - lyricsPaint.fontMetrics.top
-            wrappedLyricLines.forEachIndexed { index, line ->
-                val baseline = firstBaseline + index * lyricLineHeight
-                val paint = if (line.containsLatinScript()) latinLyricsPaint else lyricsPaint
-                canvas.drawText(line, edge, baseline, paint)
+            var baseline = firstBaseline
+            wrappedLyricLines.forEachIndexed { index, segment ->
+                val paint = if (segment.text.containsLatinScript()) latinLyricsPaint else lyricsPaint
+                canvas.drawText(segment.text, edge, baseline, paint)
                 if (paint === latinLyricsPaint) {
                     // Extra pass to make Latin (English) text match the visual heaviness
                     // of non-Latin glyphs in mixed-script lyric cards.
-                    canvas.drawText(line, edge, baseline, paint)
+                    canvas.drawText(segment.text, edge, baseline, paint)
+                }
+                if (index < wrappedLyricLines.lastIndex) {
+                    val nextSegment = wrappedLyricLines[index + 1]
+                    val spacing =
+                        if (nextSegment.isContinuation) WRAPPED_LYRIC_LINE_SPACING else LYRIC_LINE_SPACING
+                    baseline += lyricTextHeight + spacing
                 }
             }
 
@@ -205,6 +222,31 @@ object LyricsShareCardGenerator {
         canvas.drawText(line, x, baseline, paint)
     }
 
+    private fun prepareShareSongTitle(rawTitle: String): String {
+        val fallback = rawTitle.ifBlank { "Unknown song" }
+        var title = fallback
+            .replace(Regex("""\s+"""), " ")
+            .trim()
+
+        // Remove common trailing YouTube noise to keep share cards clean.
+        title = title
+            .replace(
+                Regex(
+                    """\s*(\(|\[)?(official(\s+music)?\s+video|official\s+audio|lyrics?|lyric\s+video|visualizer|hd|hq|4k|remaster(ed)?|audio)(\)|\])?\s*$""",
+                    RegexOption.IGNORE_CASE
+                ),
+                ""
+            )
+            .replace(Regex("""\s*[-|:]\s*(official|lyrics?|audio|video).*$""", RegexOption.IGNORE_CASE), "")
+            .trim()
+
+        if (title.isBlank()) title = fallback
+        if (title.length <= SHARE_TITLE_MAX_CHARS) return title
+
+        val cutAt = title.lastIndexOf(' ', SHARE_TITLE_MAX_CHARS).takeIf { it > 0 } ?: SHARE_TITLE_MAX_CHARS
+        return title.substring(0, cutAt).trimEnd() + "…"
+    }
+
     private fun shareTypeface(context: Context, style: Int): Typeface {
         val base = shareTypefaceBase
             ?: ResourcesCompat.getFont(context, R.font.google_sans_flex_variable)
@@ -229,11 +271,12 @@ object LyricsShareCardGenerator {
         lines: List<String>,
         paint: TextPaint,
         maxWidthPx: Float
-    ): List<String> {
-        val wrapped = mutableListOf<String>()
+    ): List<WrappedLyricSegment> {
+        val wrapped = mutableListOf<WrappedLyricSegment>()
         lines.forEach { raw ->
             var remaining = raw.trim()
             if (remaining.isEmpty()) return@forEach
+            var firstSegmentForLine = true
             while (remaining.isNotEmpty()) {
                 var cut = paint.breakText(remaining, true, maxWidthPx, null).coerceAtLeast(1)
                 if (cut < remaining.length) {
@@ -242,15 +285,28 @@ object LyricsShareCardGenerator {
                 }
                 val segment = remaining.substring(0, cut).trim()
                 if (segment.isNotEmpty()) {
-                    wrapped += segment
+                    wrapped += WrappedLyricSegment(
+                        text = segment,
+                        isContinuation = !firstSegmentForLine
+                    )
+                    firstSegmentForLine = false
                 }
                 remaining = remaining.substring(cut).trimStart()
             }
         }
-        return wrapped.ifEmpty { listOf("No lyrics selected") }
+        return wrapped.ifEmpty { listOf(WrappedLyricSegment("No lyrics selected", false)) }
     }
 
     private fun String.containsLatinScript(): Boolean = any { it in 'A'..'Z' || it in 'a'..'z' }
+
+    private fun lyricBlockHeight(lines: List<WrappedLyricSegment>, lineHeight: Float): Float {
+        if (lines.isEmpty()) return 0f
+        var total = lineHeight * lines.size
+        for (i in 1 until lines.size) {
+            total += if (lines[i].isContinuation) WRAPPED_LYRIC_LINE_SPACING else LYRIC_LINE_SPACING
+        }
+        return total
+    }
 
     private suspend fun loadArtworkBitmap(
         context: Context,

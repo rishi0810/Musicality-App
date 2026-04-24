@@ -107,6 +107,7 @@ import com.proj.Musicality.ui.components.HapticIconButton
 import com.proj.Musicality.ui.components.hapticClickable
 import com.proj.Musicality.ui.components.SongListItem
 import com.proj.Musicality.ui.theme.LocalPlaybackBackdropPalette
+import com.proj.Musicality.util.toCompactSongTitle
 import com.proj.Musicality.util.upscaleThumbnail
 import com.proj.Musicality.viewmodel.SearchViewModel
 import kotlinx.coroutines.launch
@@ -603,7 +604,7 @@ fun SearchScreen(
                             )
                             Spacer(Modifier.width(16.dp))
                             Text(
-                                text = suggestion.title,
+                                text = suggestion.title.toCompactSongTitle(),
                                 style = MaterialTheme.typography.bodyLarge
                             )
                         }

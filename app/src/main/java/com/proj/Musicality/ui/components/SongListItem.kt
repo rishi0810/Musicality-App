@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import com.proj.Musicality.data.local.MediaDownloadState
 import com.proj.Musicality.ui.theme.LocalSharedTransitionScope
 import com.proj.Musicality.ui.theme.MediaBoundsSpring
+import com.proj.Musicality.util.toCompactSongTitle
 
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
@@ -34,24 +35,36 @@ fun SongListItem(
     modifier: Modifier = Modifier,
     trailingText: String? = null,
     onOverflowClick: (() -> Unit)? = null,
+    onLongPress: (() -> Unit)? = null,
     downloadState: MediaDownloadState? = null,
     sharedElementKey: String? = null,
     animatedVisibilityScope: AnimatedVisibilityScope? = null
 ) {
     val interactionSource = remember { MutableInteractionSource() }
+    val displayTitle = remember(title) { title.toCompactSongTitle() }
     val sharedTransitionScope = if (sharedElementKey != null && animatedVisibilityScope != null) {
         LocalSharedTransitionScope.current
     } else null
+    val clickModifier = if (onLongPress != null) {
+        Modifier.hapticCombinedClickable(
+            interactionSource = interactionSource,
+            indication = null,
+            onLongClick = onLongPress,
+            onClick = onClick
+        )
+    } else {
+        Modifier.hapticClickable(
+            interactionSource = interactionSource,
+            indication = null,
+            onClick = onClick
+        )
+    }
 
     Row(
         modifier = modifier
             .fillMaxWidth()
             .pressScale(interactionSource)
-            .hapticClickable(
-                interactionSource = interactionSource,
-                indication = null,
-                onClick = onClick
-            )
+            .then(clickModifier)
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -73,7 +86,7 @@ fun SongListItem(
         Spacer(Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = title,
+                text = displayTitle,
                 style = MaterialTheme.typography.bodyMedium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
@@ -125,7 +138,7 @@ fun SongListItem(
             HapticIconButton(onClick = onOverflowClick) {
                 Icon(
                     imageVector = Icons.Rounded.MoreVert,
-                    contentDescription = "More actions for $title",
+                    contentDescription = "More actions for $displayTitle",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }

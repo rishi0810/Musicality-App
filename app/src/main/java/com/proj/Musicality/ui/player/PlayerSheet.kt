@@ -169,6 +169,7 @@ import com.proj.Musicality.ui.theme.LocalPlaybackBackdropPalette
 import com.proj.Musicality.ui.theme.LocalPlaybackUiPalette
 import com.proj.Musicality.ui.theme.rememberMediaBackdropPalette
 import com.proj.Musicality.util.formatMs
+import com.proj.Musicality.util.toCompactSongTitle
 import com.proj.Musicality.util.upscaleThumbnail
 import com.proj.Musicality.viewmodel.PlaybackState
 import kotlinx.coroutines.CancellationException
@@ -695,7 +696,9 @@ fun PlayerSheet(
                                 val artistClickModifier = if (animItem.artistId != null) {
                                     Modifier.clickable {
                                         animItem.artistId?.let {
-                                            onArtistTap(it, animItem.artistName, animItem.thumbnailUrl)
+                                            // Song page has track art, not canonical artist art.
+                                            // Pass null so ArtistScreen fetches proper artist image.
+                                            onArtistTap(it, animItem.artistName, null)
                                         }
                                     }
                                 } else {
@@ -875,7 +878,9 @@ fun PlayerSheet(
                         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                         modifier = Modifier.clickable {
                             showOptionsSheet = false
-                            item.artistId?.let { onArtistTap(it, item.artistName, item.thumbnailUrl) }
+                            // Song page has track art, not canonical artist art.
+                            // Pass null so ArtistScreen fetches proper artist image.
+                            item.artistId?.let { onArtistTap(it, item.artistName, null) }
                         }
                     )
                     ListItem(
@@ -1320,7 +1325,7 @@ private fun BoxScope.MiniPlayerBar(
                     ) { animItem ->
                         Column {
                             Text(
-                                text = animItem.title,
+                                text = animItem.title.toCompactSongTitle(),
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = FontWeight.Medium,
                                 color = miniTitleColor,

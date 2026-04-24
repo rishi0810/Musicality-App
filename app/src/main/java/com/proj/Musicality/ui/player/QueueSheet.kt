@@ -2,7 +2,12 @@ package com.proj.Musicality.ui.player
 
 import android.content.Intent
 import android.widget.Toast
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -21,6 +26,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Album
@@ -38,6 +45,7 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Surface
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
@@ -46,6 +54,7 @@ import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -59,6 +68,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -78,6 +88,7 @@ import com.proj.Musicality.data.model.QueueSource
 import com.proj.Musicality.ui.components.hapticClickable
 import com.proj.Musicality.ui.components.hapticCombinedClickable
 import com.proj.Musicality.ui.theme.LocalPlaybackUiPalette
+import com.proj.Musicality.util.toCompactSongTitle
 import kotlinx.coroutines.launch
 
 private data class QueueItemMenuModel(
@@ -140,68 +151,77 @@ fun QueueContent(
     val currentItemContainerColor = playbackUiPalette?.currentItemContainer ?: QueueCurrentItemColor
     val currentItemAccentColor = playbackUiPalette?.accent ?: QueueCurrentAccentColor
     val currentItemSecondaryColor = playbackUiPalette?.currentItemSecondary ?: QueueCurrentSecondaryColor
+    val scrollToTopContentColor = if (currentItemAccentColor.luminance() > 0.5f) Color.Black else Color.White
+    val listState = rememberLazyListState()
+    val showScrollToTopCta by remember {
+        derivedStateOf {
+            listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 80
+        }
+    }
 
     CompositionLocalProvider(LocalOverscrollFactory provides null) {
-        LazyColumn(
-            modifier = modifier
-                .fillMaxWidth()
-                .padding(bottom = 32.dp)
-        ) {
-            if (headerContent != null) {
-                item(key = "queue-header", contentType = "header") {
-                    headerContent()
-                }
-            }
-            itemsIndexed(
-                items = queue.items,
-                key = { index, item -> queueItemStableKey(index, item) },
-                contentType = { _, _ -> "queue_item" }
-            ) { index, item ->
-                val itemKey = item.videoId
-                val isCurrent = index == queue.currentIndex
-                val isLockedNext = index == lockedNextIndex
-                val isDragging = draggedItemKey == itemKey
-                val dismissState = rememberSwipeToDismissBoxState()
-                // Guard against double-removal: once dismissed, ignore subsequent LaunchedEffect runs
-                var dismissed by remember { mutableStateOf(false) }
-
-                LaunchedEffect(dismissState.currentValue) {
-                    if (!dismissed && dismissState.currentValue != SwipeToDismissBoxValue.Settled) {
-                        dismissed = true
-                        val removeIndex = latestItems.indexOfFirst { it.videoId == itemKey }
-                        if (removeIndex in latestItems.indices && latestItems.size > 1 && removeIndex != lockedNextIndex) {
-                            onRemoveFromQueue(removeIndex)
-                        }
+        Box(modifier = modifier.fillMaxWidth()) {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 32.dp)
+            ) {
+                if (headerContent != null) {
+                    item(key = "queue-header", contentType = "header") {
+                        headerContent()
                     }
                 }
+                itemsIndexed(
+                    items = queue.items,
+                    key = { index, item -> queueItemStableKey(index, item) },
+                    contentType = { _, _ -> "queue_item" }
+                ) { index, item ->
+                    val itemKey = item.videoId
+                    val isCurrent = index == queue.currentIndex
+                    val isLockedNext = index == lockedNextIndex
+                    val isDragging = draggedItemKey == itemKey
+                    val dismissState = rememberSwipeToDismissBoxState()
+                    // Guard against double-removal: once dismissed, ignore subsequent LaunchedEffect runs
+                    var dismissed by remember { mutableStateOf(false) }
 
-                Column {
-                    SwipeToDismissBox(
-                        modifier = Modifier.animateItem(),
-                        state = dismissState,
-                        backgroundContent = {
-                            val color by animateColorAsState(
-                                targetValue = when (dismissState.targetValue) {
-                                    SwipeToDismissBoxValue.Settled -> Color.Transparent
-                                    else -> MaterialTheme.colorScheme.errorContainer
-                                },
-                                label = "swipe-bg"
-                            )
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(64.dp)
-                                    .background(color)
-                            )
-                        },
-                        enableDismissFromStartToEnd = queue.items.size > 1 && draggedItemKey == null && !isLockedNext,
-                        enableDismissFromEndToStart = queue.items.size > 1 && draggedItemKey == null && !isLockedNext
-                    ) {
-                        val bgColor = if (isCurrent) {
-                            currentItemContainerColor
-                        } else {
-                            Color.Transparent
+                    LaunchedEffect(dismissState.currentValue) {
+                        if (!dismissed && dismissState.currentValue != SwipeToDismissBoxValue.Settled) {
+                            dismissed = true
+                            val removeIndex = latestItems.indexOfFirst { it.videoId == itemKey }
+                            if (removeIndex in latestItems.indices && latestItems.size > 1 && removeIndex != lockedNextIndex) {
+                                onRemoveFromQueue(removeIndex)
+                            }
                         }
+                    }
+
+                    Column {
+                        SwipeToDismissBox(
+                            modifier = Modifier.animateItem(),
+                            state = dismissState,
+                            backgroundContent = {
+                                val color by animateColorAsState(
+                                    targetValue = when (dismissState.targetValue) {
+                                        SwipeToDismissBoxValue.Settled -> Color.Transparent
+                                        else -> MaterialTheme.colorScheme.errorContainer
+                                    },
+                                    label = "swipe-bg"
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(64.dp)
+                                        .background(color)
+                                )
+                            },
+                            enableDismissFromStartToEnd = queue.items.size > 1 && draggedItemKey == null && !isLockedNext,
+                            enableDismissFromEndToStart = queue.items.size > 1 && draggedItemKey == null && !isLockedNext
+                        ) {
+                            val bgColor = if (isCurrent) {
+                                currentItemContainerColor
+                            } else {
+                                Color.Transparent
+                            }
 
                         Row(
                             modifier = Modifier
@@ -240,7 +260,7 @@ fun QueueContent(
                                 Spacer(Modifier.width(12.dp))
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = item.title,
+                                        text = item.title.toCompactSongTitle(),
                                         style = MaterialTheme.typography.bodyMedium,
                                         fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Medium,
                                         maxLines = 1,
@@ -350,6 +370,39 @@ fun QueueContent(
                     // ── Crossfade connector between current and next song ──
                     if (crossfadeEnabled && isCurrent && index + 1 < queue.items.size) {
                         CrossfadeConnector()
+                    }
+                }
+            }
+        }
+                AnimatedVisibility(
+                    visible = showScrollToTopCta,
+                    enter = fadeIn() + scaleIn(initialScale = 0.88f),
+                    exit = fadeOut() + scaleOut(targetScale = 0.88f),
+                    modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 18.dp, bottom = 112.dp)
+                    .zIndex(2f)
+                ) {
+                Surface(
+                    shape = CircleShape,
+                    color = currentItemAccentColor,
+                    contentColor = scrollToTopContentColor,
+                    tonalElevation = 6.dp,
+                    shadowElevation = 8.dp,
+                    modifier = Modifier
+                        .size(44.dp)
+                        .hapticClickable {
+                            scope.launch {
+                                listState.animateScrollToItem(0)
+                            }
+                        }
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Rounded.ExpandLess,
+                            contentDescription = "Scroll queue to top",
+                            modifier = Modifier.size(24.dp)
+                        )
                     }
                 }
             }

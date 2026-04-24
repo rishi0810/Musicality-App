@@ -114,6 +114,7 @@ import com.proj.Musicality.ui.components.hapticCombinedClickable
 import com.proj.Musicality.ui.components.pressScale
 import com.proj.Musicality.ui.theme.LocalPlaybackUiPalette
 import com.proj.Musicality.ui.theme.rememberMediaBackdropPalette
+import com.proj.Musicality.util.toCompactSongTitle
 import com.proj.Musicality.util.upscaleThumbnail
 import com.proj.Musicality.viewmodel.HomeViewModel
 import kotlinx.coroutines.launch
@@ -728,7 +729,7 @@ private fun HomeSectionShelf(
                     is HomeItem.Song -> {
                         HomeSongCard(
                             song = item,
-                            onOverflowClick = { onSongOverflowClick(item) },
+                            onLongPress = { onSongOverflowClick(item) },
                             onClick = {
                                 val index = songIndexById[item.videoId] ?: 0
                                 val mediaItem = item.toMediaItem()
@@ -772,7 +773,7 @@ private fun SongCarousel(
         ) { index, song ->
             HomeSongCard(
                 song = song,
-                onOverflowClick = { onSongOverflowClick(song) },
+                onLongPress = { onSongOverflowClick(song) },
                 onClick = {
                     val mediaItem = song.toMediaItem()
                     onSongTap(
@@ -1143,13 +1144,30 @@ private fun HomeMoreButton(
 @Composable
 private fun HomeSongCard(
     song: HomeItem.Song,
-    onOverflowClick: (() -> Unit)? = null,
+    onLongPress: (() -> Unit)? = null,
     onClick: () -> Unit
 ) {
+    val interaction = remember { MutableInteractionSource() }
+    val clickModifier = if (onLongPress != null) {
+        Modifier.hapticCombinedClickable(
+            interactionSource = interaction,
+            indication = null,
+            onLongClick = onLongPress,
+            onClick = onClick
+        )
+    } else {
+        Modifier.hapticClickable(
+            interactionSource = interaction,
+            indication = null,
+            onClick = onClick
+        )
+    }
+
     Column(
         modifier = Modifier
             .width(160.dp)
-            .hapticClickable(onClick = onClick)
+            .pressScale(interaction)
+            .then(clickModifier)
     ) {
         Box {
             Thumbnail(
@@ -1157,22 +1175,11 @@ private fun HomeSongCard(
                 size = 160.dp,
                 cornerRadius = 8.dp
             )
-            if (onOverflowClick != null) {
-                HapticIconButton(
-                    onClick = onOverflowClick,
-                    modifier = Modifier.align(Alignment.TopEnd)
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.MoreVert,
-                        contentDescription = "More actions for ${song.title}"
-                    )
-                }
-            }
         }
         Spacer(Modifier.height(8.dp))
         Column(modifier = Modifier.height(52.dp)) {
             Text(
-                text = song.title,
+                text = song.title.toCompactSongTitle(),
                 style = MaterialTheme.typography.bodySmall,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis
@@ -1359,7 +1366,7 @@ private fun HeroContinuePlaying(
                 color = Color.White.copy(alpha = 0.8f)
             )
             Text(
-                text = song.title,
+                text = song.title.toCompactSongTitle(),
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
                 color = Color.White,
@@ -1513,7 +1520,7 @@ private fun CompactSongCard(
             )
             Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp)) {
                 Text(
-                    text = song.title,
+                    text = song.title.toCompactSongTitle(),
                     style = MaterialTheme.typography.labelMedium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis

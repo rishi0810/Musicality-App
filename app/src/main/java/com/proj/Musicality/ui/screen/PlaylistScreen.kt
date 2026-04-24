@@ -52,6 +52,7 @@ import com.proj.Musicality.ui.components.*
 import com.proj.Musicality.ui.theme.LocalSharedTransitionScope
 import com.proj.Musicality.ui.theme.MediaBoundsSpring
 import com.proj.Musicality.ui.theme.rememberMediaBackdropPalette
+import com.proj.Musicality.util.toCompactSongTitle
 import com.proj.Musicality.util.upscaleThumbnail
 import com.proj.Musicality.viewmodel.PlaylistViewModel
 import com.proj.Musicality.viewmodel.PlaylistViewModelFactory
@@ -386,7 +387,7 @@ fun PlaylistScreen(
                         Spacer(Modifier.width(12.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = track.title,
+                                text = track.title.toCompactSongTitle(),
                                 style = MaterialTheme.typography.bodyLarge,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
