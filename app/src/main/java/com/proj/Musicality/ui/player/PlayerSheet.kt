@@ -1953,117 +1953,158 @@ private fun LyricsPanel(
                     onContinue = { showCustomizeSheet = true }
                 )
             } else {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp)
-                        .padding(bottom = 56.dp, top = 4.dp)
+                Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(backgroundColor)
+                            .padding(horizontal = 20.dp)
+                            .padding(bottom = 44.dp, top = 8.dp)
                 ) {
-                    Row(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(bottom = 6.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween
+                            .align(Alignment.BottomCenter)
+                            .padding(horizontal = 18.dp)
+                            .padding(top = 28.dp)
                     ) {
-                        HapticIconButton(
-                            onClick = { onShareModeChange(true) },
-                            enabled = canEnterShareMode
-                        ) {
-                            Icon(
-                                painter = painterResource(id = R.drawable.share_24px),
-                                contentDescription = "Share lyrics card",
-                                tint = if (canEnterShareMode) {
-                                    Color.White
-                                } else {
-                                    Color.White.copy(alpha = 0.4f)
-                                },
-                                modifier = Modifier.size(24.dp)
+                            SeekablePlaybackBar(
+                                progress = playbackProgress,
+                                durationMs = durationMs,
+                                onSeek = onSeek,
+                                onInteractingChange = onProgressBarInteractingChange,
+                                modifier = Modifier.fillMaxWidth(),
+                                color = playbackAccent,
+                                trackColor = Color.White.copy(alpha = 0.18f),
+                                trackHeight = 3.dp,
+                                expandedTrackHeight = 10.dp
                             )
-                        }
-                        HapticIconButton(onClick = onClose) {
-                            Icon(
-                                imageVector = Icons.Rounded.KeyboardArrowDown,
-                                contentDescription = "Close lyrics",
-                                tint = Color.White,
-                                modifier = Modifier.size(30.dp)
-                            )
-                        }
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 4.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    formatMs(positionMs),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color.White.copy(alpha = 0.7f)
+                                )
+                                Text(
+                                    if (durationMs > 0) formatMs(durationMs) else "",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color.White.copy(alpha = 0.7f)
+                                )
+                            }
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 12.dp),
+                                horizontalArrangement = Arrangement.SpaceEvenly,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                HapticIconButton(onClick = onSkipPrev, modifier = Modifier.size(48.dp)) {
+                                    Icon(
+                                        Icons.Rounded.SkipPrevious,
+                                        contentDescription = "Previous",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(32.dp)
+                                    )
+                                }
+                                val playInteraction = remember { MutableInteractionSource() }
+                                Box(
+                                    modifier = Modifier
+                                        .size(60.dp)
+                                        .pressScale(playInteraction)
+                                        .shadow(
+                                            12.dp,
+                                            CircleShape,
+                                            ambientColor = playbackButton.copy(alpha = 0.25f),
+                                            spotColor = playbackButton.copy(alpha = 0.3f)
+                                        )
+                                        .background(playbackButton, CircleShape)
+                                        .hapticClickable(
+                                            interactionSource = playInteraction,
+                                            indication = null
+                                        ) { onPlayPause() },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                                        contentDescription = "Play/Pause",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(32.dp)
+                                    )
+                                }
+                                HapticIconButton(onClick = onSkipNext, modifier = Modifier.size(48.dp)) {
+                                    Icon(
+                                        Icons.Rounded.SkipNext,
+                                        contentDescription = "Next",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(32.dp)
+                                    )
+                                }
+                            }
                     }
-                    SeekablePlaybackBar(
-                        progress = playbackProgress,
-                        durationMs = durationMs,
-                        onSeek = onSeek,
-                        onInteractingChange = onProgressBarInteractingChange,
-                        modifier = Modifier.fillMaxWidth(),
-                        color = playbackAccent,
-                        trackColor = Color.White.copy(alpha = 0.18f),
-                        trackHeight = 3.dp,
-                        expandedTrackHeight = 10.dp
-                    )
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(top = 2.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            formatMs(positionMs),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = Color.White.copy(alpha = 0.7f)
-                        )
-                        Text(
-                            if (durationMs > 0) formatMs(durationMs) else "",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = Color.White.copy(alpha = 0.7f)
-                        )
-                    }
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 12.dp),
-                        horizontalArrangement = Arrangement.SpaceEvenly,
+                            .align(Alignment.TopCenter)
+                            .offset(y = (-35).dp)
+                            .padding(horizontal = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        HapticIconButton(onClick = onSkipPrev, modifier = Modifier.size(48.dp)) {
-                            Icon(
-                                Icons.Rounded.SkipPrevious,
-                                contentDescription = "Previous",
-                                tint = Color.White,
-                                modifier = Modifier.size(32.dp)
-                            )
-                        }
-                        val playInteraction = remember { MutableInteractionSource() }
-                        Box(
+                        Surface(
                             modifier = Modifier
-                                .size(60.dp)
-                                .pressScale(playInteraction)
+                                .size(48.dp)
                                 .shadow(
-                                    12.dp,
-                                    CircleShape,
-                                    ambientColor = playbackButton.copy(alpha = 0.25f),
-                                    spotColor = playbackButton.copy(alpha = 0.3f)
-                                )
-                                .background(playbackButton, CircleShape)
-                                .hapticClickable(
-                                    interactionSource = playInteraction,
-                                    indication = null
-                                ) { onPlayPause() },
-                            contentAlignment = Alignment.Center
+                                    elevation = 10.dp,
+                                    shape = CircleShape,
+                                    ambientColor = Color.Black.copy(alpha = 0.24f),
+                                    spotColor = Color.Black.copy(alpha = 0.32f)
+                                ),
+                            shape = CircleShape,
+                            color = Color.Black.copy(alpha = 0.36f),
+                            tonalElevation = 0.dp
                         ) {
-                            Icon(
-                                if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                                contentDescription = "Play/Pause",
-                                tint = Color.White,
-                                modifier = Modifier.size(32.dp)
-                            )
+                            HapticIconButton(
+                                onClick = { onShareModeChange(true) },
+                                enabled = canEnterShareMode,
+                                modifier = Modifier.fillMaxSize()
+                            ) {
+                                Icon(
+                                    painter = painterResource(id = R.drawable.share_24px),
+                                    contentDescription = "Share lyrics card",
+                                    tint = if (canEnterShareMode) {
+                                        Color.White
+                                    } else {
+                                        Color.White.copy(alpha = 0.4f)
+                                    },
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
                         }
-                        HapticIconButton(onClick = onSkipNext, modifier = Modifier.size(48.dp)) {
-                            Icon(
-                                Icons.Rounded.SkipNext,
-                                contentDescription = "Next",
-                                tint = Color.White,
-                                modifier = Modifier.size(32.dp)
-                            )
+                        Surface(
+                            modifier = Modifier
+                                .size(48.dp)
+                                .shadow(
+                                    elevation = 10.dp,
+                                    shape = CircleShape,
+                                    ambientColor = Color.Black.copy(alpha = 0.24f),
+                                    spotColor = Color.Black.copy(alpha = 0.32f)
+                                ),
+                            shape = CircleShape,
+                            color = Color.Black.copy(alpha = 0.36f),
+                            tonalElevation = 0.dp
+                        ) {
+                            HapticIconButton(onClick = onClose, modifier = Modifier.fillMaxSize()) {
+                                Icon(
+                                    imageVector = Icons.Rounded.KeyboardArrowDown,
+                                    contentDescription = "Close lyrics",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(28.dp)
+                                )
+                            }
                         }
                     }
                 }

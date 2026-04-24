@@ -1,11 +1,8 @@
 package com.proj.Musicality.crossfade
 
 import android.content.Context
-import android.media.audiofx.Equalizer
 import android.util.Log
-import androidx.media3.common.C
 import androidx.media3.common.MediaItem
-import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -13,6 +10,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.math.cos
+import kotlin.math.exp
+import kotlin.math.ln
+import kotlin.math.sin
 
 /**
  * Data the ViewModel provides when the next track is ready for crossfade.
@@ -24,27 +25,54 @@ data class CrossfadeNextTrack(
 )
 
 /**
- * Dual-player crossfade with no handoff.
+ * Dual-player crossfade with DSP shaping, no handoff.
  *
  * Architecture:
- *   Track A plays on activePlayer
- *   Track B is preloaded on inactivePlayer
- *   At trigger: B starts, volumes ramp (equal-power), when done → swap active
- *   B continues from exactly where it was — no reload, no duplicated audio.
+ *   Track A plays on activePlayer (processor A: gain=1, bypass filter)
+ *   Track B preloads on inactivePlayer (processor B primed: gain=0, HPF @ ~180 Hz)
+ *   Trigger:
+ *     outgoing: gain ramps down (equal-power cos), LPF cutoff sweeps 20 kHz → ~500 Hz (log)
+ *     incoming: gain ramps up   (equal-power sin), HPF cutoff sweeps ~180 Hz → 20 Hz (log)
+ *   Swap: incoming becomes active, both processors reset to idle (unity, bypass)
  *
- * Timeline:
- *   A ──────────────┐
- *                   ├── overlap (fade A down, fade B up)
- *   B ──────────────┘── continues playing
+ *   Timeline:
+ *     A ──────────────┐
+ *                     ├── overlap (fade A down + LPF sweep; fade B up + HPF sweep)
+ *     B ──────────────┘── continues playing
+ *
+ *   Why this shape, musically:
+ *     - Equal-power cos/sin keeps the perceived loudness of the overlap constant, avoiding the
+ *       dip you get with a linear cross (which sums to 0.707 at the midpoint and sounds like a
+ *       volume drop).
+ *     - Low-passing the outgoing while it fades simulates how far sounds lose their highs to air
+ *       absorption — "fading into the distance" feels natural, whereas a flat-spectrum fade
+ *       feels like someone reached for the volume knob.
+ *     - A gentle high-pass on the incoming during the first ~half of the overlap prevents the
+ *       two tracks' low frequencies from summing incoherently. Two bass lines at different keys
+ *       will phase-cancel at their fundamentals (comb filtering), giving a muddy "phasing"
+ *       sound for a few hundred ms. The HPF keeps the incoming's bass out of the way until the
+ *       outgoing is already mostly gone.
  */
-class SimpleCrossfadeManager(private val context: Context) {
+class SimpleCrossfadeManager(@Suppress("UNUSED_PARAMETER") private val context: Context) {
 
     companion object {
         private const val TAG = "SimpleCrossfade"
         private const val FADE_DURATION_MS = 6000L
         private const val TRIGGER_LEAD_MS = 6200L
         private const val STEP_MS = 40L
-        private const val OUTGOING_FLOOR = 0.10f
+
+        // DSP sweep endpoints.
+        private const val OUTGOING_LPF_START_HZ = 20_000f
+        private const val OUTGOING_LPF_END_HZ = 500f
+        private const val INCOMING_HPF_START_HZ = 180f
+        private const val INCOMING_HPF_END_HZ = 20f
+
+        /**
+         * Fraction of the fade over which the incoming HPF opens back up. After this point the
+         * incoming is full-spectrum; the rest of the fade is pure gain ramp. Shorter value =
+         * quicker return of incoming bass; longer = more frequency separation during overlap.
+         */
+        private const val INCOMING_HPF_OPEN_FRACTION = 0.6f
     }
 
     private var enabled = false
@@ -52,15 +80,12 @@ class SimpleCrossfadeManager(private val context: Context) {
     private var lastTriggeredTrackId: String? = null
     private var transitionState: TransitionState? = null
 
-    private var outgoingEq: Equalizer? = null
-    private var incomingEq: Equalizer? = null
-    private var outgoingEqSession: Int? = null
-    private var incomingEqSession: Int? = null
-
     private data class TransitionState(
         val delegatingPlayer: CrossfadeDelegatingPlayer,
         val outgoing: ExoPlayer,
         val incoming: ExoPlayer,
+        val outgoingProc: CrossfadeAudioProcessor,
+        val incomingProc: CrossfadeAudioProcessor,
         var uiSwitchedToIncoming: Boolean = false
     )
 
@@ -127,7 +152,6 @@ class SimpleCrossfadeManager(private val context: Context) {
         } else if (delegatingPlayer != null) {
             ensureSingleActivePlayback(delegatingPlayer)
         }
-        releaseEqs()
         transitionState = null
     }
 
@@ -153,12 +177,13 @@ class SimpleCrossfadeManager(private val context: Context) {
     }
 
     /**
-     * The core crossfade: pure dual-player volume automation.
+     * The core crossfade: equal-power gain ramps paired with complementary biquad sweeps.
      *
-     * 1. Preload B on inactive player, start at vol 0
-     * 2. Ramp A down (equal-power cos), B up (equal-power sin) over FADE_DURATION_MS
-     * 3. When done: swap active player, stop old player
-     * 4. B continues from exactly where it was — no reload
+     * 1. Prime both processors: outgoing stays at (gain=1, bypass); incoming is armed at
+     *    (gain=0, HPF @ 180 Hz).
+     * 2. Preload B on inactive player; start playback (still silent since processor gain=0).
+     * 3. Step every STEP_MS: update both processors' target gain and filter cutoff.
+     * 4. When ramp completes: swap active player, stop the old one, reset both processors.
      */
     private suspend fun executeCrossfade(
         delegatingPlayer: CrossfadeDelegatingPlayer,
@@ -166,16 +191,31 @@ class SimpleCrossfadeManager(private val context: Context) {
     ) {
         val outgoing = delegatingPlayer.activePlayer
         val incoming = delegatingPlayer.inactivePlayer
+        val outgoingProc = delegatingPlayer.processorFor(outgoing)
+        val incomingProc = delegatingPlayer.processorFor(incoming)
+
         val state = TransitionState(
             delegatingPlayer = delegatingPlayer,
             outgoing = outgoing,
-            incoming = incoming
+            incoming = incoming,
+            outgoingProc = outgoingProc,
+            incomingProc = incomingProc
         )
         transitionState = state
 
         try {
-            // Prepare and start incoming at volume 0
-            incoming.volume = 0f
+            // Prime processors to their crossfade-start states.
+            // Outgoing is already in its "playing normally" state; be explicit anyway.
+            outgoingProc.setGainTarget(1f)
+            outgoingProc.setFilter(CrossfadeAudioProcessor.FilterMode.BYPASS, OUTGOING_LPF_START_HZ)
+
+            incomingProc.setGainTarget(0f)
+            incomingProc.setFilter(CrossfadeAudioProcessor.FilterMode.HIGHPASS, INCOMING_HPF_START_HZ)
+
+            // Keep ExoPlayer.volume at 1 — all gain is now in the processor.
+            outgoing.volume = 1f
+            incoming.volume = 1f
+
             incoming.setMediaItem(nextTrack.mediaItem)
             incoming.prepare()
             incoming.play()
@@ -197,41 +237,63 @@ class SimpleCrossfadeManager(private val context: Context) {
             nextTrack.onCrossfadeStart()
             state.uiSwitchedToIncoming = true
 
-            // Equal-power crossfade ramp
+            // Equal-power crossfade ramp with complementary filter sweep.
             val steps = (FADE_DURATION_MS / STEP_MS).toInt().coerceAtLeast(1)
+            val halfPi = (Math.PI / 2.0).toFloat()
+
             repeat(steps) { index ->
                 val progress = ((index + 1).toFloat() / steps.toFloat()).coerceIn(0f, 1f)
 
-                // Equal-power curves
-                val outGain = kotlin.math.cos(progress * Math.PI.toFloat() / 2f).coerceIn(0f, 1f)
-                val inGain = kotlin.math.sin(progress * Math.PI.toFloat() / 2f).coerceIn(0f, 1f)
+                // Equal-power curves (sin² + cos² = 1 → constant summed power)
+                val outGain = cos(progress * halfPi).coerceIn(0f, 1f)
+                val inGain = sin(progress * halfPi).coerceIn(0f, 1f)
 
-                outgoing.volume = lerp(1f, OUTGOING_FLOOR, 1f - outGain)
-                incoming.volume = inGain
+                // Logarithmic cutoff sweeps — frequency is perceptually logarithmic
+                val outCutoff = logSweep(OUTGOING_LPF_START_HZ, OUTGOING_LPF_END_HZ, progress)
+                val hpfProgress =
+                    (progress / INCOMING_HPF_OPEN_FRACTION).coerceIn(0f, 1f)
+                val inCutoff = logSweep(INCOMING_HPF_START_HZ, INCOMING_HPF_END_HZ, hpfProgress)
 
-                applyEq(outgoing, progress, outgoing = true, primaryChain = true)
-                applyEq(incoming, progress, outgoing = false, primaryChain = false)
+                outgoingProc.setGainTarget(outGain)
+                outgoingProc.setFilter(
+                    CrossfadeAudioProcessor.FilterMode.LOWPASS,
+                    outCutoff
+                )
+
+                incomingProc.setGainTarget(inGain)
+                // Once the HPF has opened all the way, flip to BYPASS for phase-clean signal.
+                if (hpfProgress >= 1f) {
+                    incomingProc.setFilter(
+                        CrossfadeAudioProcessor.FilterMode.BYPASS,
+                        INCOMING_HPF_END_HZ
+                    )
+                } else {
+                    incomingProc.setFilter(
+                        CrossfadeAudioProcessor.FilterMode.HIGHPASS,
+                        inCutoff
+                    )
+                }
 
                 delay(STEP_MS)
             }
 
-            // Fade complete: incoming is at full volume, outgoing is silent
-            incoming.volume = 1f
-            outgoing.volume = 0f
+            // Fade complete: pin incoming at full spectrum + unity, outgoing at silence.
+            incomingProc.resetToIdle()
+            outgoingProc.setGainTarget(0f)
 
             // Swap: incoming becomes the active player, outgoing stops
             delegatingPlayer.swapActivePlayer()
-            releaseEqs()
 
-            Log.d(TAG, "Crossfade complete. New active player position: ${delegatingPlayer.activePlayer.currentPosition}ms")
+            // Former outgoing is now idle — leave it ready for next turn
+            outgoingProc.resetToIdle()
 
-            // Notify ViewModel: crossfade is done, update any remaining state
+            Log.d(TAG, "Crossfade complete. New active position: ${delegatingPlayer.activePlayer.currentPosition}ms")
+
             nextTrack.onCrossfadeComplete()
         } catch (cancelled: CancellationException) {
             abortTransition(state, commitToIncoming = state.uiSwitchedToIncoming)
             throw cancelled
         } finally {
-            releaseEqs()
             transitionState = null
         }
     }
@@ -253,66 +315,15 @@ class SimpleCrossfadeManager(private val context: Context) {
         return if (dur > 0) dur else -1L
     }
 
-    // ── EQ shaping (bass boost on outgoing, high cut for warm receding feel) ──
-
-    private fun applyEq(
-        player: ExoPlayer,
-        progress: Float,
-        outgoing: Boolean,
-        primaryChain: Boolean
-    ) {
-        val eq = ensureEq(player, primaryChain) ?: return
-        val blend = if (outgoing) progress else (1f - progress)
-        val range = eq.bandLevelRange
-        if (range == null || range.size < 2) return
-
-        val min = range[0].toInt()
-        val max = range[1].toInt()
-        val bassBand = 0.toShort()
-        val highBand = (eq.numberOfBands.toInt() - 1).coerceAtLeast(0).toShort()
-
-        val bassBoost = (180f * blend).toInt().coerceIn(min, max).toShort()
-        val highCut = (-500f * blend).toInt().coerceIn(min, max).toShort()
-
-        runCatching {
-            eq.setBandLevel(bassBand, bassBoost)
-            eq.setBandLevel(highBand, highCut)
-        }
-    }
-
-    private fun ensureEq(player: ExoPlayer, primaryChain: Boolean): Equalizer? {
-        val sessionId = player.audioSessionId
-        if (sessionId == C.AUDIO_SESSION_ID_UNSET || sessionId == 0) return null
-
-        if (primaryChain) {
-            if (outgoingEq != null && outgoingEqSession == sessionId) return outgoingEq
-        } else {
-            if (incomingEq != null && incomingEqSession == sessionId) return incomingEq
-        }
-
-        val created = runCatching {
-            Equalizer(0, sessionId).apply { enabled = true }
-        }.getOrNull() ?: return null
-
-        if (primaryChain) {
-            outgoingEq?.release()
-            outgoingEq = created
-            outgoingEqSession = sessionId
-        } else {
-            incomingEq?.release()
-            incomingEq = created
-            incomingEqSession = sessionId
-        }
-        return created
-    }
-
-    private fun releaseEqs() {
-        runCatching { outgoingEq?.release() }
-        runCatching { incomingEq?.release() }
-        outgoingEq = null
-        incomingEq = null
-        outgoingEqSession = null
-        incomingEqSession = null
+    /**
+     * Exponential interpolation from `start` to `end` — progress in [0, 1] moves the returned
+     * value linearly in log-frequency space. This is how the ear perceives pitch / cutoff.
+     */
+    private fun logSweep(start: Float, end: Float, t: Float): Float {
+        val clamped = t.coerceIn(0f, 1f)
+        val lnStart = ln(start.toDouble())
+        val lnEnd = ln(end.toDouble())
+        return exp(lnStart + (lnEnd - lnStart) * clamped).toFloat()
     }
 
     private fun abortTransition(
@@ -322,14 +333,17 @@ class SimpleCrossfadeManager(private val context: Context) {
         val delegatingPlayer = state.delegatingPlayer
         val outgoing = state.outgoing
         val incoming = state.incoming
+        val outgoingProc = state.outgoingProc
+        val incomingProc = state.incomingProc
 
         if (commitToIncoming && state.uiSwitchedToIncoming) {
             runCatching {
-                incoming.volume = 1f
-                outgoing.volume = 0f
+                incomingProc.resetToIdle()
+                outgoingProc.setGainTarget(0f)
                 if (delegatingPlayer.activePlayer !== incoming) {
                     delegatingPlayer.swapActivePlayer()
                 }
+                outgoingProc.resetToIdle()
                 if (!delegatingPlayer.activePlayer.isPlaying) {
                     delegatingPlayer.activePlayer.play()
                 }
@@ -337,12 +351,15 @@ class SimpleCrossfadeManager(private val context: Context) {
             return
         }
 
+        // Revert: kill incoming, bring outgoing back to unity.
         runCatching {
             incoming.pause()
             incoming.stop()
             incoming.clearMediaItems()
+            incomingProc.resetToIdle()
         }
         runCatching {
+            outgoingProc.resetToIdle()
             outgoing.volume = 1f
         }
     }
@@ -355,11 +372,11 @@ class SimpleCrossfadeManager(private val context: Context) {
             inactive.pause()
             inactive.stop()
             inactive.clearMediaItems()
+            delegatingPlayer.processorFor(inactive).resetToIdle()
         }
         runCatching {
+            delegatingPlayer.processorFor(active).resetToIdle()
             active.volume = 1f
         }
     }
-
-    private fun lerp(start: Float, end: Float, t: Float): Float = start + (end - start) * t
 }

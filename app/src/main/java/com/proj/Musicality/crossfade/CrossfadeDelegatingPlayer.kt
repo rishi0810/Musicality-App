@@ -1,5 +1,6 @@
 package com.proj.Musicality.crossfade
 
+import android.content.Context
 import android.util.Log
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.ForwardingPlayer
@@ -17,47 +18,61 @@ import androidx.media3.exoplayer.ExoPlayer
  *
  * Built on ForwardingPlayer to automatically handle all Player interface methods.
  *
+ * Each inner ExoPlayer runs its own [CrossfadeAudioProcessor] in its audio pipeline so the
+ * manager can shape gain and frequency response independently, with sample-accurate smoothing.
+ *
  * Architecture:
- *   MediaSession
- *        │
- *   CrossfadeDelegatingPlayer
- *        │
- *    ┌───┴───┐
- *  Player A  Player B
+ *     MediaSession
+ *           │
+ *     CrossfadeDelegatingPlayer
+ *           │
+ *      ┌────┴────┐
+ *    Player A   Player B   (each has its own CrossfadeAudioProcessor)
  */
 @UnstableApi
-class CrossfadeDelegatingPlayer(
-    context: android.content.Context
-) : ForwardingPlayer(
-    // Initial delegate — will be swapped via reflection-free approach below
-    ExoPlayer.Builder(context)
-        .setAudioAttributes(
-            AudioAttributes.Builder()
-                .setContentType(androidx.media3.common.C.AUDIO_CONTENT_TYPE_MUSIC)
-                .setUsage(androidx.media3.common.C.USAGE_MEDIA)
-                .build(),
-            true
-        )
-        .setHandleAudioBecomingNoisy(true)
-        .build()
-) {
+class CrossfadeDelegatingPlayer private constructor(
+    injectedPlayerA: ExoPlayer,
+    injectedPlayerB: ExoPlayer,
+    private val processorForA: CrossfadeAudioProcessor,
+    private val processorForB: CrossfadeAudioProcessor
+) : ForwardingPlayer(injectedPlayerA) {
 
     companion object {
         private const val TAG = "DelegatingPlayer"
-    }
 
-    val playerA: ExoPlayer = wrappedPlayer as ExoPlayer
+        /**
+         * Build both ExoPlayers (each with its own audio processor chain) and return a
+         * [CrossfadeDelegatingPlayer] that wraps them. This factory exists so the processor
+         * can be created *before* the player it gets injected into — something the primary
+         * constructor can't do because it has to pass a pre-built player to `super(...)`.
+         */
+        fun create(context: Context): CrossfadeDelegatingPlayer {
+            val procA = CrossfadeAudioProcessor()
+            val procB = CrossfadeAudioProcessor()
 
-    val playerB: ExoPlayer = ExoPlayer.Builder(context)
-        .setAudioAttributes(
-            AudioAttributes.Builder()
+            val audioAttrs = AudioAttributes.Builder()
                 .setContentType(androidx.media3.common.C.AUDIO_CONTENT_TYPE_MUSIC)
                 .setUsage(androidx.media3.common.C.USAGE_MEDIA)
-                .build(),
-            false // only one player handles audio focus
-        )
-        .setHandleAudioBecomingNoisy(false)
-        .build()
+                .build()
+
+            val playerA = ExoPlayer.Builder(context)
+                .setRenderersFactory(CrossfadeRenderersFactory(context, procA))
+                .setAudioAttributes(audioAttrs, /* handleAudioFocus = */ true)
+                .setHandleAudioBecomingNoisy(true)
+                .build()
+
+            val playerB = ExoPlayer.Builder(context)
+                .setRenderersFactory(CrossfadeRenderersFactory(context, procB))
+                .setAudioAttributes(audioAttrs, /* handleAudioFocus = */ false)
+                .setHandleAudioBecomingNoisy(false)
+                .build()
+
+            return CrossfadeDelegatingPlayer(playerA, playerB, procA, procB)
+        }
+    }
+
+    val playerA: ExoPlayer = injectedPlayerA
+    val playerB: ExoPlayer = injectedPlayerB
 
     /** The player currently producing audible output. */
     @Volatile
@@ -67,6 +82,16 @@ class CrossfadeDelegatingPlayer(
     /** The player used for preloading the next track. */
     val inactivePlayer: ExoPlayer
         get() = if (activePlayer === playerA) playerB else playerA
+
+    /** Look up the [CrossfadeAudioProcessor] that sits in the audio pipeline of [player]. */
+    fun processorFor(player: ExoPlayer): CrossfadeAudioProcessor =
+        if (player === playerA) processorForA else processorForB
+
+    /** Reset both processors to unity-gain, bypass-filter state. */
+    fun resetProcessors() {
+        processorForA.resetToIdle()
+        processorForB.resetToIdle()
+    }
 
     // Custom listener management — we forward from the active player
     private val externalListeners = mutableListOf<Player.Listener>()
