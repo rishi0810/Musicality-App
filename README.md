@@ -6,7 +6,7 @@
 
 A modern, feature-rich Android music player that brings millions of songs, albums, and playlists to your fingertips — beautifully.
 
-<img src="https://img.shields.io/badge/Latest%20Version-v1.0.14-blue" alt="Latest Version"/>
+<img src="https://img.shields.io/badge/Latest%20Version-v.1.0.15-blue" alt="Latest Version"/>
 
 <br/>
 
@@ -19,7 +19,7 @@ A modern, feature-rich Android music player that brings millions of songs, album
 <p>
   <img src="screenshots/home_screen.png" width="30%" />
   <img src="screenshots/explore.png" width="30%" />
-  <img src="screenshots/library.png" width="30%" />
+  <img src="screenshots/library.png" width="30%"/>
 </p>
 <p>
   <img src="screenshots/songscreen.png" width="30%" />

@@ -15,7 +15,6 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.proj.Musicality.api.VisitorManager
 import com.proj.Musicality.ui.theme.MusicAppTheme
-import com.proj.Musicality.update.AppUpdateManager
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -63,10 +62,6 @@ class MainActivity : ComponentActivity() {
                 Log.e(TAG, "onCreate: VisitorManager.initialize() FAILED", e)
             }
         }
-        lifecycleScope.launch {
-            AppUpdateManager.checkAndNotify(applicationContext)
-        }
-
         setContent {
             MusicAppTheme {
                 MusicApp()

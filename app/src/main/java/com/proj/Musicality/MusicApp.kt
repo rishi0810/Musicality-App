@@ -39,6 +39,7 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -75,6 +76,7 @@ import com.proj.Musicality.ui.theme.LocalPlaybackUiPalette
 import com.proj.Musicality.ui.theme.LocalSharedTransitionScope
 import com.proj.Musicality.ui.theme.rememberPlaybackBackdropPalette
 import com.proj.Musicality.ui.theme.rememberPlaybackUiPalette
+import com.proj.Musicality.update.AppUpdateManager
 import com.proj.Musicality.util.upscaleThumbnail
 import com.proj.Musicality.viewmodel.PlaybackViewModel
 import kotlinx.coroutines.launch
@@ -84,6 +86,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 @Composable
 fun MusicApp() {
     val navController = rememberNavController()
+    val context = LocalContext.current
     val playbackViewModel: PlaybackViewModel = viewModel()
     // Only subscribe to the hasMedia boolean — avoids full MusicApp recomposition on every state update
     val hasMediaFlow = remember(playbackViewModel) {
@@ -237,6 +240,8 @@ fun MusicApp() {
     val canNavigateBack = navController.previousBackStackEntry != null
     var lyricsOpen by remember { mutableStateOf(false) }
     var progressBarInteracting by remember { mutableStateOf(false) }
+    var availableUpdate by remember { mutableStateOf<AppUpdateManager.UpdateManifest?>(null) }
+    var dismissedUpdateVersionCode by rememberSaveable { mutableIntStateOf(-1) }
 
     // Centralized system-back behavior:
     // 1) If player (SongScreen) is expanded, collapse it back to the source screen.
@@ -255,6 +260,9 @@ fun MusicApp() {
             route.endsWith("Search") || route.endsWith("Explore") -> selectedTab = 1
             route.endsWith("Library") || route.contains("LibraryCollection") -> selectedTab = 2
         }
+    }
+    LaunchedEffect(context) {
+        availableUpdate = AppUpdateManager.checkForUpdate(context.applicationContext, notify = true)
     }
     LaunchedEffect(hasMedia, bottomSheetState) {
         // Show the mini player on first playback, but don't force a full-screen
@@ -456,6 +464,40 @@ fun MusicApp() {
                 modifier = Modifier
                     .fillMaxSize()
             ) {
+                val update = availableUpdate
+                val shouldShowUpdateDialog =
+                    update != null &&
+                        currentRoute.endsWith("Home") &&
+                        dismissedUpdateVersionCode != update.latestVersionCode
+                if (shouldShowUpdateDialog) {
+                    val updateManifest = checkNotNull(update)
+                    AlertDialog(
+                        onDismissRequest = {
+                            dismissedUpdateVersionCode = updateManifest.latestVersionCode
+                        },
+                        title = { Text("Update available") },
+                        text = { Text("${updateManifest.latestVersionName} is ready to download.") },
+                        confirmButton = {
+                            TextButton(
+                                onClick = {
+                                    AppUpdateManager.downloadUpdate(context.applicationContext, updateManifest)
+                                    dismissedUpdateVersionCode = updateManifest.latestVersionCode
+                                }
+                            ) {
+                                Text("Download")
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(
+                                onClick = {
+                                    dismissedUpdateVersionCode = updateManifest.latestVersionCode
+                                }
+                            ) {
+                                Text("Dismiss")
+                            }
+                        }
+                    )
+                }
                 NavHost(
                     navController = navController,
                     startDestination = Route.Home,

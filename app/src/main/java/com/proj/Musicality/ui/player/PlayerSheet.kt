@@ -27,6 +27,7 @@ import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.scrollBy
@@ -1633,16 +1634,26 @@ private fun LyricsPanel(
     }
     var isGenerating by remember(shareItem.videoId) { mutableStateOf(false) }
     var showCustomizeSheet by remember(shareItem.videoId) { mutableStateOf(false) }
+    var dragAnchorIndex by remember(shareItem.videoId) { mutableStateOf<Int?>(null) }
 
     LaunchedEffect(shareMode) {
         if (!shareMode) {
             selectedIndices = emptySet()
             showCustomizeSheet = false
+            dragAnchorIndex = null
         }
     }
 
     BackHandler(enabled = showCustomizeSheet) {
         showCustomizeSheet = false
+    }
+    BackHandler(enabled = shareMode && !showCustomizeSheet) {
+        if (selectedIndices.isNotEmpty()) {
+            selectedIndices = emptySet()
+            dragAnchorIndex = null
+        } else {
+            onShareModeChange(false)
+        }
     }
 
     val selectedLyrics = remember(selectedIndices, loadedLines) {
@@ -1721,7 +1732,7 @@ private fun LyricsPanel(
             }
             Text(
                 text = if (shareMode) {
-                    "Tap to select · ${selectedLyrics.size}/$MAX_LYRICS_SHARE_LINES"
+                    "Drag to select · ${selectedLyrics.size}/$MAX_LYRICS_SHARE_LINES"
                 } else {
                     "Lyrics"
                 },
@@ -1762,6 +1773,11 @@ private fun LyricsPanel(
                     }
                 }
                 is LyricsState.Loaded -> {
+                    val selectableLineIndices = remember(ls.lines) {
+                        ls.lines.mapIndexedNotNull { index, lyricLine ->
+                            index.takeIf { lyricLine.text.isNotBlank() }
+                        }
+                    }
                     val syncGlowTransition = rememberInfiniteTransition(label = "lyricsSyncGlow")
                     val syncGlowPulse by syncGlowTransition.animateFloat(
                         initialValue = 0.78f,
@@ -1773,10 +1789,79 @@ private fun LyricsPanel(
                         label = "lyricsSyncGlowPulse"
                     )
                     val syncedMutedAlpha = 0.42f
+                    val shareSelectionModifier = if (shareMode && selectableLineIndices.isNotEmpty()) {
+                        Modifier.pointerInput(ls.lines, selectableLineIndices, listState) {
+                            detectDragGesturesAfterLongPress(
+                                onDragStart = { offset ->
+                                    val touchedIndex =
+                                        findLyricLineIndexAtOffsetY(listState, offset.y) ?: return@detectDragGesturesAfterLongPress
+                                    val anchor =
+                                        nearestSelectableLyricIndex(touchedIndex, selectableLineIndices)
+                                            ?: return@detectDragGesturesAfterLongPress
+                                    dragAnchorIndex = anchor
+                                    selectedIndices = setOf(anchor)
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                },
+                                onDragEnd = {
+                                    dragAnchorIndex = null
+                                },
+                                onDragCancel = {
+                                    dragAnchorIndex = null
+                                }
+                            ) { change, _ ->
+                                val anchor = dragAnchorIndex ?: return@detectDragGesturesAfterLongPress
+                                val touchedIndex = findLyricLineIndexAtOffsetY(
+                                    listState = listState,
+                                    offsetY = change.position.y
+                                )
+                                if (touchedIndex != null) {
+                                    val currentIndex =
+                                        nearestSelectableLyricIndex(touchedIndex, selectableLineIndices)
+                                            ?: return@detectDragGesturesAfterLongPress
+                                    val nextSelection = buildConsecutiveLyricSelection(
+                                        anchorLineIndex = anchor,
+                                        currentLineIndex = currentIndex,
+                                        selectableLineIndices = selectableLineIndices,
+                                        maxLines = MAX_LYRICS_SHARE_LINES
+                                    )
+                                    if (nextSelection != selectedIndices) {
+                                        selectedIndices = nextSelection
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    }
+                                }
+
+                                val edgeThresholdPx = 56.dp.toPx()
+                                val dragY = change.position.y
+                                val viewportHeight = size.height.toFloat()
+                                when {
+                                    dragY < edgeThresholdPx -> {
+                                        coroutineScope.launch {
+                                            listState.scrollBy(
+                                                ((dragY - edgeThresholdPx) / 3f).coerceAtLeast(-42f)
+                                            )
+                                        }
+                                    }
+
+                                    dragY > viewportHeight - edgeThresholdPx -> {
+                                        coroutineScope.launch {
+                                            listState.scrollBy(
+                                                ((dragY - (viewportHeight - edgeThresholdPx)) / 3f)
+                                                    .coerceAtMost(42f)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        Modifier
+                    }
                     LazyColumn(
                         state = listState,
                         userScrollEnabled = true,
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .then(shareSelectionModifier),
                         contentPadding = androidx.compose.foundation.layout.PaddingValues(
                             horizontal = if (shareMode) 18.dp else 24.dp,
                             vertical = 12.dp
@@ -1826,19 +1911,6 @@ private fun LyricsPanel(
                                             Color.Transparent
                                         }
                                     )
-                                    .hapticClickable(
-                                        indication = null,
-                                        interactionSource = remember { MutableInteractionSource() }
-                                    ) {
-                                        selectedIndices = if (index in selectedIndices) {
-                                            selectedIndices - index
-                                        } else if (selectedIndices.size < MAX_LYRICS_SHARE_LINES) {
-                                            selectedIndices + index
-                                        } else {
-                                            selectedIndices
-                                        }
-                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    }
                                     .padding(horizontal = 8.dp)
                                     .then(seekModifier)
                             } else {
@@ -1950,6 +2022,10 @@ private fun LyricsPanel(
                     selectedCount = selectedLyrics.size,
                     maxCount = MAX_LYRICS_SHARE_LINES,
                     accentColor = playbackAccent,
+                    onClear = {
+                        selectedIndices = emptySet()
+                        dragAnchorIndex = null
+                    },
                     onContinue = { showCustomizeSheet = true }
                 )
             } else {
@@ -2191,6 +2267,7 @@ private fun LyricsShareContinueBar(
     selectedCount: Int,
     maxCount: Int,
     accentColor: Color,
+    onClear: () -> Unit,
     onContinue: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -2203,7 +2280,7 @@ private fun LyricsShareContinueBar(
     ) {
         Text(
             text = if (selectedCount == 0) {
-                "Tap lyrics to pick up to $maxCount lines"
+                "Press and drag to pick up to $maxCount consecutive lines"
             } else {
                 "$selectedCount of $maxCount lines selected"
             },
@@ -2213,20 +2290,78 @@ private fun LyricsShareContinueBar(
             modifier = Modifier.fillMaxWidth()
         )
         Spacer(Modifier.height(10.dp))
-        Button(
-            onClick = onContinue,
-            enabled = selectedCount > 0,
-            colors = ButtonDefaults.buttonColors(
-                containerColor = accentColor,
-                contentColor = Color.White,
-                disabledContainerColor = Color.White.copy(alpha = 0.14f),
-                disabledContentColor = Color.White.copy(alpha = 0.5f)
-            ),
-            modifier = Modifier.fillMaxWidth()
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("Continue", fontWeight = FontWeight.SemiBold)
+            OutlinedButton(
+                onClick = onClear,
+                enabled = selectedCount > 0,
+                modifier = Modifier.weight(1f)
+            ) {
+                Text("Clear", fontWeight = FontWeight.Medium)
+            }
+            Button(
+                onClick = onContinue,
+                enabled = selectedCount > 0,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = accentColor,
+                    contentColor = Color.White,
+                    disabledContainerColor = Color.White.copy(alpha = 0.14f),
+                    disabledContentColor = Color.White.copy(alpha = 0.5f)
+                ),
+                modifier = Modifier.weight(1.6f)
+            ) {
+                Text("Continue", fontWeight = FontWeight.SemiBold)
+            }
         }
     }
+}
+
+private fun findLyricLineIndexAtOffsetY(
+    listState: androidx.compose.foundation.lazy.LazyListState,
+    offsetY: Float
+): Int? {
+    val visibleItems = listState.layoutInfo.visibleItemsInfo
+    if (visibleItems.isEmpty()) return null
+    val hit = visibleItems.firstOrNull { item ->
+        offsetY >= item.offset && offsetY <= item.offset + item.size
+    }
+    if (hit != null) return hit.index
+    return visibleItems.minByOrNull { item ->
+        when {
+            offsetY < item.offset -> item.offset - offsetY
+            offsetY > item.offset + item.size -> offsetY - (item.offset + item.size)
+            else -> 0f
+        }
+    }?.index
+}
+
+private fun nearestSelectableLyricIndex(rawIndex: Int, selectableLineIndices: List<Int>): Int? {
+    if (selectableLineIndices.isEmpty()) return null
+    return selectableLineIndices.minByOrNull { (it - rawIndex).absoluteValue }
+}
+
+private fun buildConsecutiveLyricSelection(
+    anchorLineIndex: Int,
+    currentLineIndex: Int,
+    selectableLineIndices: List<Int>,
+    maxLines: Int
+): Set<Int> {
+    val anchorPosition = selectableLineIndices.indexOf(anchorLineIndex)
+    val currentPosition = selectableLineIndices.indexOf(currentLineIndex)
+    if (anchorPosition < 0 || currentPosition < 0) return emptySet()
+
+    val maxSpan = (maxLines - 1).coerceAtLeast(0)
+    val (startPosition, endPosition) = if (currentPosition >= anchorPosition) {
+        anchorPosition to min(currentPosition, anchorPosition + maxSpan)
+    } else {
+        max(currentPosition, anchorPosition - maxSpan) to anchorPosition
+    }
+    return selectableLineIndices
+        .subList(startPosition, endPosition + 1)
+        .toSet()
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

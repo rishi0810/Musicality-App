@@ -22,7 +22,7 @@ import okhttp3.Request
 object AppUpdateManager {
     private const val TAG = "AppUpdateManager"
     private const val MANIFEST_URL =
-        "https://cdn.jsdelivr.net/gh/rishi0810/Musicality-App@main/static/manifest.json"
+        "https://rishi0810.github.io/static-api/app-update/android.json"
     private const val CHANNEL_ID = "app_updates"
     private const val CHANNEL_NAME = "App updates"
     private const val PREFS = "app_update_prefs"
@@ -39,26 +39,51 @@ object AppUpdateManager {
         @SerialName("apkUrl") val apkUrl: String
     )
 
-    suspend fun checkAndNotify(context: Context) = withContext(Dispatchers.IO) {
+    suspend fun checkAndNotify(context: Context) {
+        checkForUpdate(context, notify = true)
+    }
+
+    suspend fun checkForUpdate(
+        context: Context,
+        notify: Boolean = true
+    ): UpdateManifest? = withContext(Dispatchers.IO) {
         runCatching {
-            val manifest = fetchManifest() ?: return@withContext
+            val manifest = fetchManifest() ?: return@runCatching null
             val currentVersionCode = currentVersionCode(context)
 
-            if (manifest.latestVersionCode <= currentVersionCode) return@withContext
-            if (manifest.apkUrl.isBlank()) return@withContext
+            if (manifest.latestVersionCode <= currentVersionCode) return@runCatching null
+            if (manifest.apkUrl.isBlank()) return@runCatching null
 
-            val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            val lastNotified = prefs.getInt(KEY_LAST_NOTIFIED_VERSION_CODE, -1)
-            if (lastNotified >= manifest.latestVersionCode) return@withContext
+            if (notify) {
+                showUpdateNotificationOnce(context, manifest)
+            }
 
-            prefs.edit()
-                .putInt(KEY_LAST_NOTIFIED_VERSION_CODE, manifest.latestVersionCode)
-                .apply()
-
-            showUpdateNotification(context, manifest)
+            manifest
         }.onFailure { error ->
-            Log.e(TAG, "checkAndNotify failed", error)
+            Log.e(TAG, "checkForUpdate failed", error)
+        }.getOrNull()
+    }
+
+    fun downloadUpdate(context: Context, manifest: UpdateManifest) {
+        val downloadIntent = Intent(context, AppUpdateReceiver::class.java).apply {
+            action = AppUpdateReceiver.ACTION_DOWNLOAD_UPDATE
+            putExtra(AppUpdateReceiver.EXTRA_APK_URL, manifest.apkUrl)
+            putExtra(AppUpdateReceiver.EXTRA_VERSION_CODE, manifest.latestVersionCode)
+            putExtra(AppUpdateReceiver.EXTRA_VERSION_NAME, manifest.latestVersionName)
         }
+        context.sendBroadcast(downloadIntent)
+    }
+
+    private fun showUpdateNotificationOnce(context: Context, manifest: UpdateManifest) {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val lastNotified = prefs.getInt(KEY_LAST_NOTIFIED_VERSION_CODE, -1)
+        if (lastNotified >= manifest.latestVersionCode) return
+
+        prefs.edit()
+            .putInt(KEY_LAST_NOTIFIED_VERSION_CODE, manifest.latestVersionCode)
+            .apply()
+
+        showUpdateNotification(context, manifest)
     }
 
     private fun fetchManifest(): UpdateManifest? {
