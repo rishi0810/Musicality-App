@@ -70,6 +70,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
@@ -125,6 +127,7 @@ fun QueueContent(
     onQueueActionConsumed: (() -> Unit)? = null,
     crossfadeEnabled: Boolean = false,
     crossfadeLockActive: Boolean = false,
+    nestedScrollConnection: NestedScrollConnection? = null,
     headerContent: (@Composable () -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
@@ -165,6 +168,13 @@ fun QueueContent(
                 state = listState,
                 modifier = Modifier
                     .fillMaxWidth()
+                    .then(
+                        if (nestedScrollConnection != null) {
+                            Modifier.nestedScroll(nestedScrollConnection)
+                        } else {
+                            Modifier
+                        }
+                    )
                     .padding(bottom = 32.dp)
             ) {
                 if (headerContent != null) {

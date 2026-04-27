@@ -18,5 +18,6 @@
 local.properties
 *.jks
 app/release/
-.claude/
+./.claude/*
+./.kotlin/*
 curls.md
