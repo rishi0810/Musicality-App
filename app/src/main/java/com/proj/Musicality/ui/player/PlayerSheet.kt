@@ -189,14 +189,13 @@ private const val CROSSFADE_UI_LEAD_MS = 10_000L
 private const val DEFAULT_MINI_SWIPE_SENSITIVITY = 0.73f
 private const val MAX_LYRICS_SHARE_LINES = 6
 private const val PlayerHeroHeightFraction = 0.47f
-private val QueueSheetContainerColor = Color(0xFF18181B)
 private val PlayerHorizontalPadding = 20.dp
 private val PlayerHeroMinHeight = 360.dp
 private val PlayerHeroMaxHeight = 440.dp
 // Direct distance from the absolute top of the screen to the Lyrics/Queue stack.
 // Increase this to move Lyrics/Queue, song details, and controls further down.
 // Decrease this to move the stack up.
-private val PlayerControlsTopDistanceFromScreenTop = 550.dp
+private val PlayerControlsTopDistanceFromScreenTop = 540.dp
 private const val PlayerOverlayDismissFraction = 0.2f
 private const val PlayerOverlayDismissVelocityPx = 1200f
 private val LyricsShareBackgroundColors = listOf(
@@ -787,6 +786,7 @@ fun PlayerSheet(
                 onArtistTap = onArtistTap,
                 onAlbumTap = onAlbumTap,
                 crossfadeEnabled = crossfadeEnabled,
+                containerColor = mediaPalette.bottom,
             )
         }
 
@@ -1264,7 +1264,8 @@ private fun QueueActionSheetHost(
     onMoveInQueue: (Int, Int) -> Unit,
     onArtistTap: (String, String, String?) -> Unit,
     onAlbumTap: (String, String, String?) -> Unit,
-    crossfadeEnabled: Boolean = false
+    crossfadeEnabled: Boolean = false,
+    containerColor: Color
 ) {
     val positionMs by positionMsFlow.collectAsStateWithLifecycle()
 
@@ -1277,6 +1278,7 @@ private fun QueueActionSheetHost(
         onArtistTap = onArtistTap,
         onAlbumTap = onAlbumTap,
         crossfadeEnabled = crossfadeEnabled,
+        containerColor = containerColor,
         crossfadeLockActive = showCrossfadeCue(
             positionMs = positionMs,
             durationMs = durationMs,
@@ -1521,12 +1523,13 @@ private fun QueueActionSheet(
     onArtistTap: (String, String, String?) -> Unit,
     onAlbumTap: (String, String, String?) -> Unit,
     crossfadeEnabled: Boolean = false,
-    crossfadeLockActive: Boolean = false
+    crossfadeLockActive: Boolean = false,
+    containerColor: Color
 ) {
     PlayerOverlayBottomSheet(
         visible = true,
         onDismiss = onDismiss,
-        containerColor = QueueSheetContainerColor
+        containerColor = containerColor
     ) { nestedScrollConnection ->
         QueueContent(
             queue = queue,

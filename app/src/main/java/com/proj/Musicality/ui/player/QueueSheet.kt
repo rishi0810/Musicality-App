@@ -369,7 +369,7 @@ fun QueueContent(
                                     Icon(
                                         imageVector = Icons.Rounded.Lock,
                                         contentDescription = "Next song locked for crossfade",
-                                        tint = QueueCurrentSecondaryColor
+                                        tint = Color.White
                                     )
                                 } else {
                                     ReorderHandle()
@@ -658,7 +658,6 @@ private fun ReorderHandle() {
 
 @Composable
 private fun CrossfadeConnector() {
-    val accentColor = LocalPlaybackUiPalette.current?.accent ?: MaterialTheme.colorScheme.primary
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -668,18 +667,18 @@ private fun CrossfadeConnector() {
     ) {
         HorizontalDivider(
             modifier = Modifier.weight(1f),
-            color = accentColor.copy(alpha = 0.4f),
+            color = Color.White.copy(alpha = 0.4f),
             thickness = 1.dp
         )
         Text(
             text = "crossfade",
             style = MaterialTheme.typography.labelSmall,
-            color = accentColor.copy(alpha = 0.6f),
+            color = Color.White.copy(alpha = 0.72f),
             modifier = Modifier.padding(horizontal = 8.dp)
         )
         HorizontalDivider(
             modifier = Modifier.weight(1f),
-            color = accentColor.copy(alpha = 0.4f),
+            color = Color.White.copy(alpha = 0.4f),
             thickness = 1.dp
         )
     }
