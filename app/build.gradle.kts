@@ -11,6 +11,28 @@ android {
         version = release(36)
     }
 
+    fun releaseVersionName(): String {
+        val explicit = System.getenv("MUSICALITY_VERSION_NAME")?.takeIf { it.isNotBlank() }
+        val tag = System.getenv("GITHUB_REF_NAME")
+            ?.takeIf { it.startsWith("v") }
+            ?.removePrefix("v")
+        return explicit?.removePrefix("v") ?: tag ?: "1.0.18"
+    }
+
+    fun releaseVersionCode(versionName: String): Int {
+        System.getenv("MUSICALITY_VERSION_CODE")?.toIntOrNull()?.let { return it }
+        val parts = versionName
+            .split(".", "-", "_")
+            .mapNotNull { part -> part.takeWhile { it.isDigit() }.toIntOrNull() }
+        val major = parts.getOrElse(0) { 0 }
+        val minor = parts.getOrElse(1) { 0 }
+        val patch = parts.getOrElse(2) { 0 }
+        return major * 10_000 + minor * 100 + patch
+    }
+
+    val appVersionName = releaseVersionName()
+    val appVersionCode = releaseVersionCode(appVersionName)
+
     val hasCiSigning =
         !System.getenv("ANDROID_KEYSTORE_PATH").isNullOrBlank() &&
             !System.getenv("ANDROID_KEYSTORE_PASSWORD").isNullOrBlank() &&
@@ -21,8 +43,8 @@ android {
         applicationId = "com.proj.Musicality"
         minSdk = 33
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = appVersionCode
+        versionName = appVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
