@@ -29,6 +29,7 @@ object AppUpdateManager {
     private const val CHANNEL_NAME = "App updates"
     private const val PREFS = "app_update_prefs"
     private const val KEY_LAST_NOTIFIED_VERSION_NAME = "last_notified_version_name"
+    private const val KEY_LAST_DISMISSED_DIALOG_VERSION_NAME = "last_dismissed_dialog_version_name"
     private const val UPDATE_NOTIFICATION_ID = 4001
     private const val CHECK_INTERVAL_MILLIS = 2 * 60 * 60 * 1000L
 
@@ -90,6 +91,17 @@ object AppUpdateManager {
             putExtra(AppUpdateReceiver.EXTRA_VERSION_NAME, manifest.latestVersionName)
         }
         context.sendBroadcast(downloadIntent)
+    }
+
+    fun lastDismissedDialogVersionName(context: Context): String? =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString(KEY_LAST_DISMISSED_DIALOG_VERSION_NAME, null)
+
+    fun markDialogDismissed(context: Context, manifest: UpdateManifest) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_LAST_DISMISSED_DIALOG_VERSION_NAME, manifest.latestVersionName)
+            .apply()
     }
 
     private fun showUpdateNotificationOnce(context: Context, manifest: UpdateManifest) {

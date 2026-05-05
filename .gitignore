@@ -18,6 +18,8 @@
 local.properties
 *.jks
 app/release/
-./.claude/*
-./.kotlin/*
+.claude/
+.agents/
+.codex/
+.kotlin/
 curls.md

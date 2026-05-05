@@ -30,7 +30,7 @@ fun rememberPlaybackBackdropPalette(
     return rememberMediaBackdropPalette(
         imageUrl = artworkUrl,
         fallbackSurface = fallbackSurface,
-        animateTransitions = false
+        animateTransitions = true
     )
 }
 

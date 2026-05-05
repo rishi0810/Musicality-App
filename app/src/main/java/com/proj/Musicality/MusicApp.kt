@@ -241,7 +241,7 @@ fun MusicApp() {
     var lyricsOpen by remember { mutableStateOf(false) }
     var progressBarInteracting by remember { mutableStateOf(false) }
     var availableUpdate by remember { mutableStateOf<AppUpdateManager.UpdateManifest?>(null) }
-    var dismissedUpdateVersionCode by rememberSaveable { mutableIntStateOf(-1) }
+    var dismissedUpdateVersionName by rememberSaveable { mutableStateOf<String?>(null) }
 
     // Centralized system-back behavior:
     // 1) If player (SongScreen) is expanded, collapse it back to the source screen.
@@ -262,7 +262,9 @@ fun MusicApp() {
         }
     }
     LaunchedEffect(context) {
-        availableUpdate = AppUpdateManager.checkForUpdate(context.applicationContext, notify = true)
+        val appContext = context.applicationContext
+        dismissedUpdateVersionName = AppUpdateManager.lastDismissedDialogVersionName(appContext)
+        availableUpdate = AppUpdateManager.checkForUpdate(appContext, notify = true)
     }
     LaunchedEffect(hasMedia, bottomSheetState) {
         // Show the mini player on first playback, but don't force a full-screen
@@ -468,12 +470,16 @@ fun MusicApp() {
                 val shouldShowUpdateDialog =
                     update != null &&
                         currentRoute.endsWith("Home") &&
-                        dismissedUpdateVersionCode != update.latestVersionCode
+                        dismissedUpdateVersionName != update.latestVersionName
                 if (shouldShowUpdateDialog) {
                     val updateManifest = checkNotNull(update)
+                    fun dismissUpdateDialog() {
+                        AppUpdateManager.markDialogDismissed(context.applicationContext, updateManifest)
+                        dismissedUpdateVersionName = updateManifest.latestVersionName
+                    }
                     AlertDialog(
                         onDismissRequest = {
-                            dismissedUpdateVersionCode = updateManifest.latestVersionCode
+                            dismissUpdateDialog()
                         },
                         title = { Text("Update available") },
                         text = { Text("${updateManifest.latestVersionName} is ready to download.") },
@@ -481,7 +487,7 @@ fun MusicApp() {
                             TextButton(
                                 onClick = {
                                     AppUpdateManager.downloadUpdate(context.applicationContext, updateManifest)
-                                    dismissedUpdateVersionCode = updateManifest.latestVersionCode
+                                    dismissUpdateDialog()
                                 }
                             ) {
                                 Text("Download")
@@ -490,7 +496,7 @@ fun MusicApp() {
                         dismissButton = {
                             TextButton(
                                 onClick = {
-                                    dismissedUpdateVersionCode = updateManifest.latestVersionCode
+                                    dismissUpdateDialog()
                                 }
                             ) {
                                 Text("Dismiss")

@@ -89,22 +89,24 @@ fun ContentCard(
             }
         }
         Spacer(Modifier.height(8.dp))
-        Column(modifier = Modifier.height(68.dp)) {
+        Column(modifier = Modifier.height(if (subtitle.isNullOrBlank()) 36.dp else 52.dp)) {
             Text(
                 text = displayTitle,
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.fillMaxWidth(0.7f),
-                maxLines = 3,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis
             )
-            Text(
-                text = subtitle ?: "",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.fillMaxWidth(0.7f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+            if (!subtitle.isNullOrBlank()) {
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.fillMaxWidth(0.7f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
         }
     }
 }

@@ -12,6 +12,7 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.spring
@@ -60,10 +61,19 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.PagerDefaults
-import androidx.compose.foundation.pager.PagerSnapDistance
-import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.LocalOverscrollFactory
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.foundation.gestures.snapping.SnapLayoutInfoProvider
+import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyHorizontalGrid
+import androidx.compose.foundation.lazy.grid.LazyGridItemInfo
+import androidx.compose.foundation.lazy.grid.LazyGridLayoutInfo
+import androidx.compose.foundation.lazy.grid.LazyGridState
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.util.fastForEach
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -157,6 +167,9 @@ import androidx.core.content.FileProvider
 import androidx.core.graphics.ColorUtils
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
+import coil3.request.CachePolicy
+import coil3.request.ImageRequest
+import coil3.request.crossfade
 import com.proj.Musicality.R
 import com.proj.Musicality.data.local.LibraryRepository
 import com.proj.Musicality.data.local.MediaLibraryState
@@ -470,7 +483,12 @@ fun PlayerSheet(
                                 )
                             } else {
                                 AsyncImage(
-                                    model = artworkUrl,
+                                    model = ImageRequest.Builder(context)
+                                        .data(artworkUrl)
+                                        .size(coil3.size.Size.ORIGINAL)
+                                        .crossfade(false)
+                                        .memoryCachePolicy(CachePolicy.ENABLED)
+                                        .build(),
                                     contentDescription = item.title,
                                     contentScale = ContentScale.Crop,
                                     modifier = Modifier
@@ -1575,6 +1593,7 @@ private fun QueueActionSheet(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun AlbumArtPager(
     queue: PlaybackQueue,
@@ -1582,68 +1601,162 @@ private fun AlbumArtPager(
     modifier: Modifier = Modifier,
     cornerRadius: Dp = 24.dp
 ) {
-    val pagerState = rememberPagerState(
-        initialPage = queue.currentIndex,
-        pageCount = { queue.items.size }
-    )
+    val currentQueueIndex = queue.currentIndex
+    val queueItems = queue.items
+    val context = LocalContext.current
 
-    LaunchedEffect(queue.currentIndex) {
-        if (pagerState.currentPage != queue.currentIndex) {
-            pagerState.animateScrollToPage(queue.currentIndex)
-        }
-    }
-
-    val currentIndex by rememberUpdatedState(queue.currentIndex)
-    val isDragged by pagerState.interactionSource.collectIsDraggedAsState()
-    var userGestureActive by remember { mutableStateOf(false) }
-
-    LaunchedEffect(isDragged) {
-        if (isDragged) {
-            userGestureActive = true
-        }
-    }
-
-    LaunchedEffect(pagerState) {
-        snapshotFlow { pagerState.settledPage }
-            .distinctUntilChanged()
-            .collectLatest { settledPage ->
-                if (userGestureActive && settledPage != currentIndex) {
-                    onSkipToIndex(settledPage)
+    // Pre-fetch and decode images for currentIndex ± 2 into Coil memory cache.
+    // Both the prefetch and the display AsyncImage use Size.ORIGINAL so their
+    // cache keys match — the AsyncImage gets an instant memory-cache hit with
+    // the bitmap already decoded, skipping the Loading→Success state transition
+    // that was causing ContentScale.Crop to recalculate (the stretch).
+    LaunchedEffect(currentQueueIndex) {
+        val loader = coil3.SingletonImageLoader.get(context)
+        val windowStart = (currentQueueIndex - 2).coerceAtLeast(0)
+        val windowEnd = (currentQueueIndex + 2).coerceAtMost(queueItems.size - 1)
+        for (i in windowStart..windowEnd) {
+            launch {
+                val url = upscaleThumbnail(queueItems[i].thumbnailUrl) ?: return@launch
+                runCatching {
+                    loader.execute(
+                        ImageRequest.Builder(context)
+                            .data(url)
+                            .size(coil3.size.Size.ORIGINAL)
+                            .crossfade(false)
+                            .memoryCachePolicy(CachePolicy.ENABLED)
+                            .diskCachePolicy(CachePolicy.ENABLED)
+                            .build()
+                    )
                 }
-                userGestureActive = false
+            }
+        }
+    }
+
+    val gridState = rememberLazyGridState(initialFirstVisibleItemIndex = currentQueueIndex)
+
+    val snapProvider = remember(gridState) {
+        carouselSnapLayoutInfoProvider(
+            lazyGridState = gridState,
+            positionInLayout = { layoutSize, itemSize ->
+                (layoutSize / 2f - itemSize / 2f)
+            }
+        )
+    }
+
+    LaunchedEffect(gridState, currentQueueIndex) {
+        snapshotFlow {
+            gridState.firstVisibleItemIndex to gridState.firstVisibleItemScrollOffset
+        }
+            .distinctUntilChanged()
+            .collect { (index, offset) ->
+                if (offset == 0 && index != currentQueueIndex && index in queueItems.indices) {
+                    onSkipToIndex(index)
+                }
             }
     }
 
-    HorizontalPager(
-        state = pagerState,
-        modifier = modifier,
-        flingBehavior = PagerDefaults.flingBehavior(
-            state = pagerState,
-            pagerSnapDistance = PagerSnapDistance.atMost(1)
-        ),
-        pageSpacing = 16.dp,
-        beyondViewportPageCount = 1
-    ) { page ->
-        val pageItem = queue.items[page]
-        val pageOffset = ((pagerState.currentPage - page) + pagerState.currentPageOffsetFraction)
-            .absoluteValue
-        val interpolation = (1f - pageOffset.coerceIn(0f, 1f))
-        val pageScale = lerpFloat(0.92f, 1f, interpolation)
-        val pageAlpha = lerpFloat(0.7f, 1f, interpolation)
+    LaunchedEffect(currentQueueIndex) {
+        if (currentQueueIndex in queueItems.indices && gridState.firstVisibleItemIndex != currentQueueIndex) {
+            gridState.scrollToItem(currentQueueIndex)
+        }
+    }
 
-        AsyncImage(
-            model = upscaleThumbnail(pageItem.thumbnailUrl),
-            contentDescription = pageItem.title,
-            modifier = Modifier
-                .fillMaxSize()
-                .graphicsLayer {
-                    scaleX = pageScale
-                    scaleY = pageScale
-                    alpha = pageAlpha
+    BoxWithConstraints(modifier = modifier) {
+        val itemWidth = maxWidth
+
+        CompositionLocalProvider(LocalOverscrollFactory provides null) {
+            LazyHorizontalGrid(
+                state = gridState,
+                rows = GridCells.Fixed(1),
+                flingBehavior = rememberSnapFlingBehavior(snapProvider),
+                modifier = Modifier.fillMaxSize()
+            ) {
+                items(
+                    count = queueItems.size,
+                    key = { queueItems[it].videoId }
+                ) { index ->
+                    val mediaItem = queueItems[index]
+
+                    Box(
+                        modifier = Modifier
+                            .width(itemWidth)
+                            .fillMaxHeight()
+                            .graphicsLayer {
+                                compositingStrategy = CompositingStrategy.Offscreen
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        AsyncImage(
+                            model = ImageRequest.Builder(context)
+                                .data(upscaleThumbnail(mediaItem.thumbnailUrl))
+                                .size(coil3.size.Size.ORIGINAL)
+                                .crossfade(false)
+                                .memoryCachePolicy(CachePolicy.ENABLED)
+                                .diskCachePolicy(CachePolicy.ENABLED)
+                                .build(),
+                            contentDescription = mediaItem.title,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clip(RoundedCornerShape(cornerRadius))
+                        )
+                    }
                 }
-                .clip(RoundedCornerShape(cornerRadius)),
-            contentScale = ContentScale.Crop
-        )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+private fun carouselSnapLayoutInfoProvider(
+    lazyGridState: LazyGridState,
+    positionInLayout: (layoutSize: Float, itemSize: Float) -> Float = { layoutSize, itemSize ->
+        (layoutSize / 2f - itemSize / 2f)
+    },
+    velocityThreshold: Float = 500f,
+): SnapLayoutInfoProvider = object : SnapLayoutInfoProvider {
+    private val layoutInfo: LazyGridLayoutInfo
+        get() = lazyGridState.layoutInfo
+
+    override fun calculateApproachOffset(velocity: Float, decayOffset: Float): Float = 0f
+
+    override fun calculateSnapOffset(velocity: Float): Float {
+        val bounds = calculateSnappingOffsetBounds()
+        if (abs(velocity) < velocityThreshold) {
+            return if (abs(bounds.start) < abs(bounds.endInclusive)) {
+                bounds.start
+            } else {
+                bounds.endInclusive
+            }
+        }
+        return when {
+            velocity < 0 -> bounds.start
+            velocity > 0 -> bounds.endInclusive
+            else -> 0f
+        }
+    }
+
+    private fun calculateSnappingOffsetBounds(): ClosedFloatingPointRange<Float> {
+        var lowerBoundOffset = Float.NEGATIVE_INFINITY
+        var upperBoundOffset = Float.POSITIVE_INFINITY
+
+        layoutInfo.visibleItemsInfo.fastForEach { item ->
+            val containerSize = layoutInfo.let {
+                (if (it.orientation == androidx.compose.foundation.gestures.Orientation.Vertical)
+                    it.viewportSize.height else it.viewportSize.width) -
+                        it.beforeContentPadding - it.afterContentPadding
+            }
+            val desiredPosition = positionInLayout(containerSize.toFloat(), item.size.width.toFloat())
+            val offset = item.offset.x.toFloat() - desiredPosition
+
+            if (offset <= 0 && offset > lowerBoundOffset) {
+                lowerBoundOffset = offset
+            }
+            if (offset >= 0 && offset < upperBoundOffset) {
+                upperBoundOffset = offset
+            }
+        }
+        return lowerBoundOffset.rangeTo(upperBoundOffset)
     }
 }
 
@@ -1658,58 +1771,60 @@ private fun CrossfadeCountdownCue(
         animationSpec = tween(durationMillis = 180),
         label = "crossfadeCueAlpha"
     )
-    val labelColor = Color(0xFFB9BDC2).copy(alpha = (0.72f * cueAlpha).coerceIn(0f, 1f))
-    val shimmerTransition = rememberInfiniteTransition(label = "crossfadeShimmer")
-    val shimmerProgress by shimmerTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 2200, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "crossfadeShimmerProgress"
-    )
-    val shimmerTextBrush = remember(shimmerProgress, labelColor) {
-        val startX = -96f + (260f * shimmerProgress)
-        val endX = startX + 120f
-        Brush.linearGradient(
-            colors = listOf(
-                labelColor.copy(alpha = 0.48f),
-                Color.White.copy(alpha = (0.92f * cueAlpha).coerceIn(0f, 1f)),
-                labelColor.copy(alpha = 0.48f)
-            ),
-            start = Offset(startX, 0f),
-            end = Offset(endX, 18f)
-        )
-    }
-    val iconShimmerT = (1f - abs(shimmerProgress * 2f - 1f)).coerceIn(0f, 1f)
-    val iconTint = lerp(
-        labelColor,
-        Color.White.copy(alpha = cueAlpha),
-        iconShimmerT * 0.35f
-    )
-
     Box(
         modifier = modifier.height(18.dp),
         contentAlignment = Alignment.Center
     ) {
-        Row(
-            modifier = Modifier.graphicsLayer { alpha = cueAlpha },
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                imageVector = Icons.Rounded.GraphicEq,
-                contentDescription = null,
-                tint = iconTint,
-                modifier = Modifier.size(13.dp)
+        if (cueAlpha > 0f) {
+            val labelColor = Color(0xFFB9BDC2).copy(alpha = (0.72f * cueAlpha).coerceIn(0f, 1f))
+            val shimmerTransition = rememberInfiniteTransition(label = "crossfadeShimmer")
+            val shimmerProgress by shimmerTransition.animateFloat(
+                initialValue = 0f,
+                targetValue = 1f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(durationMillis = 2200, easing = LinearEasing),
+                    repeatMode = RepeatMode.Restart
+                ),
+                label = "crossfadeShimmerProgress"
             )
-            Spacer(Modifier.width(6.dp))
-            Text(
-                text = "Crossfade",
-                fontWeight = FontWeight.SemiBold,
-                style = MaterialTheme.typography.labelMedium.copy(brush = shimmerTextBrush)
+            val shimmerTextBrush = remember(shimmerProgress, labelColor) {
+                val startX = -96f + (260f * shimmerProgress)
+                val endX = startX + 120f
+                Brush.linearGradient(
+                    colors = listOf(
+                        labelColor.copy(alpha = 0.48f),
+                        Color.White.copy(alpha = (0.92f * cueAlpha).coerceIn(0f, 1f)),
+                        labelColor.copy(alpha = 0.48f)
+                    ),
+                    start = Offset(startX, 0f),
+                    end = Offset(endX, 18f)
+                )
+            }
+            val iconShimmerT = (1f - abs(shimmerProgress * 2f - 1f)).coerceIn(0f, 1f)
+            val iconTint = lerp(
+                labelColor,
+                Color.White.copy(alpha = cueAlpha),
+                iconShimmerT * 0.35f
             )
+
+            Row(
+                modifier = Modifier.graphicsLayer { alpha = cueAlpha },
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.GraphicEq,
+                    contentDescription = null,
+                    tint = iconTint,
+                    modifier = Modifier.size(13.dp)
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = "Crossfade",
+                    fontWeight = FontWeight.SemiBold,
+                    style = MaterialTheme.typography.labelMedium.copy(brush = shimmerTextBrush)
+                )
+            }
         }
     }
 }

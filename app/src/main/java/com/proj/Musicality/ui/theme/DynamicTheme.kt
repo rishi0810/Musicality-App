@@ -82,7 +82,7 @@ fun rememberMediaBackdropPalette(
     animateTransitions: Boolean = true
 ): MediaBackdropPalette {
     val context = LocalContext.current
-    var palette by remember(imageUrl, fallbackSurface) {
+    var palette by remember {
         mutableStateOf(defaultMediaBackdropPalette(fallbackSurface))
     }
 
