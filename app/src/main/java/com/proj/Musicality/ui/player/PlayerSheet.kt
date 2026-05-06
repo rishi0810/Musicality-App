@@ -20,6 +20,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
@@ -278,6 +280,9 @@ fun PlayerSheet(
 ) {
     val item = state.currentItem ?: return
     val queue = state.queue
+    var displayIndex by remember { mutableIntStateOf(queue.currentIndex) }
+    LaunchedEffect(queue.currentIndex) { displayIndex = queue.currentIndex }
+    val displayItem = queue.items.getOrElse(displayIndex) { item }
     // Read the expand progress state here — PlayerSheet subscribes, not MusicApp
     val expandProgress = expandProgressState.value
     val clampedExpandProgress = expandProgress.coerceIn(0f, 1f)
@@ -476,6 +481,7 @@ fun PlayerSheet(
                                 AlbumArtPager(
                                     queue = queue,
                                     onSkipToIndex = onSkipToIndex,
+                                    onDisplayIndexChanged = { displayIndex = it },
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .height(heroHeight),
@@ -545,70 +551,85 @@ fun PlayerSheet(
                                 .fillMaxSize()
                                 .padding(top = PlayerControlsTopDistanceFromScreenTop)
                         ) {
-                            // ── Row 1: Title/Artist (left, weight 1) | Like | Options (right) ──
+                            // ── Row 1: Like (left) | Song Title (center) | Options (right) ──
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(start = 24.dp, end = 12.dp),
+                                    .padding(horizontal = 16.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
+                                HapticIconButton(
+                                    onClick = {
+                                        coroutineScope.launch { libraryRepository.toggleLike(item) }
+                                    },
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .background(
+                                            color = onSurface.copy(alpha = 0.08f),
+                                            shape = CircleShape
+                                        )
+                                ) {
+                                    Icon(
+                                        if (mediaLibraryState.isLiked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                                        contentDescription = if (mediaLibraryState.isLiked) "Unlike" else "Like",
+                                        tint = if (mediaLibraryState.isLiked) playbackAccent else onSurfaceVariant,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
                                 AnimatedContent(
-                                    targetState = item,
+                                    targetState = displayItem,
                                     transitionSpec = {
-                                        (fadeIn(spring(stiffness = Spring.StiffnessMediumLow))
-                                            togetherWith fadeOut(spring(stiffness = Spring.StiffnessMedium)))
+                                        val oldIdx = queue.items.indexOfFirst { it.videoId == initialState.videoId }
+                                        val newIdx = queue.items.indexOfFirst { it.videoId == targetState.videoId }
+                                        val dir = if (newIdx >= oldIdx) 1 else -1
+                                        (slideInHorizontally { fullWidth -> dir * fullWidth / 3 } + fadeIn(spring(stiffness = Spring.StiffnessMediumLow))
+                                            togetherWith slideOutHorizontally { fullWidth -> -dir * fullWidth / 3 } + fadeOut(spring(stiffness = Spring.StiffnessMedium)))
                                     },
                                     contentKey = { it.videoId },
                                     label = "song-title",
-                                    modifier = Modifier.weight(1f)
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .padding(horizontal = 12.dp)
                                 ) { animItem ->
                                     Text(
                                         text = animItem.title,
-                                        style = MaterialTheme.typography.titleLarge,
+                                        style = MaterialTheme.typography.headlineSmall,
                                         fontWeight = FontWeight.Bold,
                                         maxLines = 1,
                                         color = onSurface,
-                                        modifier = Modifier.basicMarquee()
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .basicMarquee()
                                     )
                                 }
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                    verticalAlignment = Alignment.CenterVertically
+                                HapticIconButton(
+                                    onClick = { showOptionsSheet = true },
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .background(
+                                            color = onSurface.copy(alpha = 0.08f),
+                                            shape = CircleShape
+                                        )
                                 ) {
-                                    HapticIconButton(
-                                        onClick = {
-                                            coroutineScope.launch { libraryRepository.toggleLike(item) }
-                                        },
-                                        modifier = Modifier.size(48.dp)
-                                    ) {
-                                        Icon(
-                                            if (mediaLibraryState.isLiked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
-                                            contentDescription = if (mediaLibraryState.isLiked) "Unlike" else "Like",
-                                            tint = if (mediaLibraryState.isLiked) playbackAccent else onSurfaceVariant,
-                                            modifier = Modifier.size(24.dp)
-                                        )
-                                    }
-                                    HapticIconButton(
-                                        onClick = { showOptionsSheet = true },
-                                        modifier = Modifier.size(48.dp)
-                                    ) {
-                                        Icon(
-                                            Icons.Rounded.MoreVert,
-                                            contentDescription = "More options",
-                                            tint = onSurface
-                                        )
-                                    }
+                                    Icon(
+                                        Icons.Rounded.MoreVert,
+                                        contentDescription = "More options",
+                                        tint = onSurface,
+                                        modifier = Modifier.size(20.dp)
+                                    )
                                 }
                             }
 
-                            Spacer(Modifier.height(0.dp))
-
-                            // ── Artist name on its own line beneath the title ──
+                            // ── Artist name centered beneath the title ──
                             AnimatedContent(
-                                targetState = item,
+                                targetState = displayItem,
                                 transitionSpec = {
-                                    (fadeIn(spring(stiffness = Spring.StiffnessMediumLow))
-                                        togetherWith fadeOut(spring(stiffness = Spring.StiffnessMedium)))
+                                    val oldIdx = queue.items.indexOfFirst { it.videoId == initialState.videoId }
+                                    val newIdx = queue.items.indexOfFirst { it.videoId == targetState.videoId }
+                                    val dir = if (newIdx >= oldIdx) 1 else -1
+                                    (slideInHorizontally { fullWidth -> dir * fullWidth / 3 } + fadeIn(spring(stiffness = Spring.StiffnessMediumLow))
+                                        togetherWith slideOutHorizontally { fullWidth -> -dir * fullWidth / 3 } + fadeOut(spring(stiffness = Spring.StiffnessMedium)))
                                 },
                                 contentKey = { it.videoId },
                                 label = "song-artist",
@@ -617,37 +638,31 @@ fun PlayerSheet(
                                     .height(26.dp)
                                     .padding(horizontal = 24.dp)
                             ) { animItem ->
-                                Row(
+                                val artistClickModifier = if (animItem.artistId != null) {
+                                    Modifier.clickable {
+                                        animItem.artistId?.let {
+                                            onArtistTap(it, animItem.artistName, null)
+                                        }
+                                    }
+                                } else {
+                                    Modifier
+                                }
+
+                                Text(
+                                    text = animItem.artistName,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = onSurface.copy(alpha = 0.92f),
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    textAlign = TextAlign.Center,
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .height(26.dp),
-                                    horizontalArrangement = Arrangement.Start
-                                ) {
-                                    val artistClickModifier = if (animItem.artistId != null) {
-                                        Modifier.clickable {
-                                            animItem.artistId?.let {
-                                                // Song page has track art, not canonical artist art.
-                                                // Pass null so ArtistScreen fetches proper artist image.
-                                                onArtistTap(it, animItem.artistName, null)
-                                            }
-                                        }
-                                    } else {
-                                        Modifier
-                                    }
-
-                                    Text(
-                                        text = animItem.artistName,
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        color = onSurface.copy(alpha = 0.92f),
-                                        fontWeight = FontWeight.Medium,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = artistClickModifier
-                                    )
-                                }
+                                        .then(artistClickModifier)
+                                )
                             }
 
-                            Spacer(Modifier.height(8.dp))
+                            Spacer(Modifier.height(40.dp))
 
                             // ── Row 2: Progress bar ──
                             ExpandedPlaybackProgressSection(
@@ -665,7 +680,7 @@ fun PlayerSheet(
                                     .padding(horizontal = 24.dp)
                             )
 
-                            Spacer(Modifier.height(18.dp))
+                            Spacer(Modifier.height(20.dp))
 
                             // ── Row 3: Prev + Play/Pause + Next, centered ──
                             Row(
@@ -718,7 +733,7 @@ fun PlayerSheet(
                                 }
                             }
 
-                            Spacer(Modifier.height(14.dp))
+                            Spacer(Modifier.height(2.dp))
 
                             Row(
                                 modifier = Modifier
@@ -741,13 +756,13 @@ fun PlayerSheet(
                                         painter = painterResource(id = R.drawable.lyrics_24px),
                                         contentDescription = null,
                                         tint = Color.White,
-                                        modifier = Modifier.size(20.dp)
+                                        modifier = Modifier.size(22.dp)
                                     )
                                     Spacer(Modifier.width(8.dp))
                                     Text(
                                         text = "Lyrics",
                                         color = Color.White,
-                                        style = MaterialTheme.typography.labelLarge,
+                                        style = MaterialTheme.typography.titleSmall,
                                         fontWeight = FontWeight.SemiBold
                                     )
                                 }
@@ -772,13 +787,13 @@ fun PlayerSheet(
                                         painter = painterResource(id = R.drawable.queue_music_24px),
                                         contentDescription = null,
                                         tint = Color.White,
-                                        modifier = Modifier.size(20.dp)
+                                        modifier = Modifier.size(22.dp)
                                     )
                                     Spacer(Modifier.width(8.dp))
                                     Text(
                                         text = "Queue",
                                         color = Color.White,
-                                        style = MaterialTheme.typography.labelLarge,
+                                        style = MaterialTheme.typography.titleSmall,
                                         fontWeight = FontWeight.SemiBold
                                     )
                                 }
@@ -994,7 +1009,8 @@ fun PlayerSheet(
             onSkipNext = onSkipNext,
             onSkipPrev = onSkipPrev,
             canSkipNext = queue.currentIndex < queue.items.lastIndex,
-            canSkipPrevious = queue.currentIndex > 0
+            canSkipPrevious = queue.currentIndex > 0,
+            queue = queue
         )
 
         PlayerOverlayBottomSheet(
@@ -1247,7 +1263,7 @@ private fun ExpandedPlaybackProgressSection(
         ) {
             Text(
                 text = formatMs(positionMs),
-                style = MaterialTheme.typography.labelSmall,
+                style = MaterialTheme.typography.labelLarge,
                 color = onSurface.copy(alpha = 0.85f)
             )
             CrossfadeCountdownCue(
@@ -1264,7 +1280,7 @@ private fun ExpandedPlaybackProgressSection(
             )
             Text(
                 text = if (durationMs > 0) formatMs(durationMs) else (durationText ?: ""),
-                style = MaterialTheme.typography.labelSmall,
+                style = MaterialTheme.typography.labelLarge,
                 color = onSurface.copy(alpha = 0.85f)
             )
         }
@@ -1325,7 +1341,8 @@ private fun BoxScope.MiniPlayerBar(
     onSkipNext: () -> Unit,
     onSkipPrev: () -> Unit,
     canSkipNext: Boolean,
-    canSkipPrevious: Boolean
+    canSkipPrevious: Boolean,
+    queue: PlaybackQueue
 ) {
     val positionMs = rememberMiniPlayerPositionMs(
         positionMsFlow = positionMsFlow,
@@ -1469,7 +1486,11 @@ private fun BoxScope.MiniPlayerBar(
                     AnimatedContent(
                         targetState = item,
                         transitionSpec = {
-                            fadeIn(tween(200)) togetherWith fadeOut(tween(150))
+                            val oldIdx = queue.items.indexOfFirst { it.videoId == initialState.videoId }
+                            val newIdx = queue.items.indexOfFirst { it.videoId == targetState.videoId }
+                            val dir = if (newIdx >= oldIdx) 1 else -1
+                            (slideInHorizontally { fullWidth -> dir * fullWidth / 3 } + fadeIn(tween(200))
+                                togetherWith slideOutHorizontally { fullWidth -> -dir * fullWidth / 3 } + fadeOut(tween(150)))
                         },
                         contentKey = { it.videoId },
                         label = "mini-info"
@@ -1598,12 +1619,15 @@ private fun QueueActionSheet(
 private fun AlbumArtPager(
     queue: PlaybackQueue,
     onSkipToIndex: (Int) -> Unit,
+    onDisplayIndexChanged: (Int) -> Unit = {},
     modifier: Modifier = Modifier,
     cornerRadius: Dp = 24.dp
 ) {
     val currentQueueIndex = queue.currentIndex
     val queueItems = queue.items
     val context = LocalContext.current
+    val updatedCurrentIndex by rememberUpdatedState(currentQueueIndex)
+    val updatedQueueItems by rememberUpdatedState(queueItems)
 
     // Pre-fetch and decode images for currentIndex ± 2 into Coil memory cache.
     // Both the prefetch and the display AsyncImage use Size.ORIGINAL so their
@@ -1633,6 +1657,12 @@ private fun AlbumArtPager(
     }
 
     val gridState = rememberLazyGridState(initialFirstVisibleItemIndex = currentQueueIndex)
+    val isDragged by gridState.interactionSource.collectIsDraggedAsState()
+    var userGestureActive by remember { mutableStateOf(false) }
+
+    LaunchedEffect(isDragged) {
+        if (isDragged) userGestureActive = true
+    }
 
     val snapProvider = remember(gridState) {
         carouselSnapLayoutInfoProvider(
@@ -1643,15 +1673,22 @@ private fun AlbumArtPager(
         )
     }
 
-    LaunchedEffect(gridState, currentQueueIndex) {
+    LaunchedEffect(gridState) {
         snapshotFlow {
             gridState.firstVisibleItemIndex to gridState.firstVisibleItemScrollOffset
         }
             .distinctUntilChanged()
             .collect { (index, offset) ->
-                if (offset == 0 && index != currentQueueIndex && index in queueItems.indices) {
+                val currentItems = updatedQueueItems
+                val viewportWidth = gridState.layoutInfo.viewportSize.width
+                val dominantIndex = if (viewportWidth > 0 && offset > viewportWidth / 2) index + 1 else index
+                if (dominantIndex in currentItems.indices) {
+                    onDisplayIndexChanged(dominantIndex)
+                }
+                if (offset == 0 && userGestureActive && index != updatedCurrentIndex && index in currentItems.indices) {
                     onSkipToIndex(index)
                 }
+                if (offset == 0) userGestureActive = false
             }
     }
 
@@ -1816,13 +1853,13 @@ private fun CrossfadeCountdownCue(
                     imageVector = Icons.Rounded.GraphicEq,
                     contentDescription = null,
                     tint = iconTint,
-                    modifier = Modifier.size(13.dp)
+                    modifier = Modifier.size(15.dp)
                 )
                 Spacer(Modifier.width(6.dp))
                 Text(
                     text = "Crossfade",
                     fontWeight = FontWeight.SemiBold,
-                    style = MaterialTheme.typography.labelMedium.copy(brush = shimmerTextBrush)
+                    style = MaterialTheme.typography.labelLarge.copy(brush = shimmerTextBrush)
                 )
             }
         }
@@ -2128,8 +2165,10 @@ private fun LyricsPanel(
                             )
                             .then(shareSelectionModifier),
                         contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                            horizontal = if (shareMode) 18.dp else 24.dp,
-                            vertical = 12.dp
+                            start = if (shareMode) 18.dp else 24.dp,
+                            end = if (shareMode) 18.dp else 24.dp,
+                            top = 12.dp,
+                            bottom = if (shareMode) 12.dp else 72.dp
                         ),
                         verticalArrangement = Arrangement.spacedBy(if (shareMode) 2.dp else 10.dp)
                     ) {
@@ -2294,118 +2333,26 @@ private fun LyricsPanel(
                     onContinue = { showCustomizeSheet = true }
                 )
             } else {
-                Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(backgroundColor)
-                            .padding(horizontal = 20.dp)
-                            .padding(bottom = 44.dp, top = 8.dp)
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(backgroundColor)
+                        .padding(horizontal = 20.dp)
+                        .padding(bottom = 44.dp, top = 8.dp)
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .align(Alignment.BottomCenter)
-                            .padding(horizontal = 18.dp)
-                            .padding(top = 28.dp)
-                    ) {
-                            SeekablePlaybackBar(
-                                progress = playbackProgress,
-                                durationMs = durationMs,
-                                onSeek = onSeek,
-                                onInteractingChange = onProgressBarInteractingChange,
-                                modifier = Modifier.fillMaxWidth(),
-                                color = playbackAccent,
-                                trackColor = Color.White.copy(alpha = 0.18f),
-                                trackHeight = 3.dp,
-                                expandedTrackHeight = 10.dp
-                            )
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(top = 4.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text(
-                                    formatMs(positionMs),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = Color.White.copy(alpha = 0.7f)
-                                )
-                                Text(
-                                    if (durationMs > 0) formatMs(durationMs) else "",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = Color.White.copy(alpha = 0.7f)
-                                )
-                            }
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(top = 12.dp),
-                                horizontalArrangement = Arrangement.SpaceEvenly,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                HapticIconButton(onClick = onSkipPrev, modifier = Modifier.size(48.dp)) {
-                                    Icon(
-                                        Icons.Rounded.SkipPrevious,
-                                        contentDescription = "Previous",
-                                        tint = Color.White,
-                                        modifier = Modifier.size(32.dp)
-                                    )
-                                }
-                                val playInteraction = remember { MutableInteractionSource() }
-                                Box(
-                                    modifier = Modifier
-                                        .size(60.dp)
-                                        .pressScale(playInteraction)
-                                        .shadow(
-                                            12.dp,
-                                            CircleShape,
-                                            ambientColor = playbackButton.copy(alpha = 0.25f),
-                                            spotColor = playbackButton.copy(alpha = 0.3f)
-                                        )
-                                        .background(playbackButton, CircleShape)
-                                        .hapticClickable(
-                                            interactionSource = playInteraction,
-                                            indication = null
-                                        ) { onPlayPause() },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                                        contentDescription = "Play/Pause",
-                                        tint = Color.White,
-                                        modifier = Modifier.size(32.dp)
-                                    )
-                                }
-                                HapticIconButton(onClick = onSkipNext, modifier = Modifier.size(48.dp)) {
-                                    Icon(
-                                        Icons.Rounded.SkipNext,
-                                        contentDescription = "Next",
-                                        tint = Color.White,
-                                        modifier = Modifier.size(32.dp)
-                                    )
-                                }
-                            }
-                    }
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .align(Alignment.TopCenter)
-                            .offset(y = (-35).dp)
-                            .padding(horizontal = 4.dp),
+                            .padding(horizontal = 4.dp)
+                            .padding(top = 12.dp, bottom = 18.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Surface(
                             modifier = Modifier
-                                .size(48.dp)
-                                .shadow(
-                                    elevation = 10.dp,
-                                    shape = CircleShape,
-                                    ambientColor = Color.Black.copy(alpha = 0.24f),
-                                    spotColor = Color.Black.copy(alpha = 0.32f)
-                                ),
+                                .size(42.dp),
                             shape = CircleShape,
-                            color = Color.Black.copy(alpha = 0.36f),
+                            color = Color.White.copy(alpha = 0.1f),
                             tonalElevation = 0.dp
                         ) {
                             HapticIconButton(
@@ -2421,21 +2368,45 @@ private fun LyricsPanel(
                                     } else {
                                         Color.White.copy(alpha = 0.4f)
                                     },
-                                    modifier = Modifier.size(22.dp)
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                        Surface(
+                            onClick = {
+                                userScrolled = false
+                                coroutineScope.launch {
+                                    val target = (currentLineIndex - 2).coerceAtLeast(0)
+                                    listState.animateScrollToItem(index = target)
+                                }
+                            },
+                            shape = RoundedCornerShape(50),
+                            color = Color.White.copy(alpha = 0.1f),
+                            tonalElevation = 0.dp
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.GraphicEq,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    text = "Sync",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = Color.White
                                 )
                             }
                         }
                         Surface(
                             modifier = Modifier
-                                .size(48.dp)
-                                .shadow(
-                                    elevation = 10.dp,
-                                    shape = CircleShape,
-                                    ambientColor = Color.Black.copy(alpha = 0.24f),
-                                    spotColor = Color.Black.copy(alpha = 0.32f)
-                                ),
+                                .size(42.dp),
                             shape = CircleShape,
-                            color = Color.Black.copy(alpha = 0.36f),
+                            color = Color.White.copy(alpha = 0.1f),
                             tonalElevation = 0.dp
                         ) {
                             HapticIconButton(onClick = onClose, modifier = Modifier.fillMaxSize()) {
@@ -2443,8 +2414,89 @@ private fun LyricsPanel(
                                     imageVector = Icons.Rounded.KeyboardArrowDown,
                                     contentDescription = "Close lyrics",
                                     tint = Color.White,
-                                    modifier = Modifier.size(28.dp)
+                                    modifier = Modifier.size(22.dp)
                                 )
+                            }
+                        }
+                    }
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 18.dp)
+                    ) {
+                        SeekablePlaybackBar(
+                            progress = playbackProgress,
+                            durationMs = durationMs,
+                            onSeek = onSeek,
+                            onInteractingChange = onProgressBarInteractingChange,
+                            modifier = Modifier.fillMaxWidth(),
+                            color = Color.White,
+                            trackColor = Color.White.copy(alpha = 0.18f),
+                            trackHeight = 3.dp,
+                            expandedTrackHeight = 10.dp
+                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                formatMs(positionMs),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.White.copy(alpha = 0.7f)
+                            )
+                            Text(
+                                if (durationMs > 0) formatMs(durationMs) else "",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.White.copy(alpha = 0.7f)
+                            )
+                        }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 4.dp),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                HapticIconButton(onClick = onSkipPrev, modifier = Modifier.size(64.dp)) {
+                                    Icon(
+                                        Icons.Rounded.SkipPrevious,
+                                        contentDescription = "Previous",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(50.dp)
+                                    )
+                                }
+                                val playInteraction = remember { MutableInteractionSource() }
+                                Box(
+                                    modifier = Modifier
+                                        .size(96.dp)
+                                        .pressScale(playInteraction)
+                                        .hapticClickable(
+                                            interactionSource = playInteraction,
+                                            indication = null
+                                        ) { onPlayPause() },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                                        contentDescription = "Play/Pause",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(64.dp)
+                                    )
+                                }
+                                HapticIconButton(onClick = onSkipNext, modifier = Modifier.size(64.dp)) {
+                                    Icon(
+                                        Icons.Rounded.SkipNext,
+                                        contentDescription = "Next",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(50.dp)
+                                    )
+                                }
                             }
                         }
                     }

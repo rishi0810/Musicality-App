@@ -3,6 +3,7 @@ package com.proj.Musicality.crossfade
 import android.content.Context
 import android.util.Log
 import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -113,29 +114,33 @@ class SimpleCrossfadeManager(@Suppress("UNUSED_PARAMETER") private val context: 
         positionMs: Long,
         durationMs: Long,
         delegatingPlayer: CrossfadeDelegatingPlayer,
+        repeatMode: Int = Player.REPEAT_MODE_OFF,
         prepareNext: suspend () -> CrossfadeNextTrack?
     ) {
         if (!enabled || !hasNext || trackId.isNullOrBlank()) return
         if (transitionJob != null || durationMs <= 0L) return
         if (trackId == lastTriggeredTrackId) return
+        if (repeatMode == Player.REPEAT_MODE_ONE) return
 
         val remaining = durationMs - positionMs
         if (remaining > TRIGGER_LEAD_MS) return
 
-        transitionJob = scope.launch(Dispatchers.Main) {
-            runCatching {
-                val nextTrack = prepareNext() ?: return@launch
-                lastTriggeredTrackId = trackId
-                executeCrossfade(delegatingPlayer, nextTrack)
-            }.onFailure {
-                if (it is CancellationException) {
-                    Log.d(TAG, "Crossfade cancelled")
-                } else {
-                    Log.e(TAG, "Crossfade failed", it)
+        val job = scope.launch(Dispatchers.Main) {
+            try {
+                val nextTrack = prepareNext()
+                if (nextTrack != null) {
+                    lastTriggeredTrackId = trackId
+                    executeCrossfade(delegatingPlayer, nextTrack)
                 }
+            } catch (e: CancellationException) {
+                Log.d(TAG, "Crossfade cancelled")
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "Crossfade failed", e)
             }
-            transitionJob = null
         }
+        transitionJob = job
+        job.invokeOnCompletion { if (transitionJob === job) transitionJob = null }
     }
 
     fun cancelTransition(

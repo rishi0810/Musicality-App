@@ -76,6 +76,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
     val crossfadeEnabled: StateFlow<Boolean> = _crossfadeEnabled.asStateFlow()
 
     private var positionJob: Job? = null
+    private var fetchAndPlayJob: Job? = null
     private var playerListener: Player.Listener? = null
     private var observedPlayer: Player? = null
     private var controllerFuture: ListenableFuture<MediaController>? = null
@@ -588,7 +589,8 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         AudioFileCache.unpinAll()
         AudioFileCache.pin(item.videoId)
 
-        viewModelScope.launch(Dispatchers.Default) {
+        fetchAndPlayJob?.cancel()
+        fetchAndPlayJob = viewModelScope.launch(Dispatchers.Default) {
             var waited = 0
             while (activePlayer() == null && waited < 5000) {
                 delay(50)
@@ -614,6 +616,10 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
 
     private suspend fun startExoPlayback(url: String, item: MediaItem) {
         withContext(Dispatchers.Main) {
+            if (_state.value.currentItem?.videoId != item.videoId) {
+                Log.d(TAG, "startExoPlayback: skipping stale playback for '${item.videoId}'")
+                return@withContext
+            }
             val exo = activePlayer() ?: return@withContext
             Log.d(TAG, "startExoPlayback: setting URL (${url.length} chars) for '${item.title}'")
 
@@ -733,7 +739,8 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                             hasNext = hasNext,
                             positionMs = pos,
                             durationMs = duration,
-                            delegatingPlayer = dp
+                            delegatingPlayer = dp,
+                            repeatMode = currentState.repeatMode
                         ) {
                             prepareCrossfadeNextTrack()
                         }
@@ -911,6 +918,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
     override fun onCleared() {
         super.onCleared()
         stopPositionPolling()
+        fetchAndPlayJob?.cancel()
         upNextJob?.cancel()
         libraryQueueExtensionJob?.cancel()
         crossfadeManager.release()
