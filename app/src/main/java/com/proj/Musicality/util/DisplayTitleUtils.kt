@@ -12,6 +12,43 @@ private val separatorNoiseRegex = Regex(
     RegexOption.IGNORE_CASE
 )
 
+private val featRegex = Regex(
+    """\s*[\(\[]\s*(feat\.?|ft\.?|featuring|with|prod\.?\s+by|prod\.?)\s+[^)\]]*[\)\]]""",
+    RegexOption.IGNORE_CASE
+)
+
+private val inlineFeatRegex = Regex(
+    """\s+(feat\.?|ft\.?|featuring)\s+.+$""",
+    RegexOption.IGNORE_CASE
+)
+
+private val parenthesizedTagRegex = Regex(
+    """\s*[\(\[]\s*(remix|edit|mix|version|ver\.?|deluxe|bonus\s+track|acoustic|live|demo|instrumental|extended|radio\s+edit|clean|explicit|sped\s+up|slowed(\s*\+?\s*reverb)?|reverb|lofi|lo-fi)\s*[\)\]]""",
+    RegexOption.IGNORE_CASE
+)
+
+private val trailingDashTagRegex = Regex(
+    """\s+[-–—]\s+(remix|acoustic|live|demo|instrumental|radio\s+edit|remaster(ed)?).*$""",
+    RegexOption.IGNORE_CASE
+)
+
+fun String.toCleanSongTitle(): String {
+    val fallback = ifBlank { "Unknown song" }
+    var clean = fallback
+        .replace(Regex("""\s+"""), " ")
+        .trim()
+        .replace(trailingNoiseRegex, "")
+        .replace(separatorNoiseRegex, "")
+        .replace(featRegex, "")
+        .replace(parenthesizedTagRegex, "")
+        .replace(trailingDashTagRegex, "")
+        .replace(inlineFeatRegex, "")
+        .replace(Regex("""\s{2,}"""), " ")
+        .trim()
+    if (clean.isBlank()) clean = fallback
+    return clean
+}
+
 /**
  * Compact UI-friendly title for list rows/cards/mini-player.
  * Keeps song screen untouched by applying this only where explicitly called.

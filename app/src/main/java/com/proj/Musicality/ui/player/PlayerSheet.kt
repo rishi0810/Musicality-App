@@ -35,6 +35,7 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -97,6 +98,8 @@ import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -185,6 +188,7 @@ import com.proj.Musicality.ui.theme.LocalPlaybackBackdropPalette
 import com.proj.Musicality.ui.theme.LocalPlaybackUiPalette
 import com.proj.Musicality.ui.theme.rememberMediaBackdropPalette
 import com.proj.Musicality.util.formatMs
+import com.proj.Musicality.util.toCleanSongTitle
 import com.proj.Musicality.util.toCompactSongTitle
 import com.proj.Musicality.util.upscaleThumbnail
 import com.proj.Musicality.viewmodel.PlaybackState
@@ -210,7 +214,7 @@ private val PlayerHeroMaxHeight = 440.dp
 // Direct distance from the absolute top of the screen to the Lyrics/Queue stack.
 // Increase this to move Lyrics/Queue, song details, and controls further down.
 // Decrease this to move the stack up.
-private val PlayerControlsTopDistanceFromScreenTop = 540.dp
+private val PlayerControlsTopDistanceFromScreenTop = 525.dp
 private const val PlayerOverlayDismissFraction = 0.2f
 private const val PlayerOverlayDismissVelocityPx = 1200f
 private val LyricsShareBackgroundColors = listOf(
@@ -573,7 +577,7 @@ fun PlayerSheet(
                                         if (mediaLibraryState.isLiked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
                                         contentDescription = if (mediaLibraryState.isLiked) "Unlike" else "Like",
                                         tint = if (mediaLibraryState.isLiked) playbackAccent else onSurfaceVariant,
-                                        modifier = Modifier.size(20.dp)
+                                        modifier = Modifier.size(24.dp)
                                     )
                                 }
                                 AnimatedContent(
@@ -589,10 +593,10 @@ fun PlayerSheet(
                                     label = "song-title",
                                     modifier = Modifier
                                         .weight(1f)
-                                        .padding(horizontal = 12.dp)
+                                        .padding(horizontal = 8.dp)
                                 ) { animItem ->
                                     Text(
-                                        text = animItem.title,
+                                        text = animItem.title.toCleanSongTitle(),
                                         style = MaterialTheme.typography.headlineSmall,
                                         fontWeight = FontWeight.Bold,
                                         maxLines = 1,
@@ -616,7 +620,7 @@ fun PlayerSheet(
                                         Icons.Rounded.MoreVert,
                                         contentDescription = "More options",
                                         tint = onSurface,
-                                        modifier = Modifier.size(20.dp)
+                                        modifier = Modifier.size(24.dp)
                                     )
                                 }
                             }
@@ -648,18 +652,21 @@ fun PlayerSheet(
                                     Modifier
                                 }
 
-                                Text(
-                                    text = animItem.artistName,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    color = onSurface.copy(alpha = 0.92f),
-                                    fontWeight = FontWeight.Medium,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    textAlign = TextAlign.Center,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .then(artistClickModifier)
-                                )
+                                Box(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = animItem.artistName,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        color = onSurface.copy(alpha = 0.92f),
+                                        fontWeight = FontWeight.Medium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier.then(artistClickModifier)
+                                    )
+                                }
                             }
 
                             Spacer(Modifier.height(40.dp))
@@ -677,63 +684,124 @@ fun PlayerSheet(
                                 onSurface = onSurface,
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 24.dp)
+                                    .padding(horizontal = 16.dp)
                             )
 
                             Spacer(Modifier.height(20.dp))
 
-                            // ── Row 3: Prev + Play/Pause + Next, centered ──
+                            // ── Row 3: Prev + Play/Pause + Next — filled pill buttons ──
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = PlayerHorizontalPadding),
+                                    .padding(horizontal = 12.dp),
                                 horizontalArrangement = Arrangement.Center,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                val backInteractionSource = remember { MutableInteractionSource() }
+                                val nextInteractionSource = remember { MutableInteractionSource() }
+                                val playPauseInteractionSource = remember { MutableInteractionSource() }
+
+                                val isPlayPausePressed by playPauseInteractionSource.collectIsPressedAsState()
+                                val isBackPressed by backInteractionSource.collectIsPressedAsState()
+                                val isNextPressed by nextInteractionSource.collectIsPressedAsState()
+
+                                val springSpec = spring<Float>(dampingRatio = 0.6f, stiffness = 500f)
+
+                                val playPauseWeight by animateFloatAsState(
+                                    targetValue = when {
+                                        isPlayPausePressed -> 1.5f
+                                        isBackPressed || isNextPressed -> 1.05f
+                                        else -> 1.2f
+                                    },
+                                    animationSpec = springSpec,
+                                    label = "playPauseWeight"
+                                )
+                                val backButtonWeight by animateFloatAsState(
+                                    targetValue = when {
+                                        isBackPressed -> 1.25f
+                                        isPlayPausePressed -> 0.8f
+                                        else -> 1f
+                                    },
+                                    animationSpec = springSpec,
+                                    label = "backButtonWeight"
+                                )
+                                val nextButtonWeight by animateFloatAsState(
+                                    targetValue = when {
+                                        isNextPressed -> 1.25f
+                                        isPlayPausePressed -> 0.8f
+                                        else -> 1f
+                                    },
+                                    animationSpec = springSpec,
+                                    label = "nextButtonWeight"
+                                )
+
+                                val darkSwatch = mediaPalette.accent
+                                val lightSwatch = darkSwatch.copy(alpha = 0.22f)
+                                val controlShape = RoundedCornerShape(24.dp)
+
+                                FilledIconButton(
+                                    onClick = onSkipPrev,
+                                    shape = controlShape,
+                                    interactionSource = backInteractionSource,
+                                    colors = IconButtonDefaults.filledIconButtonColors(
+                                        containerColor = lightSwatch,
+                                        contentColor = Color.White
+                                    ),
+                                    modifier = Modifier
+                                        .height(68.dp)
+                                        .weight(backButtonWeight)
                                 ) {
-                                    HapticIconButton(onClick = onSkipPrev, modifier = Modifier.size(64.dp)) {
-                                        Icon(
-                                            Icons.Rounded.SkipPrevious,
-                                            contentDescription = "Previous",
-                                            tint = onSurface,
-                                            modifier = Modifier.size(50.dp)
-                                        )
-                                    }
+                                    Icon(
+                                        Icons.Rounded.SkipPrevious,
+                                        contentDescription = "Previous",
+                                        modifier = Modifier.size(40.dp)
+                                    )
+                                }
 
-                                    val playInteraction = remember { MutableInteractionSource() }
-                                    Box(
-                                        modifier = Modifier
-                                            .size(96.dp)
-                                            .pressScale(playInteraction)
-                                            .hapticClickable(
-                                                interactionSource = playInteraction,
-                                                indication = null
-                                            ) { onPlayPause() },
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            if (state.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                                            contentDescription = "Play/Pause",
-                                            tint = Color.White,
-                                            modifier = Modifier.size(64.dp)
-                                        )
-                                    }
+                                Spacer(modifier = Modifier.width(6.dp))
 
-                                    HapticIconButton(onClick = onSkipNext, modifier = Modifier.size(64.dp)) {
-                                        Icon(
-                                            Icons.Rounded.SkipNext,
-                                            contentDescription = "Next",
-                                            tint = onSurface,
-                                            modifier = Modifier.size(50.dp)
-                                        )
-                                    }
+                                FilledIconButton(
+                                    onClick = onPlayPause,
+                                    shape = controlShape,
+                                    interactionSource = playPauseInteractionSource,
+                                    colors = IconButtonDefaults.filledIconButtonColors(
+                                        containerColor = darkSwatch,
+                                        contentColor = Color.White
+                                    ),
+                                    modifier = Modifier
+                                        .height(68.dp)
+                                        .weight(playPauseWeight)
+                                ) {
+                                    Icon(
+                                        if (state.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                                        contentDescription = "Play/Pause",
+                                        modifier = Modifier.size(40.dp)
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.width(6.dp))
+
+                                FilledIconButton(
+                                    onClick = onSkipNext,
+                                    shape = controlShape,
+                                    interactionSource = nextInteractionSource,
+                                    colors = IconButtonDefaults.filledIconButtonColors(
+                                        containerColor = lightSwatch,
+                                        contentColor = Color.White
+                                    ),
+                                    modifier = Modifier
+                                        .height(68.dp)
+                                        .weight(nextButtonWeight)
+                                ) {
+                                    Icon(
+                                        Icons.Rounded.SkipNext,
+                                        contentDescription = "Next",
+                                        modifier = Modifier.size(32.dp)
+                                    )
                                 }
                             }
 
-                            Spacer(Modifier.height(2.dp))
+                            Spacer(Modifier.height(36.dp))
 
                             Row(
                                 modifier = Modifier
