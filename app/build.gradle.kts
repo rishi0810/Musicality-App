@@ -133,9 +133,8 @@ dependencies {
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)
 
-    // M3 Expressive + Graphics Shapes
+    // M3 Expressive
     implementation(libs.material3.expressive)
-    implementation(libs.graphics.shapes)
 
     // Palette (dominant color extraction)
     implementation(libs.palette)

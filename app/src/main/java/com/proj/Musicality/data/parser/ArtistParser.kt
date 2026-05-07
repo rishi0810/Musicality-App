@@ -45,6 +45,8 @@ object ArtistParser {
         val featuredOn = mutableListOf<ArtistContent>()
         val playlists = mutableListOf<ArtistContent>()
         val similarArtists = mutableListOf<ArtistRelated>()
+        var singlesMoreEndpoint: MoreEndpoint? = null
+        var videosMoreEndpoint: MoreEndpoint? = null
 
         val sections = response.contents?.singleColumnBrowseResultsRenderer?.tabs?.firstOrNull()
             ?.tabRenderer?.content?.sectionListRenderer?.contents ?: emptyList()
@@ -60,18 +62,30 @@ object ArtistParser {
             }
 
             section.musicCarouselShelfRenderer?.let { carousel ->
-                val title = carousel.header?.musicCarouselShelfBasicHeaderRenderer?.title?.runs?.firstOrNull()?.text ?: ""
+                val header = carousel.header?.musicCarouselShelfBasicHeaderRenderer
+                val title = header?.title?.runs?.firstOrNull()?.text ?: ""
                 val items = carousel.contents ?: emptyList()
+                val moreBrowse = header?.moreContentButton?.buttonRenderer?.navigationEndpoint?.browseEndpoint
 
                 when {
                     title == "Albums" -> items.forEach { item ->
                         item.musicTwoRowItemRenderer?.let { parseArtistContent(it)?.let { albums.add(it) } }
                     }
-                    title == "Singles" || title == "Singles & EPs" -> items.forEach { item ->
-                        item.musicTwoRowItemRenderer?.let { parseArtistContent(it)?.let { singles.add(it) } }
+                    title == "Singles" || title == "Singles & EPs" -> {
+                        items.forEach { item ->
+                            item.musicTwoRowItemRenderer?.let { parseArtistContent(it)?.let { singles.add(it) } }
+                        }
+                        if (moreBrowse?.browseId != null) {
+                            singlesMoreEndpoint = MoreEndpoint(moreBrowse.browseId, moreBrowse.params)
+                        }
                     }
-                    title == "Videos" -> items.forEach { item ->
-                        item.musicTwoRowItemRenderer?.let { parseArtistVideo(it)?.let { videos.add(it) } }
+                    title == "Videos" -> {
+                        items.forEach { item ->
+                            item.musicTwoRowItemRenderer?.let { parseArtistVideo(it)?.let { videos.add(it) } }
+                        }
+                        if (moreBrowse?.browseId != null) {
+                            videosMoreEndpoint = MoreEndpoint(moreBrowse.browseId, moreBrowse.params)
+                        }
                     }
                     title == "Live performances" -> items.forEach { item ->
                         item.musicTwoRowItemRenderer?.let { parseArtistVideo(it)?.let { livePerformances.add(it) } }
@@ -101,8 +115,57 @@ object ArtistParser {
             livePerformances = livePerformances,
             featuredOn = featuredOn,
             playlists = playlists,
-            similarArtists = similarArtists
+            similarArtists = similarArtists,
+            singlesMoreEndpoint = singlesMoreEndpoint,
+            videosMoreEndpoint = videosMoreEndpoint
         )
+    }
+
+    fun extractMoreSingles(jsonString: String): List<ArtistContent> {
+        val response = runCatching {
+            JsonParser.instance.decodeFromString<ArtistBrowseResponse>(jsonString)
+        }.getOrNull() ?: return emptyList()
+
+        val sections = response.contents?.singleColumnBrowseResultsRenderer?.tabs?.firstOrNull()
+            ?.tabRenderer?.content?.sectionListRenderer?.contents ?: return emptyList()
+
+        val results = mutableListOf<ArtistContent>()
+        sections.forEach { section ->
+            section.gridRenderer?.let { grid ->
+                grid.items?.forEach { item ->
+                    item.musicTwoRowItemRenderer?.let { parseArtistContent(it)?.let { results.add(it) } }
+                }
+            }
+        }
+        return results
+    }
+
+    fun extractMoreVideos(jsonString: String): List<ArtistVideo> {
+        val response = runCatching {
+            JsonParser.instance.decodeFromString<ArtistBrowseResponse>(jsonString)
+        }.getOrNull() ?: return emptyList()
+
+        val sections = response.contents?.singleColumnBrowseResultsRenderer?.tabs?.firstOrNull()
+            ?.tabRenderer?.content?.sectionListRenderer?.contents ?: return emptyList()
+
+        val results = mutableListOf<ArtistVideo>()
+        sections.forEach { section ->
+            section.musicPlaylistShelfRenderer?.let { shelf ->
+                shelf.contents?.forEach { item ->
+                    item.musicResponsiveListItemRenderer?.let { parseVideoListItem(it)?.let { results.add(it) } }
+                }
+            }
+        }
+        return results
+    }
+
+    private fun parseVideoListItem(item: MusicResponsiveListItemRenderer): ArtistVideo? {
+        val columns = item.flexColumns
+        val title = columns?.getOrNull(0)?.musicResponsiveListItemFlexColumnRenderer?.text?.runs?.firstOrNull()?.text ?: return null
+        val videoId = item.playlistItemData?.videoId ?: return null
+        val thumb = bestThumbUrl(item.thumbnail?.musicThumbnailRenderer?.thumbnail?.thumbnails)
+        val views = columns.getOrNull(1)?.musicResponsiveListItemFlexColumnRenderer?.text?.runs?.firstOrNull()?.text
+        return ArtistVideo(title, videoId, thumb, views)
     }
 
     private fun parseSongItem(item: MusicResponsiveListItemRenderer): ArtistSong? {

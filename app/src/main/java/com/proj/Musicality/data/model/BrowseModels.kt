@@ -16,7 +16,15 @@ data class ArtistDetails(
     val livePerformances: List<ArtistVideo>,
     val featuredOn: List<ArtistContent>,
     val playlists: List<ArtistContent>,
-    val similarArtists: List<ArtistRelated>
+    val similarArtists: List<ArtistRelated>,
+    val singlesMoreEndpoint: MoreEndpoint? = null,
+    val videosMoreEndpoint: MoreEndpoint? = null
+)
+
+@Immutable
+data class MoreEndpoint(
+    val browseId: String,
+    val params: String?
 )
 
 @Immutable

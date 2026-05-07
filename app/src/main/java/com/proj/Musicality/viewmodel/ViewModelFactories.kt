@@ -10,6 +10,17 @@ class ArtistViewModelFactory(private val browseId: String) : ViewModelProvider.F
     }
 }
 
+class ArtistMoreViewModelFactory(
+    private val browseId: String,
+    private val params: String?,
+    private val type: String
+) : ViewModelProvider.Factory {
+    @Suppress("UNCHECKED_CAST")
+    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        return ArtistMoreViewModel(browseId, params, type) as T
+    }
+}
+
 class AlbumViewModelFactory(private val browseId: String) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T {

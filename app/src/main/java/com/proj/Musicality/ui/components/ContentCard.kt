@@ -20,6 +20,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -89,12 +90,12 @@ fun ContentCard(
             }
         }
         Spacer(Modifier.height(8.dp))
-        Column(modifier = Modifier.height(if (subtitle.isNullOrBlank()) 36.dp else 52.dp)) {
+        Column(modifier = Modifier.height(if (subtitle.isNullOrBlank()) 20.dp else 36.dp)) {
             Text(
                 text = displayTitle,
                 style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.fillMaxWidth(0.7f),
-                maxLines = 2,
+                modifier = Modifier.fillMaxWidth(0.7f).basicMarquee(),
+                maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
             if (!subtitle.isNullOrBlank()) {

@@ -36,7 +36,14 @@ data class ArtistSectionListContent(val contents: List<ArtistSectionItem>? = nul
 @Serializable
 data class ArtistSectionItem(
     val musicShelfRenderer: ArtistMusicShelfRenderer? = null,
-    val musicCarouselShelfRenderer: MusicCarouselShelfRenderer? = null
+    val musicCarouselShelfRenderer: MusicCarouselShelfRenderer? = null,
+    val gridRenderer: ArtistGridRenderer? = null,
+    val musicPlaylistShelfRenderer: ArtistMusicShelfRenderer? = null
+)
+
+@Serializable
+data class ArtistGridRenderer(
+    val items: List<CarouselItem>? = null
 )
 
 @Serializable

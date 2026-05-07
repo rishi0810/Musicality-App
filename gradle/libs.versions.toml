@@ -18,7 +18,6 @@ ktor = "3.0.3"
 coroutines = "1.9.0"
 activityCompose = "1.9.3"
 media3 = "1.6.0"
-graphicsShapes = "1.0.1"
 material3Expressive = "1.5.0-alpha14"
 palette = "1.0.0"
 
@@ -45,9 +44,6 @@ compose-icons-extended = { group = "androidx.compose.material", name = "material
 
 # M3 Expressive
 material3-expressive = { group = "androidx.compose.material3", name = "material3", version.ref = "material3Expressive" }
-
-# Graphics Shapes
-graphics-shapes = { group = "androidx.graphics", name = "graphics-shapes", version.ref = "graphicsShapes" }
 
 # Palette
 palette = { group = "androidx.palette", name = "palette", version.ref = "palette" }

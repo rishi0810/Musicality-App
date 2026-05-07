@@ -35,6 +35,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowForward
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Album
 import androidx.compose.material.icons.rounded.Check
@@ -156,6 +157,7 @@ fun ArtistScreen(
     onVideoTap: (MediaItem) -> Unit,
     onPlaylistTap: (String, String, String?, String?) -> Unit,
     onSimilarArtistTap: (String, String, String?) -> Unit,
+    onMoreTap: (String, String, String, String?, String) -> Unit,
     collapsedMiniPlayerHeight: Dp = 0.dp,
     modifier: Modifier = Modifier
 ) {
@@ -420,7 +422,18 @@ fun ArtistScreen(
                 }
 
                 if (details.singles.isNotEmpty()) {
-                    item(key = "singles-header") { SectionHeader("Singles", modifier = Modifier.padding(top = 4.dp)) }
+                    item(key = "singles-header") {
+                        SectionHeaderWithArrow(
+                            title = "Singles",
+                            showArrow = details.singlesMoreEndpoint != null,
+                            onArrowClick = {
+                                details.singlesMoreEndpoint?.let { ep ->
+                                    onMoreTap(details.name, "Singles", ep.browseId, ep.params, "singles")
+                                }
+                            },
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
                     item(key = "singles-grid") {
                         ArtistContentGrid(
                             items = details.singles,
@@ -435,7 +448,18 @@ fun ArtistScreen(
                 }
 
                 if (videosPreview.isNotEmpty()) {
-                    item(key = "videos-header") { SectionHeader("Videos", modifier = Modifier.padding(top = 4.dp)) }
+                    item(key = "videos-header") {
+                        SectionHeaderWithArrow(
+                            title = "Videos",
+                            showArrow = details.videosMoreEndpoint != null,
+                            onArrowClick = {
+                                details.videosMoreEndpoint?.let { ep ->
+                                    onMoreTap(details.name, "Videos", ep.browseId, ep.params, "videos")
+                                }
+                            },
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
                     items(videosPreview, key = { it.videoId }) { video ->
                         val videoItem = video.toMediaItem(details.name, seed.browseId)
                         SongListItem(
@@ -894,9 +918,9 @@ private fun ArtistContentGrid(
     } else {
         LazyHorizontalGrid(
             rows = GridCells.Fixed(2),
-            modifier = Modifier.height(480.dp),
+            modifier = Modifier.height(420.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
             contentPadding = PaddingValues(horizontal = 16.dp)
         ) {
             items(items, key = { it.browseId }) { item ->
@@ -956,6 +980,48 @@ private fun SimilarArtistsRow(
                     textAlign = TextAlign.Center,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SectionHeaderWithArrow(
+    title: String,
+    showArrow: Boolean,
+    onArrowClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.ExtraBold
+        )
+        if (showArrow) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.hapticClickable(onClick = onArrowClick)
+            ) {
+                Text(
+                    text = "More",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.width(4.dp))
+                Icon(
+                    imageVector = Icons.AutoMirrored.Rounded.ArrowForward,
+                    contentDescription = "See all $title",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(24.dp)
                 )
             }
         }

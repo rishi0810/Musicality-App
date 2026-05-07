@@ -21,9 +21,10 @@ object RequestExecutor {
 
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
-    suspend fun executeBrowseRequest(browseId: String, visitorId: String): String = withContext(Dispatchers.IO) {
+    suspend fun executeBrowseRequest(browseId: String, visitorId: String, params: String? = null): String = withContext(Dispatchers.IO) {
+        val paramsField = if (params != null) ""","params":"$params"""" else ""
         val body = """
-            {"context":{"client":{"clientName":"${ApiConstants.WEB_REMIX_CLIENT_NAME}","clientVersion":"${ApiConstants.WEB_REMIX_CLIENT_VERSION}","gl":"US","hl":"en","visitorData":"$visitorId"},"request":{"internalExperimentFlags":[],"useSsl":true},"user":{"lockedSafetyMode":false}},"browseId":"$browseId"}
+            {"context":{"client":{"clientName":"${ApiConstants.WEB_REMIX_CLIENT_NAME}","clientVersion":"${ApiConstants.WEB_REMIX_CLIENT_VERSION}","gl":"US","hl":"en","visitorData":"$visitorId"},"request":{"internalExperimentFlags":[],"useSsl":true},"user":{"lockedSafetyMode":false}},"browseId":"$browseId"$paramsField}
         """.trimIndent().toRequestBody(jsonMediaType)
 
         val request = Request.Builder()

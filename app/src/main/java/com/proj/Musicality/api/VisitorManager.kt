@@ -101,18 +101,18 @@ object VisitorManager {
         }
     }
 
-    suspend fun executeBrowseRequestWithRecovery(browseId: String): String {
+    suspend fun executeBrowseRequestWithRecovery(browseId: String, params: String? = null): String {
         val initialId = ensureBrowseVisitorId()
         if (initialId.isBlank()) return ""
         val first = runCatching {
-            RequestExecutor.executeBrowseRequest(browseId, initialId)
+            RequestExecutor.executeBrowseRequest(browseId, initialId, params)
         }.getOrDefault("")
         if (first.isNotBlank()) return first
 
         val refreshedId = refreshBrowseVisitorId()
         if (refreshedId.isBlank() || refreshedId == initialId) return first
         return runCatching {
-            RequestExecutor.executeBrowseRequest(browseId, refreshedId)
+            RequestExecutor.executeBrowseRequest(browseId, refreshedId, params)
         }.getOrDefault(first)
     }
 

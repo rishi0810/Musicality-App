@@ -45,6 +45,15 @@ sealed interface Route {
     ) : Route
 
     @Serializable
+    data class ArtistMore(
+        val artistName: String,
+        val sectionTitle: String,
+        val browseId: String,
+        val params: String?,
+        val type: String
+    ) : Route
+
+    @Serializable
     data class Playlist(
         val title: String,
         val browseId: String,

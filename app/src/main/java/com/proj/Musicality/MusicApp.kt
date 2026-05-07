@@ -648,6 +648,27 @@ fun MusicApp() {
                             onVideoTap = onVideoTap,
                             onPlaylistTap = navToPlaylist,
                             onSimilarArtistTap = navToArtist,
+                            onMoreTap = { artistName, sectionTitle, browseId, params, type ->
+                                navController.navigate(
+                                    Route.ArtistMore(artistName, sectionTitle, browseId, params, type)
+                                )
+                            },
+                            collapsedMiniPlayerHeight = floatingControlsHeight + 3.dp
+                        )
+                    }
+
+                    composable<Route.ArtistMore>(
+                        enterTransition = { slideInHorizontally(navSpring) { it } },
+                        exitTransition = { slideOutHorizontally(navSpring) { -it / 4 } + fadeOut(motionScheme.fastEffectsSpec()) },
+                        popEnterTransition = { slideInHorizontally(navSpring) { -it / 4 } + fadeIn(motionScheme.defaultEffectsSpec()) },
+                        popExitTransition = { slideOutHorizontally(navSpring) { it } + fadeOut(motionScheme.fastEffectsSpec()) }
+                    ) { backStackEntry ->
+                        val route = backStackEntry.toRoute<Route.ArtistMore>()
+                        ArtistMoreScreen(
+                            seed = route,
+                            animatedVisibilityScope = this@composable,
+                            onAlbumTap = navToAlbum5,
+                            onVideoTap = onVideoTap,
                             collapsedMiniPlayerHeight = floatingControlsHeight + 3.dp
                         )
                     }
