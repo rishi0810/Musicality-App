@@ -4,7 +4,11 @@ import android.content.Intent
 import android.content.ClipData
 import android.util.Log
 import android.widget.Toast
+import android.app.Activity
+import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Animatable
@@ -34,6 +38,7 @@ import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -118,7 +123,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.media3.common.Player
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -293,6 +300,42 @@ fun PlayerSheet(
     val miniContentAlpha = (1f - clampedExpandProgress * 4f).coerceIn(0f, 1f)
     val fullContentAlpha = clampedExpandProgress
     val surface = MaterialTheme.colorScheme.surface
+
+    val darkTheme = isSystemInDarkTheme()
+    val activity = LocalContext.current as? ComponentActivity
+    val playerCoversStatusBar = clampedExpandProgress > 0.5f
+    DisposableEffect(playerCoversStatusBar, darkTheme, activity) {
+        if (activity == null) return@DisposableEffect onDispose {}
+        if (playerCoversStatusBar) {
+            activity.enableEdgeToEdge(
+                statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+                navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+            )
+        } else {
+            activity.enableEdgeToEdge(
+                statusBarStyle = SystemBarStyle.auto(
+                    android.graphics.Color.TRANSPARENT,
+                    android.graphics.Color.TRANSPARENT
+                ),
+                navigationBarStyle = SystemBarStyle.auto(
+                    android.graphics.Color.TRANSPARENT,
+                    android.graphics.Color.TRANSPARENT
+                )
+            )
+        }
+        onDispose {
+            activity.enableEdgeToEdge(
+                statusBarStyle = SystemBarStyle.auto(
+                    android.graphics.Color.TRANSPARENT,
+                    android.graphics.Color.TRANSPARENT
+                ),
+                navigationBarStyle = SystemBarStyle.auto(
+                    android.graphics.Color.TRANSPARENT,
+                    android.graphics.Color.TRANSPARENT
+                )
+            )
+        }
+    }
     val artworkUrl = upscaleThumbnail(item.thumbnailUrl)
     LaunchedEffect(item.videoId, artworkUrl) {
         Log.d(TAG, "PlayerSheet hero artwork url=$artworkUrl for videoId=${item.videoId}")
@@ -460,9 +503,11 @@ fun PlayerSheet(
                 val heroGradientStops = remember(heroBlendColor) {
                     arrayOf(
                         0f to Color.Transparent,
-                        0.4f to Color.Transparent,
-                        0.6f to heroBlendColor.copy(alpha = 0.3f),
-                        0.8f to heroBlendColor.copy(alpha = 0.7f),
+                        0.3f to Color.Transparent,
+                        0.5f to heroBlendColor.copy(alpha = 0.25f),
+                        0.65f to heroBlendColor.copy(alpha = 0.55f),
+                        0.8f to heroBlendColor.copy(alpha = 0.85f),
+                        0.9f to heroBlendColor.copy(alpha = 0.95f),
                         1f to heroBlendColor
                     )
                 }
@@ -516,7 +561,7 @@ fun PlayerSheet(
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(4.dp)
+                                    .height(8.dp)
                                     .align(Alignment.BottomCenter)
                                     .background(heroBlendColor)
                             )
@@ -593,7 +638,7 @@ fun PlayerSheet(
                                     label = "song-title",
                                     modifier = Modifier
                                         .weight(1f)
-                                        .padding(horizontal = 8.dp)
+                                        .padding(horizontal = 20.dp)
                                 ) { animItem ->
                                     Text(
                                         text = animItem.title.toCleanSongTitle(),
@@ -1633,6 +1678,10 @@ private fun QueueActionSheet(
     crossfadeLockActive: Boolean = false,
     containerColor: Color
 ) {
+    val backdropPalette = LocalPlaybackBackdropPalette.current
+    val headerColor = backdropPalette?.title ?: Color.White
+    val headerVariantColor = backdropPalette?.body ?: Color.White.copy(alpha = 0.74f)
+
     PlayerOverlayBottomSheet(
         visible = true,
         onDismiss = onDismiss,
@@ -1661,7 +1710,7 @@ private fun QueueActionSheet(
                         text = "Upcoming",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface,
+                        color = headerColor,
                         modifier = Modifier.padding(start = 8.dp)
                     )
                     Spacer(modifier = Modifier.weight(1f))
@@ -1672,7 +1721,7 @@ private fun QueueActionSheet(
                         Icon(
                             imageVector = Icons.Rounded.Close,
                             contentDescription = "Close queue",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            tint = headerVariantColor
                         )
                     }
                 }

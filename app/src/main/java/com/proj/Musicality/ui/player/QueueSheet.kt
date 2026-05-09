@@ -89,6 +89,7 @@ import com.proj.Musicality.data.model.PlaybackQueue
 import com.proj.Musicality.data.model.QueueSource
 import com.proj.Musicality.ui.components.hapticClickable
 import com.proj.Musicality.ui.components.hapticCombinedClickable
+import com.proj.Musicality.ui.theme.LocalPlaybackBackdropPalette
 import com.proj.Musicality.ui.theme.LocalPlaybackUiPalette
 import com.proj.Musicality.util.toCompactSongTitle
 import kotlinx.coroutines.launch
@@ -134,6 +135,9 @@ fun QueueContent(
     val context = LocalContext.current
     val haptics = LocalHapticFeedback.current
     val playbackUiPalette = LocalPlaybackUiPalette.current
+    val backdropPalette = LocalPlaybackBackdropPalette.current
+    val queueOnSurface = backdropPalette?.title ?: Color.White
+    val queueOnSurfaceVariant = backdropPalette?.body ?: Color.White.copy(alpha = 0.74f)
     val repository = remember(context.applicationContext) {
         LibraryRepository.getInstance(context.applicationContext)
     }
@@ -278,7 +282,7 @@ fun QueueContent(
                                         color = if (isCurrent) {
                                             currentItemAccentColor
                                         } else {
-                                            MaterialTheme.colorScheme.onSurface
+                                            queueOnSurface
                                         }
                                     )
                                     Text(
@@ -286,7 +290,7 @@ fun QueueContent(
                                         style = MaterialTheme.typography.bodySmall,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
-                                        color = if (isCurrent) currentItemSecondaryColor else MaterialTheme.colorScheme.onSurfaceVariant
+                                        color = if (isCurrent) currentItemSecondaryColor else queueOnSurfaceVariant
                                     )
                                 }
                                 item.durationText?.let { dur ->
@@ -294,7 +298,7 @@ fun QueueContent(
                                     Text(
                                         text = dur,
                                         style = MaterialTheme.typography.labelSmall,
-                                        color = if (isCurrent) currentItemSecondaryColor else MaterialTheme.colorScheme.onSurfaceVariant
+                                        color = if (isCurrent) currentItemSecondaryColor else queueOnSurfaceVariant
                                     )
                                 }
                             }
@@ -641,7 +645,8 @@ private fun QueueActionItem(
 
 @Composable
 private fun ReorderHandle() {
-    val lineColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f)
+    val backdropPalette = LocalPlaybackBackdropPalette.current
+    val lineColor = (backdropPalette?.body ?: Color.White.copy(alpha = 0.74f)).copy(alpha = 0.75f)
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         repeat(3) {
             Box(

@@ -114,6 +114,7 @@ import com.proj.Musicality.ui.components.hapticCombinedClickable
 import com.proj.Musicality.ui.components.pressScale
 import com.proj.Musicality.ui.theme.LocalPlaybackUiPalette
 import com.proj.Musicality.ui.theme.rememberMediaBackdropPalette
+import com.proj.Musicality.util.toCleanSongTitle
 import com.proj.Musicality.util.toCompactSongTitle
 import com.proj.Musicality.util.upscaleThumbnail
 import com.proj.Musicality.viewmodel.HomeViewModel
@@ -397,6 +398,8 @@ private fun HomeSectionShelf(
         section.title.equals("Trending on Shorts", ignoreCase = true)
     }
 
+    val displayTitle = remember(section.title) { cleanSectionTitle(section.title) }
+
     Column(modifier = Modifier.fillMaxWidth()) {
         // Dispatch on layout hints for personalized sections
         when (section.layoutHint) {
@@ -420,7 +423,7 @@ private fun HomeSectionShelf(
             SectionLayout.ALBUM_CAROUSEL -> {
                 if (section.title.isNotBlank()) {
                     SectionHeader(
-                        title = section.title,
+                        title = displayTitle,
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
@@ -434,7 +437,7 @@ private fun HomeSectionShelf(
             SectionLayout.SONG_CAROUSEL -> {
                 if (section.title.isNotBlank()) {
                     SectionHeader(
-                        title = section.title,
+                        title = displayTitle,
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
@@ -449,7 +452,7 @@ private fun HomeSectionShelf(
             SectionLayout.SONG_FEATURED_MIX -> {
                 if (section.title.isNotBlank()) {
                     SectionHeader(
-                        title = section.title,
+                        title = displayTitle,
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
@@ -472,7 +475,7 @@ private fun HomeSectionShelf(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 SectionHeader(
-                    title = section.title,
+                    title = displayTitle,
                     modifier = Modifier.weight(1f)
                 )
                 HomeMoreButton(
@@ -809,21 +812,16 @@ private fun SongFeaturedMix(
     )
 
     val darkTheme = isSystemInDarkTheme()
-    val gradientTop = if (darkTheme) {
-        featuredPalette.top
+    val cardBase = if (darkTheme) {
+        lerp(Color(0xFF1A1A1A), featuredPalette.middle, 0.18f)
     } else {
-        lerp(featuredPalette.top, Color.White, 0.62f)
-    }
-    val gradientBottom = if (darkTheme) {
-        lerp(featuredPalette.bottom, Color.Black, 0.12f)
-    } else {
-        lerp(featuredPalette.bottom, Color.White, 0.78f)
+        lerp(Color(0xFFF2F2F2), featuredPalette.middle, 0.10f)
     }
     val accent = featuredPalette.accent
-    val titleColor = if (darkTheme) featuredPalette.title else Color(0xFF111315)
-    val bodyColor = if (darkTheme) featuredPalette.body else Color(0xFF111315).copy(alpha = 0.62f)
+    val titleColor = if (darkTheme) Color.White else Color(0xFF111315)
+    val bodyColor = if (darkTheme) Color.White.copy(alpha = 0.62f) else Color(0xFF111315).copy(alpha = 0.62f)
     val borderColor = if (darkTheme) {
-        Color.White.copy(alpha = 0.06f)
+        Color.White.copy(alpha = 0.08f)
     } else {
         Color(0xFF111315).copy(alpha = 0.06f)
     }
@@ -832,7 +830,6 @@ private fun SongFeaturedMix(
     } else {
         Color(0xFF111315).copy(alpha = 0.05f)
     }
-    val cardGradient = Brush.verticalGradient(listOf(gradientTop, gradientBottom))
     val haptics = LocalHapticFeedback.current
     val cardInteraction = remember { MutableInteractionSource() }
 
@@ -856,7 +853,7 @@ private fun SongFeaturedMix(
                 .fillMaxWidth()
                 .pressScale(cardInteraction)
                 .clip(RoundedCornerShape(8.dp))
-                .background(cardGradient)
+                .background(cardBase)
                 .border(
                     BorderStroke(1.dp, borderColor),
                     RoundedCornerShape(8.dp)
@@ -871,21 +868,6 @@ private fun SongFeaturedMix(
                     }
                 )
         ) {
-            Box(
-                modifier = Modifier
-                    .matchParentSize()
-                    .background(
-                        Brush.radialGradient(
-                            colors = listOf(
-                                accent.copy(alpha = if (darkTheme) 0.18f else 0.14f),
-                                Color.Transparent
-                            ),
-                            center = androidx.compose.ui.geometry.Offset(140f, 140f),
-                            radius = 520f
-                        )
-                    )
-            )
-
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -951,7 +933,7 @@ private fun SongFeaturedMix(
                     Icon(
                         imageVector = Icons.Rounded.PlayArrow,
                         contentDescription = "Play ${featured.title}",
-                        tint = Color.White,
+                        tint = featuredPalette.onAccent,
                         modifier = Modifier.size(26.dp)
                     )
                 }
@@ -1448,6 +1430,18 @@ private fun HeroContinuePlayingWithTopPicks(
             }
         }
     }
+}
+
+private val sectionTitlePrefixRegex = Regex(
+    """^(Similar to|Continue Playing)\s+""",
+    RegexOption.IGNORE_CASE
+)
+
+private fun cleanSectionTitle(title: String): String {
+    val match = sectionTitlePrefixRegex.find(title) ?: return title
+    val prefix = match.groupValues[1]
+    val songName = title.removePrefix(match.value).toCleanSongTitle()
+    return "$prefix $songName"
 }
 
 private fun HomeSection.usesUpNextSeedQueue(): Boolean {

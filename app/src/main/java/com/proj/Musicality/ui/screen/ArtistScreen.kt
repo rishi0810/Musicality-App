@@ -117,6 +117,8 @@ import com.proj.Musicality.ui.components.SectionHeader
 import com.proj.Musicality.ui.components.ShimmerSection
 import com.proj.Musicality.ui.components.SongListItem
 import com.proj.Musicality.ui.components.Thumbnail
+import com.proj.Musicality.ui.theme.ForceGradientStatusBar
+import com.proj.Musicality.ui.theme.GradientTheme
 import com.proj.Musicality.ui.theme.LocalSharedTransitionScope
 import com.proj.Musicality.ui.theme.MediaBoundsSpring
 import com.proj.Musicality.ui.theme.rememberMediaBackdropPalette
@@ -169,6 +171,8 @@ fun ArtistScreen(
         key = seed.browseId,
         factory = ArtistViewModelFactory(seed.browseId)
     )
+
+    ForceGradientStatusBar()
 
     LaunchedEffect(seed.browseId) {
         viewModel.initialize(seed)
@@ -269,6 +273,7 @@ fun ArtistScreen(
                 )
             }
     ) {
+    GradientTheme {
     LazyColumn(
         state = listState,
         modifier = Modifier.fillMaxSize(),
@@ -523,7 +528,8 @@ fun ArtistScreen(
             }
         }
     }
-    }
+    } // GradientTheme
+    } // Box
 
     selectedTopSongMenu?.let { menu ->
         val mediaState by remember(menu.videoId) {

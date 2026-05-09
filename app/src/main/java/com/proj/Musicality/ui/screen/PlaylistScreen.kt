@@ -49,6 +49,8 @@ import com.proj.Musicality.data.local.MediaLibraryState
 import com.proj.Musicality.data.model.*
 import com.proj.Musicality.navigation.Route
 import com.proj.Musicality.ui.components.*
+import com.proj.Musicality.ui.theme.ForceGradientStatusBar
+import com.proj.Musicality.ui.theme.GradientTheme
 import com.proj.Musicality.ui.theme.LocalSharedTransitionScope
 import com.proj.Musicality.ui.theme.MediaBoundsSpring
 import com.proj.Musicality.ui.theme.rememberMediaBackdropPalette
@@ -96,6 +98,8 @@ fun PlaylistScreen(
         factory = PlaylistViewModelFactory(seed.browseId)
     )
 
+    ForceGradientStatusBar()
+
     LaunchedEffect(seed.browseId) {
         viewModel.initialize(seed)
     }
@@ -125,6 +129,7 @@ fun PlaylistScreen(
     val scope = rememberCoroutineScope()
     var selectedTrackMenu by remember { mutableStateOf<PlaylistTrackMenuModel?>(null) }
 
+    GradientTheme {
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -462,6 +467,7 @@ fun PlaylistScreen(
         }
         }
     } // Box
+    } // GradientTheme
 
     selectedTrackMenu?.let { menu ->
         val mediaState by remember(menu.mediaItem.videoId) {

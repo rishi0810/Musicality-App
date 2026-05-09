@@ -86,13 +86,13 @@ fun rememberMediaBackdropPalette(
         mutableStateOf(defaultMediaBackdropPalette(fallbackSurface))
     }
 
-    LaunchedEffect(imageUrl, fallbackSurface, allowNetworkFetch) {
+    LaunchedEffect(imageUrl, allowNetworkFetch) {
         if (imageUrl.isNullOrBlank()) {
             palette = defaultMediaBackdropPalette(fallbackSurface)
             return@LaunchedEffect
         }
 
-        val cacheKey = "media-palette:v2:$imageUrl:${fallbackSurface.toArgb()}"
+        val cacheKey = "media-palette:v3:$imageUrl"
         (AppCache.paletteColors.get(cacheKey) as? MediaBackdropPalette)?.let {
             palette = it
             return@LaunchedEffect
@@ -204,14 +204,24 @@ fun rememberMediaBackdropPalette(
     }
 }
 
+private val GradientSurface = Color(0xFF000000)
+
 private fun buildMediaBackdropPalette(
     palette: Palette,
     fallbackSurface: Color
 ): MediaBackdropPalette {
-    val surface = fallbackSurface.copy(alpha = 1f)
+    val surface = GradientSurface
     val allSwatches = palette.swatches
-    val expressiveSwatches = allSwatches.filter { saturationOf(Color(it.rgb)) >= 0.12f }
-    val swatches = (if (expressiveSwatches.isNotEmpty()) expressiveSwatches else allSwatches)
+    val totalPopulation = allSwatches.sumOf { it.population }.coerceAtLeast(1)
+    val expressiveSwatches = allSwatches.filter { saturationOf(Color(it.rgb)) >= 0.18f }
+    val expressivePopulationRatio =
+        expressiveSwatches.sumOf { it.population }.toFloat() / totalPopulation.toFloat()
+    val swatches = if (expressiveSwatches.isNotEmpty() && expressivePopulationRatio >= 0.15f) {
+        expressiveSwatches
+    } else {
+        allSwatches
+    }
+    val isAchromatic = expressivePopulationRatio < 0.15f
     val maxPopulation = swatches.maxOfOrNull { it.population }?.coerceAtLeast(1) ?: 1
     val sortedSwatches = swatches
         .sortedByDescending { scoreSwatch(it, maxPopulation) }
@@ -220,8 +230,10 @@ private fun buildMediaBackdropPalette(
         .firstOrNull()
         ?.let { Color(it.rgb) }
 
+    val dominantMinSaturation = if (isAchromatic) 0.06f else 0.22f
+    val dominantTargetLightness = if (isAchromatic) 0.28f else 0.38f
     val dominant = dominantSeed
-        ?.let { normalizeBackdropColor(it, surface, targetLightness = 0.38f, minSaturation = 0.22f) }
+        ?.let { normalizeBackdropColor(it, surface, targetLightness = dominantTargetLightness, minSaturation = dominantMinSaturation) }
         ?: darkenColor(surface, 0.08f)
 
     val supportiveSeed = sortedSwatches
@@ -247,8 +259,9 @@ private fun buildMediaBackdropPalette(
             ?.let { Color(it.rgb) }
         ?: dominantSeed
 
+    val supportiveMinSaturation = if (isAchromatic) 0.04f else 0.18f
     val supportiveBase = supportiveSeed
-        ?.let { normalizeBackdropColor(it, surface, targetLightness = 0.30f, minSaturation = 0.18f) }
+        ?.let { normalizeBackdropColor(it, surface, targetLightness = 0.30f, minSaturation = supportiveMinSaturation) }
         ?: darkenColor(dominant, 0.12f)
 
     // Keep large hue jumps from producing muddy olive/brown backdrops when dominant is already strong.
@@ -292,9 +305,10 @@ private fun buildMediaBackdropPalette(
 }
 
 private fun defaultMediaBackdropPalette(surface: Color): MediaBackdropPalette {
-    val top = lerp(surface.copy(alpha = 1f), Color.Black, 0.12f)
-    val middle = lerp(surface.copy(alpha = 1f), Color.Black, 0.22f)
-    val bottom = lerp(surface.copy(alpha = 1f), Color.Black, 0.34f)
+    val s = GradientSurface
+    val top = lerp(s, Color.Black, 0.12f)
+    val middle = lerp(s, Color.Black, 0.22f)
+    val bottom = lerp(s, Color.Black, 0.34f)
     val accent = ensureContrastAgainst(Color(0xFF9CCBFF), bottom, 3.1)
     val title = readableForegroundForBackgrounds(top, middle, bottom)
     return MediaBackdropPalette(

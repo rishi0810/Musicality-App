@@ -32,6 +32,14 @@ private val trailingDashTagRegex = Regex(
     RegexOption.IGNORE_CASE
 )
 
+private val hashtagRegex = Regex(
+    """\s*#\S+""",
+)
+
+private val pipeSeparatedCreditsRegex = Regex(
+    """\s*[-–—]\s+[^|]+(\|[^|]+)+\s*$""",
+)
+
 fun String.toCleanSongTitle(): String {
     val fallback = ifBlank { "Unknown song" }
     var clean = fallback
@@ -43,6 +51,8 @@ fun String.toCleanSongTitle(): String {
         .replace(parenthesizedTagRegex, "")
         .replace(trailingDashTagRegex, "")
         .replace(inlineFeatRegex, "")
+        .replace(hashtagRegex, "")
+        .replace(pipeSeparatedCreditsRegex, "")
         .replace(Regex("""\s{2,}"""), " ")
         .trim()
     if (clean.isBlank()) clean = fallback

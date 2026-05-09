@@ -1,10 +1,14 @@
 package com.proj.Musicality.ui.theme
 
+import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
+import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -60,4 +64,45 @@ fun MusicAppTheme(content: @Composable () -> Unit) {
         motionScheme = MotionScheme.expressive(),
         content = content
     )
+}
+
+@Composable
+fun GradientTheme(content: @Composable () -> Unit) {
+    val darkTheme = isSystemInDarkTheme()
+    if (darkTheme) {
+        content()
+    } else {
+        val context = LocalContext.current
+        val darkBackground = Color(0xFF000000)
+        val darkColorScheme = dynamicDarkColorScheme(context).copy(
+            background = darkBackground,
+            surface = darkBackground
+        )
+        MaterialTheme(colorScheme = darkColorScheme, content = content)
+    }
+}
+
+@Composable
+fun ForceGradientStatusBar() {
+    val darkTheme = isSystemInDarkTheme()
+    val activity = LocalContext.current as? ComponentActivity
+    DisposableEffect(darkTheme, activity) {
+        if (activity == null || darkTheme) return@DisposableEffect onDispose {}
+        activity.enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+        )
+        onDispose {
+            activity.enableEdgeToEdge(
+                statusBarStyle = SystemBarStyle.auto(
+                    android.graphics.Color.TRANSPARENT,
+                    android.graphics.Color.TRANSPARENT
+                ),
+                navigationBarStyle = SystemBarStyle.auto(
+                    android.graphics.Color.TRANSPARENT,
+                    android.graphics.Color.TRANSPARENT
+                )
+            )
+        }
+    }
 }
