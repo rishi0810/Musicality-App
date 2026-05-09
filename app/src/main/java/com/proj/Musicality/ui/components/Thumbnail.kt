@@ -14,6 +14,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import com.proj.Musicality.config.LocalCornerRadius
+import com.proj.Musicality.config.scaled
 import coil3.request.CachePolicy
 import coil3.request.ImageRequest
 import coil3.request.crossfade
@@ -27,7 +29,8 @@ fun Thumbnail(
     cornerRadius: Dp = 4.dp,
     allowNetworkFetch: Boolean = true
 ) {
-    val shape = RoundedCornerShape(cornerRadius)
+    val radiusPreset = LocalCornerRadius.current
+    val shape = RoundedCornerShape(cornerRadius.scaled(radiusPreset))
     val density = LocalDensity.current
     val context = LocalContext.current
     val targetPx = with(density) { size.roundToPx() }

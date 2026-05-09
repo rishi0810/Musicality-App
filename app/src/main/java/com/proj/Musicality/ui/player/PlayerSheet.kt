@@ -194,6 +194,7 @@ import com.proj.Musicality.ui.components.hapticClickable
 import com.proj.Musicality.ui.theme.LocalPlaybackBackdropPalette
 import com.proj.Musicality.ui.theme.LocalPlaybackUiPalette
 import com.proj.Musicality.ui.theme.rememberMediaBackdropPalette
+import com.proj.Musicality.config.AppConfig
 import com.proj.Musicality.util.formatMs
 import com.proj.Musicality.util.toCleanSongTitle
 import com.proj.Musicality.util.toCompactSongTitle
@@ -2010,6 +2011,7 @@ private fun LyricsPanel(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
+    val wordSyncEnabled by AppConfig.wordSyncLyrics.collectAsStateWithLifecycle()
     val positionMs by positionMsFlow.collectAsStateWithLifecycle()
     val smoothedPositionMsFloat by animateFloatAsState(
         targetValue = positionMs.toFloat(),
@@ -2338,7 +2340,7 @@ private fun LyricsPanel(
                                 seekModifier
                             }
                             val words = line.words
-                            val useWordSync = !shareMode && ls.isSynced &&
+                            val useWordSync = wordSyncEnabled && !shareMode && ls.isSynced &&
                                 distance == 0 && !words.isNullOrEmpty()
                             if (useWordSync) {
                                 // Keep original line text intact and style ranges in-place,

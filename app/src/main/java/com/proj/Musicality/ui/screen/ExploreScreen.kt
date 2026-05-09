@@ -61,6 +61,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.request.crossfade
+import com.proj.Musicality.config.LocalCornerRadius
+import com.proj.Musicality.config.scaled
 import com.proj.Musicality.R
 import com.proj.Musicality.data.model.HomeItem
 import com.proj.Musicality.data.model.HomeSection
@@ -318,8 +320,9 @@ private fun GenresRow(onMoodTap: (MoodCategoryParser.Mood) -> Unit) {
 
 @Composable
 private fun GenreCard(mood: MoodCategoryParser.Mood, onClick: () -> Unit) {
+    val radiusPreset = LocalCornerRadius.current
     val interactionSource = remember { MutableInteractionSource() }
-    val shape = RoundedCornerShape(14.dp)
+    val shape = RoundedCornerShape(14.dp.scaled(radiusPreset))
     // Strong scrim covering bottom ~50% of card
     val scrim = remember {
         Brush.verticalGradient(
@@ -417,6 +420,7 @@ private fun MoodsRow(onMoodTap: (MoodCategoryParser.Mood) -> Unit) {
 
 @Composable
 private fun MoodChip(mood: MoodCategoryParser.Mood, onClick: () -> Unit) {
+    val radiusPreset = LocalCornerRadius.current
     val accentColor = moodAccentColor(mood)
     val interactionSource = remember { MutableInteractionSource() }
     Surface(
@@ -427,7 +431,7 @@ private fun MoodChip(mood: MoodCategoryParser.Mood, onClick: () -> Unit) {
                 indication = null,
                 onClick = onClick
             ),
-        shape = RoundedCornerShape(10.dp),
+        shape = RoundedCornerShape(10.dp.scaled(radiusPreset)),
         color = MaterialTheme.colorScheme.surfaceContainerHighest
     ) {
         Row(

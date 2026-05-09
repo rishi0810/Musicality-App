@@ -66,6 +66,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.proj.Musicality.config.LocalCornerRadius
+import com.proj.Musicality.config.scaled
 import com.proj.Musicality.R
 import com.proj.Musicality.data.local.LibraryCollectionType
 import com.proj.Musicality.data.local.MediaDownloadState
@@ -100,6 +102,7 @@ fun LibraryCollectionScreen(
     collapsedMiniPlayerHeight: Dp,
     modifier: Modifier = Modifier
 ) {
+    val radiusPreset = LocalCornerRadius.current
     val context = LocalContext.current
     val repository = remember(context.applicationContext) {
         LibraryRepository.getInstance(context.applicationContext)
@@ -176,7 +179,7 @@ fun LibraryCollectionScreen(
                         Box(
                             modifier = Modifier
                                 .size(220.dp)
-                                .clip(RoundedCornerShape(16.dp))
+                                .clip(RoundedCornerShape(16.dp.scaled(radiusPreset)))
                                 .background(MaterialTheme.colorScheme.surfaceContainerHigh),
                             contentAlignment = Alignment.Center
                         ) {

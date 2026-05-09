@@ -72,7 +72,9 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
 
     // ── Crossfade ──
     private val crossfadeManager = SimpleCrossfadeManager(application.applicationContext)
-    private val _crossfadeEnabled = MutableStateFlow(false)
+    private val _crossfadeEnabled = MutableStateFlow(
+        com.proj.Musicality.config.AppConfig.crossfadeEnabled.value
+    )
     val crossfadeEnabled: StateFlow<Boolean> = _crossfadeEnabled.asStateFlow()
 
     private var positionJob: Job? = null
@@ -93,12 +95,22 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
 
     init {
         AudioFileCache.init(application.applicationContext)
+        if (_crossfadeEnabled.value) {
+            crossfadeManager.setEnabled(true)
+        }
         connectToSession()
-        // Collect skip events from notification controls
         viewModelScope.launch {
             PlaybackService.skipEvents.collect { direction ->
                 Log.d(TAG, "Skip event from notification: direction=$direction")
                 if (direction > 0) skipNext() else skipPrev()
+            }
+        }
+        viewModelScope.launch {
+            com.proj.Musicality.config.AppConfig.crossfadeEnabled.collect { enabled ->
+                if (enabled != _crossfadeEnabled.value) {
+                    _crossfadeEnabled.value = enabled
+                    crossfadeManager.setEnabled(enabled, getDelegatingPlayer())
+                }
             }
         }
     }
@@ -106,6 +118,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
     fun toggleCrossfade() {
         val enabled = !_crossfadeEnabled.value
         _crossfadeEnabled.value = enabled
+        com.proj.Musicality.config.AppConfig.setCrossfadeEnabled(enabled)
         crossfadeManager.setEnabled(enabled, getDelegatingPlayer())
     }
 
@@ -581,8 +594,10 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         fetchLyrics(item)
         ensureServiceStarted()
         viewModelScope.launch(Dispatchers.IO) {
-            runCatching { listeningHistoryRepository.recordPlayback(item) }
-            HomePrefetchManager.prefetch(getApplication<Application>().applicationContext, forcePersonalization = true)
+            if (!com.proj.Musicality.config.AppConfig.listeningHistoryPaused.value) {
+                runCatching { listeningHistoryRepository.recordPlayback(item) }
+                HomePrefetchManager.prefetch(getApplication<Application>().applicationContext, forcePersonalization = true)
+            }
         }
 
         // Unpin previous track, pin current
@@ -684,8 +699,10 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                 _positionMs.value = 0L
                 fetchLyrics(nextItem)
                 withContext(Dispatchers.IO) {
-                    runCatching { listeningHistoryRepository.recordPlayback(nextItem) }
-                    HomePrefetchManager.prefetch(getApplication<Application>().applicationContext, forcePersonalization = true)
+                    if (!com.proj.Musicality.config.AppConfig.listeningHistoryPaused.value) {
+                        runCatching { listeningHistoryRepository.recordPlayback(nextItem) }
+                        HomePrefetchManager.prefetch(getApplication<Application>().applicationContext, forcePersonalization = true)
+                    }
                 }
                 maybeExtendLibraryQueueFromCurrentPosition()
             },

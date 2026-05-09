@@ -97,6 +97,8 @@ import com.proj.Musicality.data.local.LibraryRepository
 import com.proj.Musicality.data.local.LibrarySnapshot
 import com.proj.Musicality.data.local.SavedEntry
 import com.proj.Musicality.data.local.SavedFilter
+import com.proj.Musicality.config.LocalCornerRadius
+import com.proj.Musicality.config.scaled
 import com.proj.Musicality.R
 import com.proj.Musicality.ui.components.HapticFilledTonalButton
 import com.proj.Musicality.ui.components.HapticIconButton
@@ -294,6 +296,7 @@ private fun SavedLibrarySection(
     onRemoveEntry: (SavedEntry) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val radiusPreset = LocalCornerRadius.current
     var showSortMenu by remember { mutableStateOf(false) }
     val backdropPalette = LocalPlaybackBackdropPalette.current
     val segmentedActiveContainerColor = backdropPalette?.middle
@@ -377,7 +380,7 @@ private fun SavedLibrarySection(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(220.dp)
-                        .clip(RoundedCornerShape(24.dp))
+                        .clip(RoundedCornerShape(24.dp.scaled(radiusPreset)))
                         .background(MaterialTheme.colorScheme.surfaceContainerLow),
                     contentAlignment = Alignment.Center
                 ) {
@@ -533,6 +536,7 @@ private fun MasonryCard(
     onClick: (SavedEntry) -> Unit,
     onRequestRemove: (SavedEntry) -> Unit
 ) {
+    val radiusPreset = LocalCornerRadius.current
     val sharedTransitionScope = LocalSharedTransitionScope.current
     val sharedElementKey = when (selectedSavedFilter) {
         SavedFilter.ALBUM -> "thumb-album-${entry.id}"
@@ -543,7 +547,7 @@ private fun MasonryCard(
     Card(
         modifier = modifier
             .clickable { onClick(entry) },
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(16.dp.scaled(radiusPreset)),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow
         )
@@ -584,9 +588,9 @@ private fun MasonryCard(
                         .size(28.dp)
                         .background(
                             color = Color.Black.copy(alpha = 0.35f),
-                            shape = RoundedCornerShape(16.dp)
+                            shape = RoundedCornerShape(16.dp.scaled(radiusPreset))
                         )
-                        .clip(RoundedCornerShape(16.dp))
+                        .clip(RoundedCornerShape(16.dp.scaled(radiusPreset)))
                 ) {
                     Icon(
                         imageVector = Icons.Rounded.DeleteForever,
@@ -631,6 +635,7 @@ private fun CollectionSummaryCard(
     icon: @Composable () -> Unit,
     onClick: () -> Unit
 ) {
+    val radiusPreset = LocalCornerRadius.current
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -640,7 +645,7 @@ private fun CollectionSummaryCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(1f),
-            shape = RoundedCornerShape(18.dp),
+            shape = RoundedCornerShape(18.dp.scaled(radiusPreset)),
             colors = CardDefaults.cardColors(
                 containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
             )

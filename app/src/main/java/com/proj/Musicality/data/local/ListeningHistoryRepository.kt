@@ -51,6 +51,12 @@ class ListeningHistoryRepository private constructor(
         }
     }
 
+    suspend fun clearAll() = withContext(Dispatchers.IO) {
+        writeMutex.withLock {
+            db.clearListeningHistory()
+        }
+    }
+
     suspend fun getSnapshot(): ListeningHistorySnapshot = withContext(Dispatchers.IO) {
         // Serialize snapshot reads with writes so tiering decisions don't see partial history.
         writeMutex.withLock {

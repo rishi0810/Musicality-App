@@ -574,6 +574,12 @@ class SQLiteDatabaseHelper(context: Context) : SQLiteOpenHelper(
         )
     }
 
+    fun clearListeningHistory() {
+        writableDatabase.execSQL("DELETE FROM listening_history")
+        writableDatabase.execSQL("DELETE FROM song_play_counts")
+        writableDatabase.execSQL("DELETE FROM artist_play_counts")
+    }
+
     private fun createLibraryTables(db: SQLiteDatabase) {
         db.execSQL(
             """

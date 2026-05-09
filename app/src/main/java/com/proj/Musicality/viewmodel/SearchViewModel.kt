@@ -24,7 +24,7 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
     companion object {
         private const val PREFS_NAME = "search_prefs"
         private const val KEY_SEARCH_HISTORY = "search_history"
-        private const val MAX_HISTORY_ENTRIES = 12
+        private const val MAX_HISTORY_ENTRIES = 5
     }
 
     private val _query = MutableStateFlow("")
@@ -114,6 +114,7 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private fun addSearchToHistory(query: String) {
+        if (com.proj.Musicality.config.AppConfig.searchHistoryPaused.value) return
         val updated = buildList {
             add(query)
             addAll(_searchHistory.value.filterNot { it.equals(query, ignoreCase = true) })

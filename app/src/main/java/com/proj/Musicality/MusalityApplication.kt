@@ -8,6 +8,7 @@ import coil3.memory.MemoryCache
 import coil3.request.crossfade
 import com.proj.Musicality.api.IpLocationRepository
 import com.proj.Musicality.api.VisitorManager
+import com.proj.Musicality.config.AppConfig
 import com.proj.Musicality.viewmodel.HomePrefetchManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -20,6 +21,7 @@ class MusalityApplication : Application(), SingletonImageLoader.Factory {
 
     override fun onCreate() {
         super.onCreate()
+        AppConfig.init(this)
         VisitorManager.loadFromPrefs(this)
         applicationScope.launch {
             IpLocationRepository.fetchAndCacheOnce(this@MusalityApplication)

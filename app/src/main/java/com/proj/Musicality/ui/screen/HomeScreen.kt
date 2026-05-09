@@ -44,6 +44,7 @@ import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Podcasts
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Widgets
 import androidx.compose.material3.CircularProgressIndicator
@@ -114,6 +115,8 @@ import com.proj.Musicality.ui.components.hapticCombinedClickable
 import com.proj.Musicality.ui.components.pressScale
 import com.proj.Musicality.ui.theme.LocalPlaybackUiPalette
 import com.proj.Musicality.ui.theme.rememberMediaBackdropPalette
+import com.proj.Musicality.config.LocalCornerRadius
+import com.proj.Musicality.config.scaled
 import com.proj.Musicality.util.toCleanSongTitle
 import com.proj.Musicality.util.toCompactSongTitle
 import com.proj.Musicality.util.upscaleThumbnail
@@ -147,6 +150,7 @@ fun HomeScreen(
     onArtistTap: (String, String, String?) -> Unit,
     onAlbumTap: (String, String, String?, String?) -> Unit,
     onPlaylistTap: (String, String, String?, String?) -> Unit,
+    onSettingsTap: () -> Unit = {},
     collapsedMiniPlayerHeight: Dp = 0.dp,
     modifier: Modifier = Modifier
 ) {
@@ -198,12 +202,25 @@ fun HomeScreen(
             contentPadding = PaddingValues(bottom = collapsedMiniPlayerHeight + 8.dp)
         ) {
             item(key = "home-title") {
-                Text(
-                    text = "Home",
-                    style = MaterialTheme.typography.headlineLarge,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 16.dp, end = 4.dp, top = 10.dp, bottom = 10.dp)
+                ) {
+                    Text(
+                        text = "Home",
+                        style = MaterialTheme.typography.headlineLarge,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f)
+                    )
+                    HapticIconButton(onClick = onSettingsTap) {
+                        Icon(
+                            Icons.Rounded.Settings,
+                            contentDescription = "Settings"
+                        )
+                    }
+                }
             }
 
             val personalizedSections = state.personalizedSections
@@ -800,6 +817,7 @@ private fun SongFeaturedMix(
     onSongTap: (MediaItem, PlaybackQueue) -> Unit,
     onSongOverflowClick: (HomeItem.Song) -> Unit
 ) {
+    val radiusPreset = LocalCornerRadius.current
     val songs = remember(section.items) { section.items.filterIsInstance<HomeItem.Song>() }
     if (songs.isEmpty()) return
     val queueItems = remember(songs) { songs.map { it.toMediaItem() } }
@@ -852,11 +870,11 @@ private fun SongFeaturedMix(
                 .padding(horizontal = 16.dp)
                 .fillMaxWidth()
                 .pressScale(cardInteraction)
-                .clip(RoundedCornerShape(8.dp))
+                .clip(RoundedCornerShape(8.dp.scaled(radiusPreset)))
                 .background(cardBase)
                 .border(
                     BorderStroke(1.dp, borderColor),
-                    RoundedCornerShape(8.dp)
+                    RoundedCornerShape(8.dp.scaled(radiusPreset))
                 )
                 .hapticCombinedClickable(
                     interactionSource = cardInteraction,
@@ -1182,13 +1200,14 @@ private fun HomeSongCard(
 
 @Composable
 private fun HomeNavButton(item: HomeItem.NavButton) {
+    val radiusPreset = LocalCornerRadius.current
     val accentColor = item.color
         ?.let { Color(it.toInt()) }
         ?: MaterialTheme.colorScheme.primary
     val icon = item.icon.toImageVector()
     Surface(
         modifier = Modifier.width(176.dp),
-        shape = RoundedCornerShape(10.dp),
+        shape = RoundedCornerShape(10.dp.scaled(radiusPreset)),
         color = MaterialTheme.colorScheme.surfaceContainerHighest
     ) {
         Row(
@@ -1281,6 +1300,7 @@ private fun HeroContinuePlaying(
     section: HomeSection,
     onSongTap: (MediaItem, PlaybackQueue) -> Unit
 ) {
+    val radiusPreset = LocalCornerRadius.current
     val song = section.items.firstOrNull() as? HomeItem.Song ?: return
     val mediaItem = remember(song) { song.toMediaItem() }
     val bottomScrim = remember {
@@ -1301,7 +1321,7 @@ private fun HeroContinuePlaying(
             .fillMaxWidth()
             .padding(horizontal = 16.dp)
             .height(200.dp)
-            .clip(RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(16.dp.scaled(radiusPreset)))
             .clickable {
                 onSongTap(
                     mediaItem,
@@ -1480,6 +1500,7 @@ private fun CompactSongCard(
     modifier: Modifier = Modifier,
     onLongPress: (() -> Unit)? = null
 ) {
+    val radiusPreset = LocalCornerRadius.current
     val interaction = remember { MutableInteractionSource() }
     val haptics = LocalHapticFeedback.current
     val clickModifier = if (onLongPress != null) {
@@ -1499,7 +1520,7 @@ private fun CompactSongCard(
         modifier = modifier
             .pressScale(interaction)
             .then(clickModifier),
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(8.dp.scaled(radiusPreset)),
         color = MaterialTheme.colorScheme.surfaceContainerHigh
     ) {
         Column {
@@ -1510,7 +1531,7 @@ private fun CompactSongCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(1f)
-                    .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
+                    .clip(RoundedCornerShape(topStart = 8.dp.scaled(radiusPreset), topEnd = 8.dp.scaled(radiusPreset)))
             )
             Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp)) {
                 Text(

@@ -87,6 +87,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.proj.Musicality.config.LocalCornerRadius
+import com.proj.Musicality.config.scaled
 import com.proj.Musicality.api.SearchType
 import com.proj.Musicality.data.local.LibraryRepository
 import com.proj.Musicality.data.local.MediaDownloadState
@@ -143,6 +145,7 @@ fun SearchScreen(
     collapsedMiniPlayerHeight: Dp = 0.dp,
     modifier: Modifier = Modifier
 ) {
+    val radiusPreset = LocalCornerRadius.current
     val viewModel: SearchViewModel = viewModel()
     val query by viewModel.query.collectAsStateWithLifecycle()
     val suggestions by viewModel.suggestions.collectAsStateWithLifecycle()
@@ -244,7 +247,7 @@ fun SearchScreen(
                     }
                 },
                 singleLine = true,
-                shape = RoundedCornerShape(22.dp),
+                shape = RoundedCornerShape(22.dp.scaled(radiusPreset)),
                 colors = TextFieldDefaults.colors(
                     unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
                     focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,

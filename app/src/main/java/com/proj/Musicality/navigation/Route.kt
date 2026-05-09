@@ -60,4 +60,7 @@ sealed interface Route {
         val author: String? = null,
         val thumbnailUrl: String? = null
     ) : Route
+
+    @Serializable
+    data object Settings : Route
 }

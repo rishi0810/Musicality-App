@@ -524,8 +524,22 @@ fun MusicApp() {
                         onVideoTap = onVideoTap,
                         onArtistTap = navToArtist,
                         onAlbumTap = navToAlbum,
-                        onPlaylistTap = navToPlaylist
+                        onPlaylistTap = navToPlaylist,
+                        onSettingsTap = { navController.navigate(Route.Settings) }
                     )
+                    }
+
+                    composable<Route.Settings>(
+                        enterTransition = { slideInHorizontally(navSpring) { it } },
+                        exitTransition = { slideOutHorizontally(navSpring) { -it / 4 } + fadeOut(motionScheme.fastEffectsSpec()) },
+                        popEnterTransition = { slideInHorizontally(navSpring) { -it / 4 } + fadeIn(motionScheme.defaultEffectsSpec()) },
+                        popExitTransition = { slideOutHorizontally(navSpring) { it } + fadeOut(motionScheme.fastEffectsSpec()) }
+                    ) {
+                        SettingsScreen(
+                            onBack = { navController.popBackStack() },
+                            collapsedMiniPlayerHeight = floatingControlsHeight + 3.dp,
+                            modifier = Modifier.statusBarsPadding()
+                        )
                     }
 
                     composable<Route.Explore> {

@@ -9,7 +9,10 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.Font
@@ -48,7 +51,12 @@ private fun typographyWithFontFamily(base: Typography, fontFamily: FontFamily): 
 @Composable
 fun MusicAppTheme(content: @Composable () -> Unit) {
     val context = LocalContext.current
-    val darkTheme = isSystemInDarkTheme()
+    val themeMode by com.proj.Musicality.config.AppConfig.themeMode.collectAsState()
+    val darkTheme = when (themeMode) {
+        com.proj.Musicality.config.ThemeMode.SYSTEM -> isSystemInDarkTheme()
+        com.proj.Musicality.config.ThemeMode.DARK -> true
+        com.proj.Musicality.config.ThemeMode.LIGHT -> false
+    }
 
     val appBackground = if (darkTheme) Color(0xFF000000) else Color(0xFFFFFBF5)
 
@@ -58,12 +66,18 @@ fun MusicAppTheme(content: @Composable () -> Unit) {
         dynamicLightColorScheme(context).copy(background = appBackground, surface = appBackground)
     }
 
+    val cornerRadiusPreset by com.proj.Musicality.config.AppConfig.cornerRadius.collectAsState()
+
     MaterialExpressiveTheme(
         colorScheme = colorScheme,
         typography = typographyWithFontFamily(Typography(), GoogleSansFlexFamily),
-        motionScheme = MotionScheme.expressive(),
-        content = content
-    )
+        motionScheme = MotionScheme.expressive()
+    ) {
+        CompositionLocalProvider(
+            com.proj.Musicality.config.LocalCornerRadius provides cornerRadiusPreset,
+            content = content
+        )
+    }
 }
 
 @Composable

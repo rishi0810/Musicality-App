@@ -17,4 +17,9 @@ class LruCache<K, V>(private val maxSize: Int) {
             map.remove(eldest.key)
         }
     }
+
+    @Synchronized
+    fun clear() {
+        map.clear()
+    }
 }
