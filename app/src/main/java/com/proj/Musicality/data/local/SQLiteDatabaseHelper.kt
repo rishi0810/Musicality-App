@@ -96,6 +96,21 @@ data class ArtistPlayCountDbRecord(
     val lastPlayedAt: Long
 )
 
+data class PlayedCacheDbRecord(
+    val videoId: String,
+    val title: String,
+    val artistName: String,
+    val artistId: String?,
+    val albumName: String?,
+    val albumId: String?,
+    val thumbnailUrl: String?,
+    val thumbnailPath: String?,
+    val durationText: String?,
+    val filePath: String,
+    val fileSizeBytes: Long,
+    val cachedAt: Long
+)
+
 class SQLiteDatabaseHelper(context: Context) : SQLiteOpenHelper(
     context,
     DATABASE_NAME,
@@ -105,6 +120,7 @@ class SQLiteDatabaseHelper(context: Context) : SQLiteOpenHelper(
     override fun onCreate(db: SQLiteDatabase) {
         createLibraryTables(db)
         createListeningHistoryTables(db)
+        createPlayedCacheTable(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -113,6 +129,9 @@ class SQLiteDatabaseHelper(context: Context) : SQLiteOpenHelper(
         }
         if (oldVersion < 3) {
             migrateListeningHistoryTablesToRequireArtistId(db)
+        }
+        if (oldVersion < 4) {
+            createPlayedCacheTable(db)
         }
     }
 
@@ -580,6 +599,88 @@ class SQLiteDatabaseHelper(context: Context) : SQLiteOpenHelper(
         writableDatabase.execSQL("DELETE FROM artist_play_counts")
     }
 
+    fun upsertPlayedCacheEntry(record: PlayedCacheDbRecord) {
+        writableDatabase.insertWithOnConflict(
+            "played_cache",
+            null,
+            ContentValues().apply {
+                put("video_id", record.videoId)
+                put("title", record.title)
+                put("artist_name", record.artistName)
+                put("artist_id", record.artistId)
+                put("album_name", record.albumName)
+                put("album_id", record.albumId)
+                put("thumbnail_url", record.thumbnailUrl)
+                put("thumbnail_path", record.thumbnailPath)
+                put("duration_text", record.durationText)
+                put("file_path", record.filePath)
+                put("file_size_bytes", record.fileSizeBytes)
+                put("cached_at", record.cachedAt)
+            },
+            SQLiteDatabase.CONFLICT_REPLACE
+        )
+    }
+
+    fun getPlayedCacheSongs(): List<PlayedCacheDbRecord> = readableDatabase.query(
+        "played_cache",
+        null,
+        null,
+        null,
+        null,
+        null,
+        "cached_at DESC"
+    ).use { cursor ->
+        buildList {
+            while (cursor.moveToNext()) add(cursor.toPlayedCacheRecord())
+        }
+    }
+
+    fun getPlayedCacheEntry(videoId: String): PlayedCacheDbRecord? = readableDatabase.query(
+        "played_cache",
+        null,
+        "video_id = ?",
+        arrayOf(videoId),
+        null,
+        null,
+        null
+    ).use { cursor ->
+        if (cursor.moveToFirst()) cursor.toPlayedCacheRecord() else null
+    }
+
+    fun getPlayedCacheTotalSizeBytes(): Long = readableDatabase.rawQuery(
+        "SELECT COALESCE(SUM(file_size_bytes), 0) FROM played_cache",
+        null
+    ).use { cursor ->
+        if (cursor.moveToFirst()) cursor.getLong(0) else 0L
+    }
+
+    fun getOldestPlayedCacheEntries(limit: Int): List<PlayedCacheDbRecord> = readableDatabase.query(
+        "played_cache",
+        null,
+        null,
+        null,
+        null,
+        null,
+        "cached_at ASC",
+        limit.coerceAtLeast(1).toString()
+    ).use { cursor ->
+        buildList {
+            while (cursor.moveToNext()) add(cursor.toPlayedCacheRecord())
+        }
+    }
+
+    fun deletePlayedCacheEntry(videoId: String): Int {
+        return writableDatabase.delete(
+            "played_cache",
+            "video_id = ?",
+            arrayOf(videoId)
+        )
+    }
+
+    fun clearPlayedCache() {
+        writableDatabase.execSQL("DELETE FROM played_cache")
+    }
+
     private fun createLibraryTables(db: SQLiteDatabase) {
         db.execSQL(
             """
@@ -720,6 +821,28 @@ class SQLiteDatabaseHelper(context: Context) : SQLiteOpenHelper(
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_listening_history_video_id ON listening_history(video_id)")
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_song_play_counts_play_count ON song_play_counts(play_count DESC)")
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_artist_play_counts_play_count ON artist_play_counts(play_count DESC)")
+    }
+
+    private fun createPlayedCacheTable(db: SQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS played_cache (
+                video_id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                artist_name TEXT NOT NULL,
+                artist_id TEXT,
+                album_name TEXT,
+                album_id TEXT,
+                thumbnail_url TEXT,
+                thumbnail_path TEXT,
+                duration_text TEXT,
+                file_path TEXT NOT NULL,
+                file_size_bytes INTEGER NOT NULL DEFAULT 0,
+                cached_at INTEGER NOT NULL
+            )
+            """.trimIndent()
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_played_cache_cached_at ON played_cache(cached_at DESC)")
     }
 
     private fun migrateListeningHistoryTablesToRequireArtistId(db: SQLiteDatabase) {
@@ -894,6 +1017,21 @@ class SQLiteDatabaseHelper(context: Context) : SQLiteOpenHelper(
         lastPlayedAt = getLongOrZero("last_played_at")
     )
 
+    private fun Cursor.toPlayedCacheRecord(): PlayedCacheDbRecord = PlayedCacheDbRecord(
+        videoId = getStringOrEmpty("video_id"),
+        title = getStringOrEmpty("title"),
+        artistName = getStringOrEmpty("artist_name"),
+        artistId = getStringOrNull("artist_id"),
+        albumName = getStringOrNull("album_name"),
+        albumId = getStringOrNull("album_id"),
+        thumbnailUrl = getStringOrNull("thumbnail_url"),
+        thumbnailPath = getStringOrNull("thumbnail_path"),
+        durationText = getStringOrNull("duration_text"),
+        filePath = getStringOrEmpty("file_path"),
+        fileSizeBytes = getLongOrZero("file_size_bytes"),
+        cachedAt = getLongOrZero("cached_at")
+    )
+
     private fun Cursor.toArtistPlayCountRecord(): ArtistPlayCountDbRecord = ArtistPlayCountDbRecord(
         artistId = getStringOrEmpty("artist_id"),
         artistName = getStringOrEmpty("artist_name"),
@@ -923,6 +1061,6 @@ class SQLiteDatabaseHelper(context: Context) : SQLiteOpenHelper(
 
     companion object {
         private const val DATABASE_NAME = "musicality_library.db"
-        private const val DATABASE_VERSION = 3
+        private const val DATABASE_VERSION = 4
     }
 }

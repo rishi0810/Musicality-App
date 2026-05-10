@@ -1460,7 +1460,8 @@ private val sectionTitlePrefixRegex = Regex(
 private fun cleanSectionTitle(title: String): String {
     val match = sectionTitlePrefixRegex.find(title) ?: return title
     val prefix = match.groupValues[1]
-    val songName = title.removePrefix(match.value).toCleanSongTitle()
+    var songName = title.removePrefix(match.value).toCleanSongTitle()
+    if (songName.length > 40) songName = songName.take(40).trimEnd() + "…"
     return "$prefix $songName"
 }
 

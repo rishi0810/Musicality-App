@@ -10,6 +10,7 @@ import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 
 /**
  * A Player wrapper that delegates to whichever ExoPlayer is currently "active."
@@ -55,14 +56,18 @@ class CrossfadeDelegatingPlayer private constructor(
                 .setUsage(androidx.media3.common.C.USAGE_MEDIA)
                 .build()
 
+            val mediaSourceFactory = DefaultMediaSourceFactory(StreamAwareDataSource.Factory(context))
+
             val playerA = ExoPlayer.Builder(context)
                 .setRenderersFactory(CrossfadeRenderersFactory(context, procA))
+                .setMediaSourceFactory(mediaSourceFactory)
                 .setAudioAttributes(audioAttrs, /* handleAudioFocus = */ true)
                 .setHandleAudioBecomingNoisy(true)
                 .build()
 
             val playerB = ExoPlayer.Builder(context)
                 .setRenderersFactory(CrossfadeRenderersFactory(context, procB))
+                .setMediaSourceFactory(mediaSourceFactory)
                 .setAudioAttributes(audioAttrs, /* handleAudioFocus = */ false)
                 .setHandleAudioBecomingNoisy(false)
                 .build()

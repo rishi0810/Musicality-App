@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Slider
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Contrast
@@ -59,6 +60,7 @@ import com.proj.Musicality.cache.HomeDiskCache
 import com.proj.Musicality.config.AppConfig
 import com.proj.Musicality.config.CornerRadiusPreset
 import com.proj.Musicality.config.ThemeMode
+import com.proj.Musicality.data.local.LibraryRepository
 import com.proj.Musicality.data.local.ListeningHistoryRepository
 import com.proj.Musicality.ui.components.HapticIconButton
 import com.proj.Musicality.update.AppUpdateManager
@@ -79,6 +81,11 @@ fun SettingsScreen(
     val wordSyncLyrics by AppConfig.wordSyncLyrics.collectAsStateWithLifecycle()
     val listeningHistoryPaused by AppConfig.listeningHistoryPaused.collectAsStateWithLifecycle()
     val searchHistoryPaused by AppConfig.searchHistoryPaused.collectAsStateWithLifecycle()
+    val playedCacheEnabled by AppConfig.playedCacheEnabled.collectAsStateWithLifecycle()
+    val playedCacheLimitMb by AppConfig.playedCacheLimitMb.collectAsStateWithLifecycle()
+    val libraryRepository = remember(context.applicationContext) {
+        LibraryRepository.getInstance(context.applicationContext)
+    }
     val packageInfo = remember {
         runCatching { context.packageManager.getPackageInfo(context.packageName, 0) }.getOrNull()
     }
@@ -254,6 +261,77 @@ fun SettingsScreen(
         // ── Storage ──
         item(key = "section-storage") {
             SectionLabel("Storage", Icons.Rounded.Storage)
+        }
+        item(key = "played-cache-toggle") {
+            SettingsSwitch(
+                title = "Auto-cache played songs",
+                subtitle = "Save songs offline as you listen",
+                checked = playedCacheEnabled,
+                onCheckedChange = { AppConfig.setPlayedCacheEnabled(it) }
+            )
+        }
+        item(key = "played-cache-limit") {
+            val limitLabel = if (playedCacheLimitMb >= 1024) {
+                "%.1f GB".format(playedCacheLimitMb / 1024f)
+            } else {
+                "$playedCacheLimitMb MB"
+            }
+            val usedMb = remember(playedCacheLimitMb) { libraryRepository.getPlayedCacheSizeMb() }
+            val usedLabel = if (usedMb >= 1024f) {
+                "%.1f GB".format(usedMb / 1024f)
+            } else {
+                "%.0f MB".format(usedMb)
+            }
+            Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                Text(
+                    text = "Played cache limit",
+                    style = MaterialTheme.typography.bodyLarge
+                )
+                Text(
+                    text = "Used $usedLabel of $limitLabel",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(4.dp))
+                Slider(
+                    value = playedCacheLimitMb.toFloat(),
+                    onValueChange = {
+                        val rounded = (it / 50f).toInt() * 50
+                        AppConfig.setPlayedCacheLimitMb(rounded)
+                    },
+                    valueRange = AppConfig.PLAYED_CACHE_MIN_MB.toFloat()..AppConfig.PLAYED_CACHE_MAX_MB.toFloat()
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "500 MB",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "2 GB",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+        item(key = "clear-played-cache") {
+            var cleared by remember { mutableStateOf(false) }
+            SettingsAction(
+                title = "Clear played cache",
+                subtitle = if (cleared) "Cleared" else "Auto-cached songs from playback",
+                icon = Icons.Rounded.DeleteSweep,
+                onClick = {
+                    scope.launch {
+                        libraryRepository.clearPlayedCache()
+                        cleared = true
+                        Toast.makeText(context, "Played cache cleared", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            )
         }
         item(key = "clear-audio-cache") {
             var cleared by remember { mutableStateOf(false) }

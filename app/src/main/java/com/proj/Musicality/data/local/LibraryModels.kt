@@ -17,7 +17,8 @@ enum class DateSortOrder {
 enum class LibraryCollectionType {
     LIKED,
     TOP_SONGS,
-    DOWNLOADED
+    DOWNLOADED,
+    PLAYED
 }
 
 enum class SavedEntryType {
@@ -55,6 +56,7 @@ data class LibrarySnapshot(
     val likedSongs: List<MediaItem> = emptyList(),
     val topSongs: List<MediaItem> = emptyList(),
     val downloadedMedia: List<MediaItem> = emptyList(),
+    val playedSongs: List<MediaItem> = emptyList(),
     val artists: List<SavedEntry> = emptyList(),
     val playlists: List<SavedEntry> = emptyList(),
     val albums: List<SavedEntry> = emptyList()

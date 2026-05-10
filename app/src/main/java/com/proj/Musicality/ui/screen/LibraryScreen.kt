@@ -36,6 +36,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Done
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -238,7 +239,8 @@ private fun YouLibrarySection(
         listOf(
             Triple("Songs", "${snapshot.likedSongs.size} items", LibraryCollectionType.LIKED),
             Triple("Top Songs", "${snapshot.topSongs.size} items", LibraryCollectionType.TOP_SONGS),
-            Triple("Downloads", "${snapshot.downloadedMedia.size} items", LibraryCollectionType.DOWNLOADED)
+            Triple("Downloads", "${snapshot.downloadedMedia.size} items", LibraryCollectionType.DOWNLOADED),
+            Triple("Played", "${snapshot.playedSongs.size} items", LibraryCollectionType.PLAYED)
         )
     }
 
@@ -269,6 +271,12 @@ private fun YouLibrarySection(
                         )
                         LibraryCollectionType.DOWNLOADED -> Icon(
                             painter = painterResource(id = R.drawable.download_24px),
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.size(42.dp)
+                        )
+                        LibraryCollectionType.PLAYED -> Icon(
+                            imageVector = Icons.Rounded.History,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.size(42.dp)

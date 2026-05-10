@@ -111,6 +111,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
@@ -945,6 +946,15 @@ fun PlayerSheet(
                 checkedBorderColor = selectedControlAccent,
                 checkedIconColor = selectedControlOnAccent
             )
+            val isCurrentLongForm = remember(item.durationText) {
+                val parts = item.durationText?.split(":")?.mapNotNull { it.trim().toLongOrNull() } ?: emptyList()
+                val seconds = when (parts.size) {
+                    2 -> parts[0] * 60 + parts[1]
+                    3 -> parts[0] * 3600 + parts[1] * 60 + parts[2]
+                    else -> 0L
+                }
+                seconds > 900L
+            }
             ModalBottomSheet(
                 onDismissRequest = {
                     dismissOptionsAfterDownload = false
@@ -953,25 +963,40 @@ fun PlayerSheet(
                 sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
             ) {
                 Column(modifier = Modifier.padding(bottom = 16.dp)) {
+                    val crossfadeDisabledByLongForm = isCurrentLongForm
+                    val effectiveCrossfade = crossfadeEnabled && !crossfadeDisabledByLongForm
+                    val disabledAlpha = if (crossfadeDisabledByLongForm) 0.38f else 1f
                     ListItem(
-                        headlineContent = { Text("Crossfade") },
-                        supportingContent = { Text("Blend songs seamlessly") },
+                        headlineContent = {
+                            Text(
+                                "Crossfade",
+                                color = LocalContentColor.current.copy(alpha = disabledAlpha)
+                            )
+                        },
+                        supportingContent = {
+                            Text(
+                                if (crossfadeDisabledByLongForm) "Not available for long-form audio"
+                                else "Blend songs seamlessly",
+                                color = LocalContentColor.current.copy(alpha = disabledAlpha)
+                            )
+                        },
                         leadingContent = {
                             Icon(
                                 Icons.Rounded.Tune,
                                 contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = disabledAlpha)
                             )
                         },
                         trailingContent = {
                             Switch(
-                                checked = crossfadeEnabled,
-                                onCheckedChange = { onToggleCrossfade() },
+                                checked = effectiveCrossfade,
+                                onCheckedChange = { if (!crossfadeDisabledByLongForm) onToggleCrossfade() },
+                                enabled = !crossfadeDisabledByLongForm,
                                 colors = switchColors
                             )
                         },
                         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                        modifier = Modifier.clickable { onToggleCrossfade() }
+                        modifier = if (crossfadeDisabledByLongForm) Modifier else Modifier.clickable { onToggleCrossfade() }
                     )
                     ListItem(
                         headlineContent = { Text("Loop song") },

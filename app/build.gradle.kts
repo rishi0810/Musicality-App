@@ -157,6 +157,7 @@ dependencies {
 
     // Media3 (ExoPlayer + MediaSession for notification controls)
     implementation(libs.media3.exoplayer)
+    implementation(libs.media3.datasource.okhttp)
     implementation(libs.media3.session)
 
     testImplementation(libs.junit)

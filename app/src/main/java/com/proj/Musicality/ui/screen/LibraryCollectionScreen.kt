@@ -31,6 +31,7 @@ import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
+import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Share
@@ -113,18 +114,21 @@ fun LibraryCollectionScreen(
         LibraryCollectionType.LIKED -> snapshot.likedSongs
         LibraryCollectionType.TOP_SONGS -> snapshot.topSongs
         LibraryCollectionType.DOWNLOADED -> snapshot.downloadedMedia
+        LibraryCollectionType.PLAYED -> snapshot.playedSongs
     }
 
     val title = when (collectionType) {
         LibraryCollectionType.LIKED -> "Songs"
         LibraryCollectionType.TOP_SONGS -> "Top Songs"
         LibraryCollectionType.DOWNLOADED -> "Downloads"
+        LibraryCollectionType.PLAYED -> "Played"
     }
     val queueSource = when (collectionType) {
         LibraryCollectionType.LIKED, LibraryCollectionType.TOP_SONGS -> QueueSource.LIBRARY
-        LibraryCollectionType.DOWNLOADED -> QueueSource.SEARCH
+        LibraryCollectionType.DOWNLOADED, LibraryCollectionType.PLAYED -> QueueSource.SEARCH
     }
     val isDownloadedCollection = collectionType == LibraryCollectionType.DOWNLOADED
+            || collectionType == LibraryCollectionType.PLAYED
     val artworkUrl = items.firstOrNull()?.thumbnailUrl
     val albumColors = rememberAlbumColors(
         imageUrl = artworkUrl,
@@ -203,6 +207,14 @@ fun LibraryCollectionScreen(
                                 LibraryCollectionType.DOWNLOADED -> {
                                     Icon(
                                         painter = painterResource(id = R.drawable.download_24px),
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.size(72.dp)
+                                    )
+                                }
+                                LibraryCollectionType.PLAYED -> {
+                                    Icon(
+                                        imageVector = Icons.Rounded.History,
                                         contentDescription = null,
                                         tint = MaterialTheme.colorScheme.onSurface,
                                         modifier = Modifier.size(72.dp)

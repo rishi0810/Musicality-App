@@ -10,6 +10,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
@@ -17,9 +18,12 @@ import com.proj.Musicality.PlaybackService
 import com.proj.Musicality.api.LyricsRepository
 import com.proj.Musicality.api.RequestExecutor
 import com.proj.Musicality.api.VisitorManager
+import com.proj.Musicality.api.StreamRequestResolver
 import com.proj.Musicality.cache.AppCache
 import com.proj.Musicality.cache.AudioFileCache
+import com.proj.Musicality.data.local.LibraryRepository
 import com.proj.Musicality.data.local.ListeningHistoryRepository
+import java.io.File
 import com.proj.Musicality.data.model.LyricsState
 import com.proj.Musicality.data.model.MediaItem
 import com.proj.Musicality.data.model.PlaybackQueue
@@ -27,6 +31,12 @@ import com.proj.Musicality.data.model.QueueSource
 import com.proj.Musicality.data.resolver.SongArtResolver
 import com.proj.Musicality.crossfade.CrossfadeNextTrack
 import com.proj.Musicality.crossfade.CrossfadeDelegatingPlayer
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.ResolvingDataSource
+import androidx.media3.datasource.okhttp.OkHttpDataSource
+import androidx.media3.exoplayer.source.ProgressiveMediaSource
+import okhttp3.OkHttpClient
+import java.util.concurrent.TimeUnit
 import com.proj.Musicality.data.parser.NextParser
 import com.proj.Musicality.crossfade.SimpleCrossfadeManager
 import com.proj.Musicality.util.shouldRestartCurrentTrack
@@ -60,6 +70,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         private const val TAG = "PlaybackViewModel"
         private const val CROSSFADE_PREVIOUS_GRACE_MS = 10_000L
         private const val LIBRARY_EXTENSION_SEED_COUNT = 5
+        private const val LONG_FORM_THRESHOLD_SECONDS = 900L
     }
 
     private val _state = MutableStateFlow(PlaybackState())
@@ -92,6 +103,8 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
     private var lastCrossfadeArrivalRealtimeMs: Long = 0L
     private val listeningHistoryRepository =
         ListeningHistoryRepository.getInstance(application.applicationContext)
+    private val libraryRepository =
+        LibraryRepository.getInstance(application.applicationContext)
 
     init {
         AudioFileCache.init(application.applicationContext)
@@ -210,6 +223,10 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
             override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
                 if (_crossfadeEnabled.value && crossfadeManager.isTransitioning()) return
                 syncStateFromPlayer(player)
+            }
+
+            override fun onPlayerError(error: PlaybackException) {
+                Log.e(TAG, "onPlayerError: code=${error.errorCode} msg=${error.localizedMessage}", error.cause)
             }
 
             override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
@@ -616,13 +633,57 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                 return@launch
             }
 
-            withContext(Dispatchers.Main) { setupPlayerListener() }
+            withContext(Dispatchers.Main) {
+                setupPlayerListener()
+                getDelegatingPlayer()?.let { dp ->
+                    dp.activePlayer.stop()
+                    dp.activePlayer.clearMediaItems()
+                    dp.inactivePlayer.stop()
+                    dp.inactivePlayer.clearMediaItems()
+                } ?: activePlayer()?.let { exo ->
+                    exo.stop()
+                    exo.clearMediaItems()
+                }
+            }
 
-            val file = AudioFileCache.getOrDownload(item.videoId)
+            val longForm = if (item.durationText != null) {
+                val seconds = parseDurationToSeconds(item.durationText)
+                Log.d(TAG, "fetchAndPlay: durationText='${item.durationText}' parsed=${seconds}s threshold=${LONG_FORM_THRESHOLD_SECONDS}s")
+                seconds > LONG_FORM_THRESHOLD_SECONDS
+            } else {
+                val details = withContext(Dispatchers.IO) {
+                    StreamRequestResolver.fetchSongPlaybackDetails(item.videoId)
+                }
+                details?.streamUrl?.let { AppCache.putStreamUrl(item.videoId, it) }
+                Log.d(TAG, "fetchAndPlay: durationText=null, API lengthSeconds=${details?.lengthSeconds} threshold=${LONG_FORM_THRESHOLD_SECONDS}s")
+                (details?.lengthSeconds ?: 0L) > LONG_FORM_THRESHOLD_SECONDS
+            }
+
+            Log.d(TAG, "fetchAndPlay: videoId=${item.videoId} longForm=$longForm")
+            if (longForm) {
+                val streamUrl = withContext(Dispatchers.IO) { resolveStreamUrl(item.videoId) }
+                if (streamUrl != null) {
+                    val playableUrl = streamUrl.withFullRange()
+                    Log.d(TAG, "fetchAndPlay: streaming long-form '${item.videoId}' (dur=${item.durationText})")
+                    startLongFormPlayback(playableUrl, item)
+                } else {
+                    Log.e(TAG, "fetchAndPlay: stream URL unavailable for long-form '${item.videoId}'")
+                }
+                return@launch
+            }
+
+            val localFile = withContext(Dispatchers.IO) { libraryRepository.findLocalAudioFile(item.videoId) }
+            val file = if (localFile != null) {
+                Log.d(TAG, "fetchAndPlay: reusing local file for '${item.videoId}' (${localFile.length() / 1024}KB)")
+                localFile
+            } else {
+                AudioFileCache.getOrDownload(item.videoId)
+            }
             if (file != null) {
                 val fileUri = file.toURI().toString()
-                Log.d(TAG, "fetchAndPlay: playing from cached file for '${item.videoId}' (${file.length() / 1024}KB)")
+                Log.d(TAG, "fetchAndPlay: playing '${item.videoId}' (${file.length() / 1024}KB)")
                 startExoPlayback(fileUri, item)
+                cacheToPlayedCollection(item, file)
             } else {
                 Log.e(TAG, "fetchAndPlay: Failed to download audio for '${item.videoId}'")
             }
@@ -636,7 +697,8 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                 return@withContext
             }
             val exo = activePlayer() ?: return@withContext
-            Log.d(TAG, "startExoPlayback: setting URL (${url.length} chars) for '${item.title}'")
+            val isHttp = url.startsWith("http")
+            Log.d(TAG, "startExoPlayback: ${if (isHttp) "HTTP stream" else "local file"} (${url.length} chars) for '${item.title}', url=${url.take(120)}")
 
             val media3Item = androidx.media3.common.MediaItem.Builder()
                 .setMediaId(item.videoId)
@@ -657,6 +719,61 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    @OptIn(UnstableApi::class)
+    private suspend fun startLongFormPlayback(url: String, item: MediaItem) {
+        withContext(Dispatchers.Main) {
+            if (_state.value.currentItem?.videoId != item.videoId) {
+                Log.d(TAG, "startLongFormPlayback: skipping stale playback for '${item.videoId}'")
+                return@withContext
+            }
+            val dp = getDelegatingPlayer() ?: return@withContext
+            val exo = dp.activePlayer
+            Log.d(TAG, "startLongFormPlayback: HTTP stream for '${item.title}', url=${url.take(120)}")
+
+            val httpFactory = OkHttpDataSource.Factory(
+                OkHttpClient.Builder()
+                    .connectTimeout(15, TimeUnit.SECONDS)
+                    .readTimeout(60, TimeUnit.SECONDS)
+                    .build()
+            )
+            val resolvingFactory = ResolvingDataSource.Factory(httpFactory) { dataSpec ->
+                val uri = dataSpec.uri
+                val uriStr = uri.toString()
+                if (uriStr.contains("range=") && dataSpec.position > 0L) {
+                    val newUri = uriStr.replace(Regex("range=[^&]*"), "range=${dataSpec.position}-")
+                    Log.d(TAG, "longForm: rewriting range for position=${dataSpec.position}")
+                    dataSpec.buildUpon()
+                        .setUri(Uri.parse(newUri))
+                        .setPosition(0)
+                        .setUriPositionOffset(0)
+                        .build()
+                } else {
+                    dataSpec
+                }
+            }
+
+            val media3Item = androidx.media3.common.MediaItem.Builder()
+                .setMediaId(item.videoId)
+                .setUri(url)
+                .setMediaMetadata(
+                    MediaMetadata.Builder()
+                        .setTitle(item.title)
+                        .setArtist(item.artistName)
+                        .setAlbumTitle(item.albumName)
+                        .setArtworkUri(item.thumbnailUrl?.let { Uri.parse(it) })
+                        .build()
+                )
+                .build()
+
+            val mediaSource = ProgressiveMediaSource.Factory(resolvingFactory)
+                .createMediaSource(media3Item)
+
+            exo.setMediaSource(mediaSource)
+            exo.prepare()
+            exo.play()
+        }
+    }
+
     // ── Crossfade: prepare the next track for dual-player blending ──
 
     private suspend fun prepareCrossfadeNextTrack(): CrossfadeNextTrack? {
@@ -665,7 +782,14 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         if (nextIndex !in current.queue.items.indices) return null
 
         val nextItem = current.queue.items[nextIndex]
-        val file = AudioFileCache.getOrDownload(nextItem.videoId) ?: return null
+        val localFile = withContext(Dispatchers.IO) { libraryRepository.findLocalAudioFile(nextItem.videoId) }
+        val file = if (localFile != null) {
+            Log.d(TAG, "prepareCrossfade: reusing local file for '${nextItem.videoId}' (${localFile.length() / 1024}KB)")
+            localFile
+        } else {
+            AudioFileCache.getOrDownload(nextItem.videoId) ?: return null
+        }
+        cacheToPlayedCollection(nextItem, file)
         val uri = file.toURI().toString()
         val media3 = androidx.media3.common.MediaItem.Builder()
             .setMediaId(nextItem.videoId)
@@ -744,16 +868,19 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                         }
                     }
 
-                    // Monitor for crossfade trigger
+                    // Monitor for crossfade trigger (skip for long-form content)
                     if (dp != null) {
                         val currentState = _state.value
                         val currentTrackId = currentState.currentItem?.videoId
                         val duration = currentState.durationMs
-                        val hasNext = currentState.queue.currentIndex + 1 < currentState.queue.items.size
+                        val nextIndex = currentState.queue.currentIndex + 1
+                        val hasNext = nextIndex < currentState.queue.items.size
+                        val currentIsLongForm = currentState.currentItem?.let { isLongFormContent(it) } == true
+                        val nextIsLongForm = hasNext && isLongFormContent(currentState.queue.items[nextIndex])
                         crossfadeManager.monitor(
                             scope = viewModelScope,
                             trackId = currentTrackId,
-                            hasNext = hasNext,
+                            hasNext = hasNext && !currentIsLongForm && !nextIsLongForm,
                             positionMs = pos,
                             durationMs = duration,
                             delegatingPlayer = dp,
@@ -774,10 +901,25 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
     }
 
     private fun prefetchNext(queue: PlaybackQueue) {
+        val currentItem = _state.value.currentItem
+        if (currentItem != null && isLongFormContent(currentItem)) {
+            Log.d(TAG, "prefetchNext: skipping — current track is long-form")
+            return
+        }
         val nextIdx = queue.currentIndex + 1
         if (nextIdx < queue.items.size) {
-            val nextId = queue.items[nextIdx].videoId
+            val nextItem = queue.items[nextIdx]
+            if (isLongFormContent(nextItem)) {
+                Log.d(TAG, "prefetchNext: skipping long-form '${nextItem.videoId}' (${nextItem.durationText})")
+                return
+            }
+            val nextId = nextItem.videoId
             viewModelScope.launch(Dispatchers.IO) {
+                val localFile = libraryRepository.findLocalAudioFile(nextId)
+                if (localFile != null) {
+                    Log.d(TAG, "prefetchNext: already local for '$nextId' (${localFile.length() / 1024}KB)")
+                    return@launch
+                }
                 runCatching {
                     AudioFileCache.getOrDownload(nextId)?.let {
                         Log.d(TAG, "prefetchNext: downloaded '$nextId' (${it.length() / 1024}KB)")
@@ -785,6 +927,49 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                 }.onFailure { Log.e(TAG, "prefetchNext: FAILED for '$nextId'", it) }
             }
         }
+    }
+
+    private fun cacheToPlayedCollection(item: MediaItem, file: File) {
+        viewModelScope.launch(Dispatchers.IO) {
+            Log.d(TAG, "PlayedCache: starting cache for '${item.videoId}' (${item.title}), source=${file.absolutePath}, exists=${file.exists()}, size=${file.length() / 1024}KB")
+            runCatching {
+                libraryRepository.cachePlayedSong(item, file)
+            }.onSuccess {
+                Log.d(TAG, "PlayedCache: cached '${item.videoId}' successfully")
+            }.onFailure {
+                Log.e(TAG, "PlayedCache: FAILED for '${item.videoId}'", it)
+            }
+        }
+    }
+
+    private fun parseDurationToSeconds(durationText: String?): Long {
+        if (durationText.isNullOrBlank()) return 0L
+        val parts = durationText.split(":").mapNotNull { it.trim().toLongOrNull() }
+        return when (parts.size) {
+            2 -> parts[0] * 60 + parts[1]
+            3 -> parts[0] * 3600 + parts[1] * 60 + parts[2]
+            else -> 0L
+        }
+    }
+
+    private fun isLongFormContent(item: MediaItem): Boolean {
+        return parseDurationToSeconds(item.durationText) > LONG_FORM_THRESHOLD_SECONDS
+    }
+
+    private suspend fun resolveStreamUrl(videoId: String): String? {
+        val cached = AppCache.getStreamUrl(videoId)
+        if (!cached.isNullOrBlank()) return cached
+        return runCatching {
+            val details = StreamRequestResolver.fetchSongPlaybackDetails(videoId)
+            details?.streamUrl?.also { AppCache.putStreamUrl(videoId, it) }
+        }.onFailure {
+            Log.e(TAG, "resolveStreamUrl: failed for '$videoId'", it)
+        }.getOrNull()
+    }
+
+    private fun String.withFullRange(): String {
+        if (contains("range=")) return replace(Regex("range=[^&]*"), "range=0-")
+        return if (contains("?")) "$this&range=0-" else "$this?range=0-"
     }
 
     private fun resetLibraryTailExtensionContext(queue: PlaybackQueue) {

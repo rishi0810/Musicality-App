@@ -18,12 +18,6 @@ data class LyricsWithProvider(val lrc: String, val provider: String)
 
 /**
  * Orchestrates a tiered race across the enabled providers.
- *
- * Ported from Metrolist: launches `TIER_SIZE` providers at a time. If nothing
- * succeeds within `GRACE_PERIOD_MS`, the next tier is launched. Otherwise, we
- * wait long enough to know whether any *higher-priority* provider also returns
- * (earlier provider wins). Overall deadline `MAX_LYRICS_FETCH_MS`.
- *
  * Simplified vs. upstream: provider order is fixed (no DataStore / no user
  * reordering), all providers are always "enabled".
  */

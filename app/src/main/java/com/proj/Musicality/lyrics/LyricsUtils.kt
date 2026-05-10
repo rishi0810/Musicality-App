@@ -47,8 +47,6 @@ fun filterLyricsCreditLines(lyrics: String): String =
     }.joinToString("\n")
 
 /**
- * Parses Metrolist's extended LRC into simple lines.
- *
  *   [mm:ss.xx]{agent:v1}text
  *   <word:startSec:endSec|word:...>   ← optional word block (karaoke timing)
  *

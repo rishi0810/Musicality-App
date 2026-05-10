@@ -1,9 +1,11 @@
 package com.proj.Musicality.data.local
 
 import android.content.Context
+import android.util.Log
 import com.proj.Musicality.api.StreamRequestResolver
 import com.proj.Musicality.api.VisitorManager
 import com.proj.Musicality.cache.AppCache
+import com.proj.Musicality.config.AppConfig
 import com.proj.Musicality.data.model.MediaItem
 import java.io.File
 import java.net.URLDecoder
@@ -38,6 +40,7 @@ class LibraryRepository private constructor(
         .build()
     private val audioDir = File(appContext.filesDir, "library_audio").apply { mkdirs() }
     private val thumbDir = File(appContext.filesDir, "library_thumbs").apply { mkdirs() }
+    private val playedDir = File(appContext.filesDir, "played_cache").apply { mkdirs() }
 
     private val _snapshot = MutableStateFlow(LibrarySnapshot())
     val snapshot: StateFlow<LibrarySnapshot> = _snapshot.asStateFlow()
@@ -109,6 +112,60 @@ class LibraryRepository private constructor(
         runCatching {
             writeMutex.withLock {
                 val now = System.currentTimeMillis()
+
+                val playedEntry = db.getPlayedCacheEntry(item.videoId)
+                val playedFile = playedEntry?.let { File(it.filePath) }
+                    ?.takeIf { it.exists() && it.length() > 0 }
+
+                if (playedFile != null) {
+                    Log.d(TAG, "download: reusing played cache file for '${item.videoId}' (${playedFile.length() / 1024}KB)")
+                    val thumbnailPath = persistThumbnail("media_${item.videoId}", item.thumbnailUrl)
+                    val filePath = playedFile.absolutePath
+                    if (item.isVideo()) {
+                        val existing = db.getVideo(item.videoId)
+                        db.upsertVideo(
+                            VideoDbRecord(
+                                videoId = item.videoId,
+                                title = item.title,
+                                artistName = item.artistName,
+                                artistId = item.artistId,
+                                thumbnailUrl = item.thumbnailUrl,
+                                thumbnailPath = thumbnailPath ?: existing?.thumbnailPath,
+                                durationText = item.durationText,
+                                filePath = filePath,
+                                isLiked = existing?.isLiked ?: false,
+                                isDownloaded = true,
+                                dateAdded = now
+                            )
+                        )
+                    } else {
+                        val existing = db.getSong(item.videoId)
+                        db.upsertSong(
+                            SongDbRecord(
+                                videoId = item.videoId,
+                                title = item.title,
+                                artistName = item.artistName,
+                                artistId = item.artistId,
+                                albumName = item.albumName,
+                                albumId = item.albumId,
+                                thumbnailUrl = item.thumbnailUrl,
+                                thumbnailPath = thumbnailPath ?: existing?.thumbnailPath,
+                                durationText = item.durationText,
+                                filePath = filePath,
+                                isLiked = existing?.isLiked ?: false,
+                                isDownloaded = true,
+                                dateAdded = now
+                            )
+                        )
+                    }
+                    _snapshot.value = loadSnapshot()
+                    setDownloadState(
+                        item.videoId,
+                        MediaDownloadState(progress = 1f, isDownloading = false, isDownloaded = true)
+                    )
+                    return@withLock
+                }
+
                 setDownloadState(
                     item.videoId,
                     MediaDownloadState(
@@ -326,7 +383,9 @@ class LibraryRepository private constructor(
                 LibraryCollectionType.DOWNLOADED -> {
                     if (song != null) {
                         song.filePath?.let { path ->
-                            runCatching { File(path).delete() }
+                            val playedRef = db.getPlayedCacheEntry(item.videoId)
+                            val sharedByPlayed = playedRef != null && playedRef.filePath == path
+                            if (!sharedByPlayed) runCatching { File(path).delete() }
                         }
                         db.upsertSong(
                             song.copy(
@@ -337,7 +396,9 @@ class LibraryRepository private constructor(
                         setDownloadState(song.videoId, null)
                     } else if (video != null) {
                         video.filePath?.let { path ->
-                            runCatching { File(path).delete() }
+                            val playedRef = db.getPlayedCacheEntry(item.videoId)
+                            val sharedByPlayed = playedRef != null && playedRef.filePath == path
+                            if (!sharedByPlayed) runCatching { File(path).delete() }
                         }
                         db.upsertVideo(
                             video.copy(
@@ -348,10 +409,150 @@ class LibraryRepository private constructor(
                         setDownloadState(video.videoId, null)
                     }
                 }
+                LibraryCollectionType.PLAYED -> {
+                    val entry = db.getPlayedCacheEntry(item.videoId)
+                    if (entry != null) {
+                        val dlSong = db.getSong(item.videoId)
+                        val dlVideo = db.getVideo(item.videoId)
+                        val sharedByDownload =
+                            (dlSong?.isDownloaded == true && dlSong.filePath == entry.filePath) ||
+                            (dlVideo?.isDownloaded == true && dlVideo.filePath == entry.filePath)
+                        if (!sharedByDownload) runCatching { File(entry.filePath).delete() }
+                        db.deletePlayedCacheEntry(item.videoId)
+                    }
+                }
             }
 
             _snapshot.value = loadSnapshot()
         }
+    }
+
+    suspend fun cachePlayedSong(item: MediaItem, sourceFile: File) = withContext(Dispatchers.IO) {
+        if (!AppConfig.playedCacheEnabled.value) {
+            Log.d(TAG, "PlayedCache: skipped '${item.videoId}' — feature disabled")
+            return@withContext
+        }
+        if (!sourceFile.exists()) {
+            Log.w(TAG, "PlayedCache: skipped '${item.videoId}' — source file missing: ${sourceFile.absolutePath}")
+            return@withContext
+        }
+
+        Log.d(TAG, "PlayedCache: acquiring lock for '${item.videoId}'")
+        writeMutex.withLock {
+            Log.d(TAG, "PlayedCache: lock acquired for '${item.videoId}'")
+            val existing = db.getPlayedCacheEntry(item.videoId)
+            if (existing != null) {
+                Log.d(TAG, "PlayedCache: already cached '${item.videoId}', updating timestamp")
+                db.upsertPlayedCacheEntry(existing.copy(cachedAt = System.currentTimeMillis()))
+                _snapshot.value = loadSnapshot()
+                return@withLock
+            }
+
+            val dlSong = db.getSong(item.videoId)
+            val dlVideo = db.getVideo(item.videoId)
+            val downloadedFile = (dlSong?.takeIf { it.isDownloaded }?.filePath
+                ?: dlVideo?.takeIf { it.isDownloaded }?.filePath)
+                ?.let { File(it) }
+                ?.takeIf { it.exists() && it.length() > 0 }
+
+            val destFile: File
+            if (downloadedFile != null) {
+                Log.d(TAG, "PlayedCache: reusing downloaded file for '${item.videoId}'")
+                destFile = downloadedFile
+            } else {
+                if (sourceFile.length() > PLAYED_CACHE_MAX_FILE_BYTES) {
+                    Log.d(TAG, "PlayedCache: skipped '${item.videoId}' — file too large (${sourceFile.length() / 1024}KB)")
+                    return@withLock
+                }
+                val ext = sourceFile.extension.ifBlank { "m4a" }
+                destFile = File(playedDir, "${sanitize(item.videoId)}.$ext")
+                Log.d(TAG, "PlayedCache: copying ${sourceFile.length() / 1024}KB → ${destFile.absolutePath}")
+                runCatching { sourceFile.copyTo(destFile, overwrite = true) }
+                    .onFailure {
+                        Log.e(TAG, "PlayedCache: copy FAILED for '${item.videoId}'", it)
+                        return@withLock
+                    }
+            }
+
+            val thumbnailPath = persistThumbnail("played_${item.videoId}", item.thumbnailUrl)
+
+            db.upsertPlayedCacheEntry(
+                PlayedCacheDbRecord(
+                    videoId = item.videoId,
+                    title = item.title,
+                    artistName = item.artistName,
+                    artistId = item.artistId,
+                    albumName = item.albumName,
+                    albumId = item.albumId,
+                    thumbnailUrl = item.thumbnailUrl,
+                    thumbnailPath = thumbnailPath,
+                    durationText = item.durationText,
+                    filePath = destFile.absolutePath,
+                    fileSizeBytes = destFile.length(),
+                    cachedAt = System.currentTimeMillis()
+                )
+            )
+            Log.d(TAG, "PlayedCache: saved '${item.videoId}' (${destFile.length() / 1024}KB)")
+
+            evictPlayedCacheIfNeeded()
+            _snapshot.value = loadSnapshot()
+        }
+    }
+
+    suspend fun clearPlayedCache() = withContext(Dispatchers.IO) {
+        writeMutex.withLock {
+            val entries = db.getPlayedCacheSongs()
+            entries.forEach { entry ->
+                val dlSong = db.getSong(entry.videoId)
+                val dlVideo = db.getVideo(entry.videoId)
+                val sharedByDownload =
+                    (dlSong?.isDownloaded == true && dlSong.filePath == entry.filePath) ||
+                    (dlVideo?.isDownloaded == true && dlVideo.filePath == entry.filePath)
+                if (!sharedByDownload) runCatching { File(entry.filePath).delete() }
+            }
+            db.clearPlayedCache()
+            _snapshot.value = loadSnapshot()
+        }
+    }
+
+    fun getPlayedCacheSizeMb(): Float {
+        val bytes = db.getPlayedCacheTotalSizeBytes()
+        return bytes / (1024f * 1024f)
+    }
+
+    private fun evictPlayedCacheIfNeeded() {
+        val limitBytes = AppConfig.playedCacheLimitMb.value * 1024L * 1024L
+        var totalBytes = db.getPlayedCacheTotalSizeBytes()
+        while (totalBytes > limitBytes) {
+            val oldest = db.getOldestPlayedCacheEntries(1).firstOrNull() ?: break
+            val dlSong = db.getSong(oldest.videoId)
+            val dlVideo = db.getVideo(oldest.videoId)
+            val sharedByDownload =
+                (dlSong?.isDownloaded == true && dlSong.filePath == oldest.filePath) ||
+                (dlVideo?.isDownloaded == true && dlVideo.filePath == oldest.filePath)
+            if (!sharedByDownload) runCatching { File(oldest.filePath).delete() }
+            db.deletePlayedCacheEntry(oldest.videoId)
+            totalBytes -= oldest.fileSizeBytes
+        }
+    }
+
+    fun findLocalAudioFile(videoId: String): File? {
+        val song = db.getSong(videoId)
+        if (song != null && song.isDownloaded && !song.filePath.isNullOrBlank()) {
+            val f = File(song.filePath)
+            if (f.exists() && f.length() > 0) return f
+        }
+        val video = db.getVideo(videoId)
+        if (video != null && video.isDownloaded && !video.filePath.isNullOrBlank()) {
+            val f = File(video.filePath)
+            if (f.exists() && f.length() > 0) return f
+        }
+        val played = db.getPlayedCacheEntry(videoId)
+        if (played != null) {
+            val f = File(played.filePath)
+            if (f.exists() && f.length() > 0) return f
+        }
+        return null
     }
 
     fun observeMediaState(videoId: String): Flow<MediaLibraryState> {
@@ -411,10 +612,25 @@ class LibraryRepository private constructor(
             )
         }
 
+        val playedSongs = db.getPlayedCacheSongs().map { row ->
+            MediaItem(
+                videoId = row.videoId,
+                title = row.title,
+                artistName = row.artistName,
+                artistId = row.artistId,
+                albumName = row.albumName,
+                albumId = row.albumId,
+                thumbnailUrl = displayThumbnailUrl(row.thumbnailUrl, row.thumbnailPath),
+                durationText = row.durationText,
+                musicVideoType = "MUSIC_VIDEO_TYPE_ATV"
+            )
+        }
+
         return LibrarySnapshot(
             likedSongs = likedSongs,
             topSongs = topSongs,
             downloadedMedia = downloadedMedia,
+            playedSongs = playedSongs,
             artists = artists,
             playlists = playlists,
             albums = albums
@@ -519,6 +735,9 @@ class LibraryRepository private constructor(
     )
 
     companion object {
+        private const val TAG = "LibraryRepository"
+        private const val PLAYED_CACHE_MAX_FILE_BYTES = 15L * 1024 * 1024
+
         @Volatile
         private var INSTANCE: LibraryRepository? = null
 
