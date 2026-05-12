@@ -69,6 +69,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
     companion object {
         private const val TAG = "PlaybackViewModel"
         private const val CROSSFADE_PREVIOUS_GRACE_MS = 10_000L
+        private const val REWIND_PREVIOUS_WINDOW_MS = 2_000L
         private const val LIBRARY_EXTENSION_SEED_COUNT = 5
         private const val LONG_FORM_THRESHOLD_SECONDS = 900L
     }
@@ -101,6 +102,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
     private var libraryTailExtensionRequested: Boolean = false
     private var lastCrossfadeArrivalTrackId: String? = null
     private var lastCrossfadeArrivalRealtimeMs: Long = 0L
+    private var lastRewindRealtimeMs: Long = 0L
     private val listeningHistoryRepository =
         ListeningHistoryRepository.getInstance(application.applicationContext)
     private val libraryRepository =
@@ -483,11 +485,13 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         val effectivePlayer = activePlayer()
         val shouldForcePrevious =
             wasTransitioning || isWithinCrossfadePreviousWindow(currentTrackId)
+                || isWithinRewindPreviousWindow()
 
         if (!shouldForcePrevious && effectivePlayer != null && shouldRestartCurrentTrack(effectivePlayer.currentPosition)) {
             crossfadeManager.resetTriggerForTrack(currentTrackId)
             effectivePlayer.seekTo(0L)
             _positionMs.value = 0L
+            lastRewindRealtimeMs = SystemClock.elapsedRealtime()
             return
         }
         val prev = current.queue.currentIndex - 1
@@ -1149,11 +1153,18 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
     private fun clearCrossfadePreviousWindow() {
         lastCrossfadeArrivalTrackId = null
         lastCrossfadeArrivalRealtimeMs = 0L
+        lastRewindRealtimeMs = 0L
     }
 
     private fun isWithinCrossfadePreviousWindow(trackId: String?): Boolean {
         if (trackId == null || trackId != lastCrossfadeArrivalTrackId) return false
         val elapsed = SystemClock.elapsedRealtime() - lastCrossfadeArrivalRealtimeMs
         return elapsed in 0..CROSSFADE_PREVIOUS_GRACE_MS
+    }
+
+    private fun isWithinRewindPreviousWindow(): Boolean {
+        if (lastRewindRealtimeMs == 0L) return false
+        val elapsed = SystemClock.elapsedRealtime() - lastRewindRealtimeMs
+        return elapsed in 0..REWIND_PREVIOUS_WINDOW_MS
     }
 }

@@ -125,7 +125,8 @@ fun LibraryCollectionScreen(
     }
     val queueSource = when (collectionType) {
         LibraryCollectionType.LIKED, LibraryCollectionType.TOP_SONGS -> QueueSource.LIBRARY
-        LibraryCollectionType.DOWNLOADED, LibraryCollectionType.PLAYED -> QueueSource.SEARCH
+        LibraryCollectionType.DOWNLOADED -> QueueSource.SEARCH
+        LibraryCollectionType.PLAYED -> QueueSource.PLAYED
     }
     val isDownloadedCollection = collectionType == LibraryCollectionType.DOWNLOADED
             || collectionType == LibraryCollectionType.PLAYED
