@@ -412,11 +412,17 @@ class SimpleCrossfadeManager(@Suppress("UNUSED_PARAMETER") private val context: 
             state.uiSwitchedToIncoming = true
 
             // ── Envelope driven by accumulated *active* playback time ──
-            // We progress the fade only while the outgoing is actually playing. If the user
-            // pauses mid-fade, wall-clock time keeps advancing but the audio doesn't — the
+            // We progress the fade only while the user wants playback. If the user pauses
+            // mid-fade, wall-clock time keeps advancing but the audio doesn't — the
             // accumulator freezes, the incoming is paused to stay in lock-step, and on resume
             // both sides pick up exactly where they were. This makes mid-fade pause behave
             // like a normal pause anywhere else in the track.
+            //
+            // We key off [Player.getPlayWhenReady] (user intent) rather than [isPlaying]
+            // (transport state). The outgoing reaching STATE_ENDED mid-fade is expected by
+            // design — TRIGGER_LEAD_MS only barely covers pre-roll + fade, and any leading
+            // silence on the incoming consumes more of that budget — so isPlaying would flip
+            // false on natural end-of-stream and incorrectly freeze the fade forever.
             val fadeDuration = FADE_DURATION_MS.toFloat()
             val halfPi = (PI / 2.0).toFloat()
             var accumulatedActiveMs = 0L
@@ -425,9 +431,9 @@ class SimpleCrossfadeManager(@Suppress("UNUSED_PARAMETER") private val context: 
 
             while (true) {
                 val now = SystemClock.elapsedRealtime()
-                val outgoingPlaying = outgoing.isPlaying
+                val userWantsPlayback = outgoing.playWhenReady
 
-                if (outgoingPlaying) {
+                if (userWantsPlayback) {
                     if (pausedDueToOutgoing) {
                         // Resume incoming and reset the tick reference — we don't credit the
                         // paused interval against the fade.
