@@ -62,16 +62,32 @@ Earlier versions used `android.media.audiofx.Equalizer` + `ExoPlayer.setVolume` 
 **What it does, per sample:**
 
 ```
-x[n] → RMS meter tap → biquad (LPF / HPF / bypass) → * gain → clamp → y[n]
+x[n] → linear-RMS tap → K-weighting cascade tap → main biquad (LPF / HPF / bypass)
+     → mid/side stereo width → * gain → * trim → clamp → y[n]
 ```
+
+The K-weighting tap is BS.1770-style (high-shelf at 1681.97 Hz +4 dB → high-pass at
+38.135 Hz, Q ≈ 0.5). Its mean-square is summed over a 150 ms sliding window and exposed
+as a linear value; the ratio of two processors' readings is the perceptual loudness
+delta between two tracks — the same metric Spotify and Apple Music use to normalize.
 
 **Public parameter API (thread-safe, volatile-backed):**
 
 - `setGainTarget(gain)` — target gain, smoothed toward per sample (≈10 ms)
-- `setTrimDb(db)` — static loudness-match trim (±24 dB)
-- `setFilter(mode, cutoffHz, q)` — LPF / HPF / bypass; coefficients are recomputed on the audio thread on change
-- `resetToIdle()` — unity gain, bypass filter — the "playing normally" state
-- `getRmsDb()` / `getRmsLinear()` — sliding-window loudness of the *raw input*, usable for match-gain decisions
+- `setTrimDb(db, rampMs)` — static loudness-match trim (±24 dB). `rampMs = 0` snaps;
+  `> 0` enables a per-sample one-pole smoother (used to drift the matched trim back to
+  unity over ~5 s after the swap, so the new track ends up at native level)
+- `setFilter(mode, cutoffHz, q)` — LPF / HPF / bypass; coefficients are recomputed on
+  the audio thread the next frame after a change
+- `setStereoWidth(width)` — mid/side scaling. 1 = unchanged; 0 = mono fold; up to 2.
+  Mono streams skip the M/S path entirely
+- `resetToIdle()` — unity gain, no trim, bypass filter, full stereo — the "playing
+  normally" state
+- `getRmsLinear()` — unweighted 200 ms sliding RMS of the raw input
+- `getKWeightedRmsLinear()` / `getKWeightedLoudnessDb()` — K-weighted (BS.1770) loudness
+  of the raw input over the last ~150 ms; used by the manager for cross-track matching
+- `resetLoudnessMeter()` — clear the K-weighted accumulator and biquad state, so the
+  next reading reflects only fresh audio (called when arming an incoming player)
 
 **Why a biquad:** A second-order IIR section is the smallest filter that can give a flat passband, a monotonic rolloff, and a controllable slope. Two multiplies and two adds per sample per channel — cheap enough to run on any Android device at 44.1 kHz without measurable CPU cost. The cookbook formulas (Robert Bristow-Johnson) map directly from (sampleRate, cutoffHz, Q) to `(b0, b1, b2, a1, a2)`.
 
@@ -86,51 +102,104 @@ x[n] → RMS meter tap → biquad (LPF / HPF / bypass) → * gain → clamp → 
 **Lifecycle during a crossfade:**
 
 ```
-monitor() detects remaining ≤ TRIGGER_LEAD_MS
+monitor() detects remaining ≤ TRIGGER_LEAD_MS  (= FADE_DURATION_MS + PRE_ROLL_MS + 200)
        │
        ▼
 prepareNext() called (downloads + builds CrossfadeNextTrack)
        │
        ▼
 executeCrossfade():
-  outgoing processor: gain=1, filter=BYPASS    (already in this state)
-  incoming processor: gain=0, filter=HPF @ 180 Hz
-  inactivePlayer.setMediaItem(nextTrack.mediaItem)
-  inactivePlayer.prepare()
-  inactivePlayer.play()                       ← silent: processor gain is 0
+  ── prime ──
+  outgoing processor: gain=1, filter=BYPASS, width=1
+  incoming processor: gain=0, trim=0, filter=HPF @ 220 Hz, width=0.55,
+                       loudness meter cleared
+  inactivePlayer.setMediaItem(nextTrack.mediaItem); prepare(); play()
        │
        ▼
-Wait until inactivePlayer.isPlaying
+  Wait until inactivePlayer.isPlaying
        │
        ▼
-nextTrack.onCrossfadeStart()                  ← ViewModel updates UI
+  ── pre-roll (500 ms): silent loudness sampling ──
+  delay 200 ms (let K-weighting biquads settle and meter window fill)
+  3 × { sample outgoing.kWeightedRmsLinear, incoming.kWeightedRmsLinear; delay 100 ms }
+  trimDb = 20·log10(avg(out) / avg(in)), clamped ±LOUDNESS_TRIM_MAX_DB (=6)
+  incoming.setTrimDb(trimDb, ramp=80 ms)      ← matched-loudness lock
        │
        ▼
-For each STEP_MS of FADE_DURATION_MS:
-  t = progress in [0, 1]
-  outgoing processor:
-    gain    = cos(t·π/2)                      ← equal-power down
-    filter  = LPF, cutoff = logSweep(20 kHz, 500 Hz, t)
-  incoming processor:
-    gain    = sin(t·π/2)                      ← equal-power up
-    filter  = HPF, cutoff = logSweep(180 Hz, 20 Hz, min(t / 0.6, 1))
-    once hpfProgress ≥ 1 → filter = BYPASS    (phase-clean signal)
+  nextTrack.onCrossfadeStart()                ← ViewModel updates UI
        │
        ▼
-delegatingPlayer.swapActivePlayer()
-Both processors ← resetToIdle()
+  ── time-driven envelope (6 s, 20 ms ticks) ──
+  start = SystemClock.elapsedRealtime()
+  loop until raw progress ≥ 1:
+    rawT  = (now − start) / FADE_DURATION_MS
+    t     = tukey(rawT, 0.15)                 ← raised-cosine ease in/out
+    outgoing:
+      gain   = cos(t·π/2)                     ← equal-power down
+      filter = LPF, cutoff = logSweep(20 kHz → 150 Hz, t)
+      width  = 1 → 0  (linear in t)           ← mono-fold to "recede"
+    incoming:
+      gain   = sin(t·π/2)                     ← equal-power up
+      filter = HPF, cutoff = logSweep(220 → 30 Hz, min(t/0.85, 1))
+      once hpfProgress ≥ 1 → filter = BYPASS  (cutoff already inaudible)
+      width  = 0.55 → 1  (linear in t/0.8)   ← opens out of mono
        │
        ▼
-nextTrack.onCrossfadeComplete()               ← ViewModel re-wires, prefetches
+  delegatingPlayer.swapActivePlayer()
+  outgoing → resetToIdle()
+  incoming → setTrimDb(0, ramp=5 s)          ← drift back to native level
+       │
+       ▼
+  nextTrack.onCrossfadeComplete()             ← ViewModel re-wires, prefetches
 ```
 
-**The logarithmic cutoff sweep** matters: a linear sweep from 20 kHz to 500 Hz spends 97% of its time above 600 Hz, so the *audible* filter effect only happens in the last 100 ms — perceptually it sounds like a sudden "dunk" at the end. Log-spaced sweeps move through each octave for the same fraction of the fade, which is how the ear perceives frequency.
+**Time-driven progress (not iteration count)**: the loop computes `rawT` from
+`SystemClock.elapsedRealtime()` each tick, so a coroutine tick that fires late doesn't
+push later ticks late too — the next tick computes the correct progress and the curve
+catches up. With the old `index/steps` formulation, jitter accumulated and the fade
+could end audibly off-cadence on a busy device.
 
-**Why the incoming HPF** starts at 180 Hz and opens over only the first 60% of the fade: two bass lines in different keys sum to comb-filter artifacts at their fundamentals — a brief "phasing" sound during the overlap. A gentle HPF on the incoming keeps its bass out of the way while the outgoing is still audible; once the outgoing is nearly silent, the incoming's low end opens back up fully.
+**Tukey progress shaping**: a raised-cosine softens the first and last 15 % of the
+fade. The cosine gain curve has zero slope where it meets the eased endpoints — so the
+gain change "eases in" (no sudden drop on the outgoing) and "eases out" (no sudden
+plateau on the incoming). The middle 70 % is straight linear, preserving the equal-
+power behavior where it matters most.
 
-**Why no more `OUTGOING_FLOOR`:** The old pipeline held the outgoing at 10 % gain to the end of the fade so the swap wouldn't feel abrupt. With sample-accurate gain smoothing + spectral thinning via LPF, the outgoing can go to absolute zero and the final swap is inaudible — the perceived presence has already tapered off through loss of highs.
+**The logarithmic cutoff sweep** matters: a linear sweep from 20 kHz to 150 Hz spends
+> 97 % of its time above 1 kHz, so the audible filter effect only happens in the last
+~100 ms — perceptually a sudden "dunk" at the end. Log-spaced sweeps move through each
+octave for the same fraction of the fade, which is how the ear perceives frequency.
 
-**Cancellation:** `cancelTransition()` cancels the coroutine job, resets both processors to idle, and stops the inactive player. The processors are always left in a clean state so the next crossfade starts predictably.
+**Why the incoming HPF stays active until 85 % of the fade**: with the outgoing LPF
+sweeping to 150 Hz, the outgoing's bass is still around −7 dB at the 70 % mark. Holding
+the incoming HPF until 85 % keeps the two tracks' bass lines from summing into comb-
+filter "phasing" artifacts. The HPF endpoint at 30 Hz is essentially BYPASS in the
+audible range, so the final flip to BYPASS is acoustically silent.
+
+**Stereo-width modulation** is a depth cue: narrowing the outgoing toward mono makes it
+recede from the front-stage; opening the incoming from 0.55 to full stereo makes it
+"unfold" into the field. Cost: four multiplies and two adds per stereo frame. Mono
+streams skip the M/S stage entirely.
+
+**Loudness matching** is the biggest perceptual win. Adjacent tracks at different
+master levels (e.g. a −9 LUFS pop song into a −18 LUFS jazz ballad) jump audibly even
+with a perfect equal-power curve. Sampling K-weighted RMS on both players during the
+500 ms pre-roll and applying a clamped ±6 dB trim to the incoming aligns the perceived
+loudness across the entire fade. After the swap, that trim drifts back to 0 dB over
+~5 s (τ = 5 s, one-pole) so the new track ends up at native level without an audible
+step — the rate (≈ 1.2 dB/s worst case) is below the casual-listener detection
+threshold for slow gain change.
+
+**Why no more `OUTGOING_FLOOR`**: the old pipeline held the outgoing at 10 % gain to
+the end of the fade so the swap wouldn't feel abrupt. With sample-accurate gain
+smoothing + spectral thinning via LPF + width narrowing, the outgoing can go to zero
+and the final swap is inaudible — the perceived presence has already tapered off
+through loss of highs and stereo spread.
+
+**Cancellation**: `cancelTransition()` cancels the fade coroutine and any in-flight
+trim-decay, then either commits to the incoming (preserving the matched trim and
+starting the decay) or reverts (kills incoming, returns outgoing to idle). The
+processors are always left in a clean state so the next crossfade starts predictably.
 
 ---
 

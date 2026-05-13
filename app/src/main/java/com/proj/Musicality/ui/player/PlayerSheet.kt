@@ -1394,17 +1394,27 @@ private fun ExpandedPlaybackProgressSection(
             expandedTrackHeight = 12.dp
         )
 
-        Row(
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 4.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .padding(top = 4.dp)
         ) {
-            Text(
-                text = formatMs(positionMs),
-                style = MaterialTheme.typography.labelLarge,
-                color = onSurface.copy(alpha = 0.85f)
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = formatMs(positionMs),
+                    style = MaterialTheme.typography.labelLarge.copy(fontFeatureSettings = "tnum"),
+                    color = onSurface.copy(alpha = 0.85f)
+                )
+                Text(
+                    text = if (durationMs > 0) formatMs(durationMs) else (durationText ?: ""),
+                    style = MaterialTheme.typography.labelLarge.copy(fontFeatureSettings = "tnum"),
+                    color = onSurface.copy(alpha = 0.85f)
+                )
+            }
             CrossfadeCountdownCue(
                 visible = showCrossfadeCue(
                     positionMs = positionMs,
@@ -1413,14 +1423,7 @@ private fun ExpandedPlaybackProgressSection(
                     hasNextTrack = hasNextTrack
                 ),
                 accentColor = playbackAccent,
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(horizontal = 8.dp)
-            )
-            Text(
-                text = if (durationMs > 0) formatMs(durationMs) else (durationText ?: ""),
-                style = MaterialTheme.typography.labelLarge,
-                color = onSurface.copy(alpha = 0.85f)
+                modifier = Modifier.align(Alignment.Center)
             )
         }
     }

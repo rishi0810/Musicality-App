@@ -2,7 +2,9 @@ package com.proj.Musicality.crossfade
 
 import kotlin.math.PI
 import kotlin.math.cos
+import kotlin.math.pow
 import kotlin.math.sin
+import kotlin.math.sqrt
 
 /**
  * IIR biquad filter coefficients — Robert Bristow-Johnson's audio-EQ cookbook, normalized so a0 == 1.
@@ -64,6 +66,41 @@ internal data class BiquadCoefficients(
             val a2 = (1.0 - alpha) / a0
             return BiquadCoefficients(
                 b0.toFloat(), b1.toFloat(), b2.toFloat(), a1.toFloat(), a2.toFloat()
+            )
+        }
+
+        /**
+         * Second-order high-shelf (RBJ cookbook). Used as the first stage of BS.1770 K-weighting,
+         * which boosts everything above ~1500 Hz by ~4 dB to approximate the ear's high-frequency
+         * sensitivity emphasis.
+         */
+        fun highshelf(
+            sampleRate: Int,
+            cutoffHz: Float,
+            gainDb: Float,
+            q: Float = DEFAULT_Q
+        ): BiquadCoefficients {
+            val fc = cutoffHz.coerceIn(10f, sampleRate * 0.49f)
+            val a = 10.0.pow(gainDb.toDouble() / 40.0) // sqrt of linear gain
+            val w0 = 2.0 * PI * fc / sampleRate
+            val cosW0 = cos(w0)
+            val sinW0 = sin(w0)
+            val alpha = sinW0 / (2.0 * q)
+            val twoSqrtAAlpha = 2.0 * sqrt(a) * alpha
+
+            val a0 = (a + 1.0) - (a - 1.0) * cosW0 + twoSqrtAAlpha
+            val b0 = a * ((a + 1.0) + (a - 1.0) * cosW0 + twoSqrtAAlpha)
+            val b1 = -2.0 * a * ((a - 1.0) + (a + 1.0) * cosW0)
+            val b2 = a * ((a + 1.0) + (a - 1.0) * cosW0 - twoSqrtAAlpha)
+            val a1Out = 2.0 * ((a - 1.0) - (a + 1.0) * cosW0)
+            val a2Out = (a + 1.0) - (a - 1.0) * cosW0 - twoSqrtAAlpha
+
+            return BiquadCoefficients(
+                (b0 / a0).toFloat(),
+                (b1 / a0).toFloat(),
+                (b2 / a0).toFloat(),
+                (a1Out / a0).toFloat(),
+                (a2Out / a0).toFloat()
             )
         }
 
