@@ -650,6 +650,19 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                 }
             }
 
+            // Short-circuit on local files (downloads + played cache) so playback works offline
+            // and avoids a network round-trip when duration is unknown. Local audio is always
+            // short-form — long-form is streamed, never cached — so the long-form gating below
+            // is irrelevant once we have a file on disk.
+            val localFile = withContext(Dispatchers.IO) { libraryRepository.findLocalAudioFile(item.videoId) }
+            if (localFile != null) {
+                Log.d(TAG, "fetchAndPlay: reusing local file for '${item.videoId}' (${localFile.length() / 1024}KB)")
+                val fileUri = localFile.toURI().toString()
+                startExoPlayback(fileUri, item)
+                cacheToPlayedCollection(item, localFile)
+                return@launch
+            }
+
             val longForm = if (item.durationText != null) {
                 val seconds = parseDurationToSeconds(item.durationText)
                 Log.d(TAG, "fetchAndPlay: durationText='${item.durationText}' parsed=${seconds}s threshold=${LONG_FORM_THRESHOLD_SECONDS}s")
@@ -676,13 +689,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                 return@launch
             }
 
-            val localFile = withContext(Dispatchers.IO) { libraryRepository.findLocalAudioFile(item.videoId) }
-            val file = if (localFile != null) {
-                Log.d(TAG, "fetchAndPlay: reusing local file for '${item.videoId}' (${localFile.length() / 1024}KB)")
-                localFile
-            } else {
-                AudioFileCache.getOrDownload(item.videoId)
-            }
+            val file = AudioFileCache.getOrDownload(item.videoId)
             if (file != null) {
                 val fileUri = file.toURI().toString()
                 Log.d(TAG, "fetchAndPlay: playing '${item.videoId}' (${file.length() / 1024}KB)")
