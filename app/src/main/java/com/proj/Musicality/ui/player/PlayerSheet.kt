@@ -147,6 +147,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
@@ -189,6 +190,7 @@ import com.proj.Musicality.data.local.MediaLibraryState
 import com.proj.Musicality.data.model.LyricsState
 import com.proj.Musicality.data.model.MediaItem
 import com.proj.Musicality.data.model.PlaybackQueue
+import com.proj.Musicality.data.model.QueueSource
 import com.proj.Musicality.ui.components.pressScale
 import com.proj.Musicality.ui.components.HapticIconButton
 import com.proj.Musicality.ui.components.hapticClickable
@@ -785,6 +787,11 @@ fun PlayerSheet(
                                 val darkSwatch = mediaPalette.accent
                                 val lightSwatch = darkSwatch.copy(alpha = 0.22f)
                                 val controlShape = RoundedCornerShape(24.dp)
+                                val sideButtonContentColor =
+                                    if (lightSwatch.compositeOver(mediaPalette.bottom).luminance() > 0.5f) Color.Black
+                                    else Color.White
+                                val playButtonContentColor =
+                                    if (darkSwatch.luminance() > 0.5f) Color.Black else Color.White
 
                                 FilledIconButton(
                                     onClick = onSkipPrev,
@@ -792,7 +799,7 @@ fun PlayerSheet(
                                     interactionSource = backInteractionSource,
                                     colors = IconButtonDefaults.filledIconButtonColors(
                                         containerColor = lightSwatch,
-                                        contentColor = Color.White
+                                        contentColor = sideButtonContentColor
                                     ),
                                     modifier = Modifier
                                         .height(68.dp)
@@ -813,7 +820,7 @@ fun PlayerSheet(
                                     interactionSource = playPauseInteractionSource,
                                     colors = IconButtonDefaults.filledIconButtonColors(
                                         containerColor = darkSwatch,
-                                        contentColor = Color.White
+                                        contentColor = playButtonContentColor
                                     ),
                                     modifier = Modifier
                                         .height(68.dp)
@@ -834,7 +841,7 @@ fun PlayerSheet(
                                     interactionSource = nextInteractionSource,
                                     colors = IconButtonDefaults.filledIconButtonColors(
                                         containerColor = lightSwatch,
-                                        contentColor = Color.White
+                                        contentColor = sideButtonContentColor
                                     ),
                                     modifier = Modifier
                                         .height(68.dp)
@@ -1147,8 +1154,11 @@ fun PlayerSheet(
             onPlayPause = onPlayPause,
             onSkipNext = onSkipNext,
             onSkipPrev = onSkipPrev,
-            canSkipNext = queue.currentIndex < queue.items.lastIndex,
-            canSkipPrevious = queue.currentIndex > 0,
+            // PLAYED queues wrap at both ends — mini-player swipe must mirror that.
+            canSkipNext = queue.source == QueueSource.PLAYED && queue.items.size > 1 ||
+                queue.currentIndex < queue.items.lastIndex,
+            canSkipPrevious = queue.source == QueueSource.PLAYED && queue.items.size > 1 ||
+                queue.currentIndex > 0,
             queue = queue
         )
 
@@ -1760,6 +1770,24 @@ private fun QueueActionSheet(
     }
 }
 
+// Slot↔real index mapping for the circular AlbumArtPager. Circular queues (PLAYED, size > 1)
+// render two ghost slots that mirror the wrap targets:
+//   slot 0          → items[size - 1]  (leading ghost; shown when user drags past first)
+//   slot 1..size    → items[0..size-1] (real items)
+//   slot size + 1   → items[0]         (trailing ghost; shown when user drags past last)
+// When a drag lands on a ghost, the gesture handler emits onSkipToIndex(realIndex) and a
+// follow-up scroll silently retargets the twin real slot. The ghost and twin show the same
+// image, so the jump is imperceptible.
+private fun realFromSlot(slot: Int, size: Int, circular: Boolean): Int = when {
+    size == 0 -> 0
+    !circular -> slot.coerceIn(0, size - 1)
+    slot <= 0 -> size - 1
+    slot >= size + 1 -> 0
+    else -> (slot - 1).coerceIn(0, size - 1)
+}
+
+private fun slotFromReal(real: Int, circular: Boolean): Int = if (circular) real + 1 else real
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun AlbumArtPager(
@@ -1774,6 +1802,9 @@ private fun AlbumArtPager(
     val context = LocalContext.current
     val updatedCurrentIndex by rememberUpdatedState(currentQueueIndex)
     val updatedQueueItems by rememberUpdatedState(queueItems)
+    val isCircular = queue.source == QueueSource.PLAYED && queueItems.size > 1
+    val updatedIsCircular by rememberUpdatedState(isCircular)
+    val pagerItemCount = if (isCircular) queueItems.size + 2 else queueItems.size
 
     // Pre-fetch and decode images for currentIndex ± 2 into Coil memory cache.
     // Both the prefetch and the display AsyncImage use Size.ORIGINAL so their
@@ -1802,7 +1833,10 @@ private fun AlbumArtPager(
         }
     }
 
-    val gridState = rememberLazyGridState(initialFirstVisibleItemIndex = currentQueueIndex)
+    val gridState = rememberLazyGridState(
+        initialFirstVisibleItemIndex = slotFromReal(currentQueueIndex, isCircular)
+            .coerceIn(0, (pagerItemCount - 1).coerceAtLeast(0))
+    )
     val isDragged by gridState.interactionSource.collectIsDraggedAsState()
     var userGestureActive by remember { mutableStateOf(false) }
 
@@ -1824,23 +1858,32 @@ private fun AlbumArtPager(
             gridState.firstVisibleItemIndex to gridState.firstVisibleItemScrollOffset
         }
             .distinctUntilChanged()
-            .collect { (index, offset) ->
+            .collect { (slot, offset) ->
                 val currentItems = updatedQueueItems
+                val size = currentItems.size
+                if (size == 0) return@collect
+                val circular = updatedIsCircular
                 val viewportWidth = gridState.layoutInfo.viewportSize.width
-                val dominantIndex = if (viewportWidth > 0 && offset > viewportWidth / 2) index + 1 else index
-                if (dominantIndex in currentItems.indices) {
-                    onDisplayIndexChanged(dominantIndex)
+                val dominantSlot = if (viewportWidth > 0 && offset > viewportWidth / 2) slot + 1 else slot
+                val dominantReal = realFromSlot(dominantSlot, size, circular)
+                if (dominantReal in currentItems.indices) {
+                    onDisplayIndexChanged(dominantReal)
                 }
-                if (offset == 0 && userGestureActive && index != updatedCurrentIndex && index in currentItems.indices) {
-                    onSkipToIndex(index)
+                if (offset == 0 && userGestureActive) {
+                    val realIndex = realFromSlot(slot, size, circular)
+                    if (realIndex != updatedCurrentIndex && realIndex in currentItems.indices) {
+                        onSkipToIndex(realIndex)
+                    }
                 }
                 if (offset == 0) userGestureActive = false
             }
     }
 
-    LaunchedEffect(currentQueueIndex) {
-        if (currentQueueIndex in queueItems.indices && gridState.firstVisibleItemIndex != currentQueueIndex) {
-            gridState.scrollToItem(currentQueueIndex)
+    LaunchedEffect(currentQueueIndex, isCircular, queueItems.size) {
+        if (currentQueueIndex !in queueItems.indices) return@LaunchedEffect
+        val targetSlot = slotFromReal(currentQueueIndex, isCircular)
+        if (gridState.firstVisibleItemIndex != targetSlot) {
+            gridState.scrollToItem(targetSlot)
         }
     }
 
@@ -1855,10 +1898,20 @@ private fun AlbumArtPager(
                 modifier = Modifier.fillMaxSize()
             ) {
                 items(
-                    count = queueItems.size,
-                    key = { queueItems[it].videoId }
-                ) { index ->
-                    val mediaItem = queueItems[index]
+                    count = pagerItemCount,
+                    key = { slot ->
+                        val real = realFromSlot(slot, queueItems.size, isCircular)
+                        val base = queueItems.getOrNull(real)?.videoId
+                        when {
+                            base == null -> "empty-$slot"
+                            isCircular && slot == 0 -> "wrap-leading-$base"
+                            isCircular && slot == queueItems.size + 1 -> "wrap-trailing-$base"
+                            else -> base
+                        }
+                    }
+                ) { slot ->
+                    val real = realFromSlot(slot, queueItems.size, isCircular)
+                    val mediaItem = queueItems[real]
 
                     Box(
                         modifier = Modifier

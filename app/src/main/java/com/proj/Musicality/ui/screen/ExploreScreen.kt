@@ -66,13 +66,16 @@ import com.proj.Musicality.config.scaled
 import com.proj.Musicality.R
 import com.proj.Musicality.data.model.HomeItem
 import com.proj.Musicality.data.model.HomeSection
+import com.proj.Musicality.data.network.NetworkStatus
+import com.proj.Musicality.data.network.NetworkStatusMonitor
 import com.proj.Musicality.data.parser.MoodCategoryParser
 import com.proj.Musicality.ui.components.ContentCard
 import com.proj.Musicality.ui.components.ErrorMessage
+import com.proj.Musicality.ui.components.OfflinePanel
 import com.proj.Musicality.ui.components.hapticClickable
 import com.proj.Musicality.ui.components.pressScale
 import com.proj.Musicality.ui.components.SectionHeader
-import com.proj.Musicality.ui.components.ShimmerSection
+import com.proj.Musicality.ui.components.PageLoader
 import com.proj.Musicality.ui.theme.LocalSharedTransitionScope
 import com.proj.Musicality.ui.theme.MediaBoundsSpring
 import com.proj.Musicality.viewmodel.ExploreViewModel
@@ -86,9 +89,16 @@ fun ExploreScreen(
     onAlbumTap: (String, String, String?, String?) -> Unit,
     onPlaylistTap: (String, String, String?, String?) -> Unit,
     onMoodTap: (MoodCategoryParser.Mood) -> Unit,
+    onExplorePlayed: () -> Unit = {},
     collapsedMiniPlayerHeight: Dp = 0.dp,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
+    val networkMonitor = remember(context.applicationContext) {
+        NetworkStatusMonitor.getInstance(context.applicationContext)
+    }
+    val networkStatus by networkMonitor.status.collectAsStateWithLifecycle()
+    val isOffline = networkStatus is NetworkStatus.None
     val viewModel: ExploreViewModel = viewModel()
     val state by viewModel.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
@@ -96,6 +106,27 @@ fun ExploreScreen(
     val pullState = rememberPullToRefreshState()
 
     LaunchedEffect(Unit) { viewModel.initialize() }
+
+    var wasOffline by remember { mutableStateOf(isOffline) }
+    LaunchedEffect(isOffline) {
+        if (wasOffline && !isOffline) {
+            scope.launch {
+                isRefreshing = true
+                viewModel.refresh()
+                isRefreshing = false
+            }
+        }
+        wasOffline = isOffline
+    }
+
+    if (isOffline) {
+        OfflinePanel(
+            onExplorePlayed = onExplorePlayed,
+            bottomPadding = collapsedMiniPlayerHeight + 8.dp,
+            modifier = modifier.fillMaxSize()
+        )
+        return
+    }
 
     PullToRefreshBox(
         isRefreshing = isRefreshing,
@@ -126,7 +157,7 @@ fun ExploreScreen(
 
             when (val s = state) {
                 is ExploreViewModel.UiState.Loading -> {
-                    items(5, key = { "shimmer-$it" }) { ShimmerSection() }
+                    item(key = "explore-loader") { PageLoader() }
                 }
 
                 is ExploreViewModel.UiState.Error -> {

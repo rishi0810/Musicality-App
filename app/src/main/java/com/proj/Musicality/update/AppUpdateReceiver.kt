@@ -36,6 +36,7 @@ class AppUpdateReceiver : BroadcastReceiver() {
         when (intent?.action) {
             ACTION_DOWNLOAD_UPDATE -> handleDownloadUpdate(context, intent)
             DownloadManager.ACTION_DOWNLOAD_COMPLETE -> handleDownloadComplete(context, intent)
+            Intent.ACTION_MY_PACKAGE_REPLACED -> handlePackageReplaced(context)
         }
     }
 
@@ -45,6 +46,9 @@ class AppUpdateReceiver : BroadcastReceiver() {
         val versionName = intent.getStringExtra(EXTRA_VERSION_NAME).orEmpty()
         if (apkUrl.isBlank() || versionCode <= 0) return
 
+        val downloadManager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+        removePreviousDownload(context, downloadManager)
+
         val request = DownloadManager.Request(Uri.parse(apkUrl))
             .setTitle("Musicality update")
             .setDescription("Downloading $versionName")
@@ -52,12 +56,12 @@ class AppUpdateReceiver : BroadcastReceiver() {
             .setMimeType("application/vnd.android.package-archive")
             .setAllowedOverMetered(true)
             .setAllowedOverRoaming(true)
-            .setDestinationInExternalPublicDir(
+            .setDestinationInExternalFilesDir(
+                context,
                 Environment.DIRECTORY_DOWNLOADS,
                 "app-release-$versionName.apk"
             )
 
-        val downloadManager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
         val downloadId = runCatching { downloadManager.enqueue(request) }
             .onFailure { Log.e(TAG, "Failed to enqueue update download", it) }
             .getOrNull() ?: return
@@ -66,6 +70,28 @@ class AppUpdateReceiver : BroadcastReceiver() {
             .edit()
             .putLong(KEY_DOWNLOAD_ID, downloadId)
             .putInt(KEY_DOWNLOAD_VERSION_CODE, versionCode)
+            .apply()
+    }
+
+    private fun handlePackageReplaced(context: Context) {
+        val downloadManager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+        removePreviousDownload(context, downloadManager)
+
+        val notificationManager =
+            context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.cancel(INSTALL_NOTIFICATION_ID)
+    }
+
+    private fun removePreviousDownload(context: Context, downloadManager: DownloadManager) {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val previousId = prefs.getLong(KEY_DOWNLOAD_ID, -1L)
+        if (previousId > 0L) {
+            runCatching { downloadManager.remove(previousId) }
+                .onFailure { Log.w(TAG, "Failed to remove previous update download", it) }
+        }
+        prefs.edit()
+            .remove(KEY_DOWNLOAD_ID)
+            .remove(KEY_DOWNLOAD_VERSION_CODE)
             .apply()
     }
 

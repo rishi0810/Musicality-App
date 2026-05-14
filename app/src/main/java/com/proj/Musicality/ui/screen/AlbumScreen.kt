@@ -236,7 +236,7 @@ fun AlbumScreen(
 
         when (val s = state) {
             is AlbumViewModel.UiState.Seed -> {
-                items(4, key = { "shimmer-$it" }) { ShimmerSection() }
+                item(key = "loader") { PageLoader() }
             }
             is AlbumViewModel.UiState.Loaded -> {
                 val album = s.album

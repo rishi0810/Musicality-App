@@ -226,7 +226,7 @@ fun PlaylistScreen(
 
         when (val s = state) {
             is PlaylistViewModel.UiState.Seed -> {
-                items(4, key = { "shimmer-$it" }) { ShimmerSection() }
+                item(key = "loader") { PageLoader() }
             }
             is PlaylistViewModel.UiState.Loaded -> {
                 val playlist = s.playlist
@@ -262,7 +262,9 @@ fun PlaylistScreen(
                             color = mediaPalette.body,
                             maxLines = 3,
                             overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 24.dp, vertical = 8.dp),
                             textAlign = TextAlign.Center
                         )
                     }

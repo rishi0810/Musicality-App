@@ -114,7 +114,6 @@ import com.proj.Musicality.ui.components.HapticFilledTonalIconButton
 import com.proj.Musicality.ui.components.HapticOutlinedButton
 import com.proj.Musicality.ui.components.hapticClickable
 import com.proj.Musicality.ui.components.SectionHeader
-import com.proj.Musicality.ui.components.ShimmerSection
 import com.proj.Musicality.ui.components.SongListItem
 import com.proj.Musicality.ui.components.Thumbnail
 import com.proj.Musicality.ui.theme.ForceGradientStatusBar
@@ -328,7 +327,6 @@ fun ArtistScreen(
                         )
                     }
                 }
-                items(3, key = { "shimmer-$it" }) { ShimmerSection() }
             }
 
             is ArtistViewModel.UiState.Loaded -> {

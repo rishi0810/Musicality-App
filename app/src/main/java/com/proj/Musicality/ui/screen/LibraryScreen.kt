@@ -92,6 +92,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import com.proj.Musicality.ui.theme.LocalPlaybackBackdropPalette
 import com.proj.Musicality.ui.theme.LocalPlaybackUiPalette
+import com.proj.Musicality.ui.theme.readableContentColor
 import com.proj.Musicality.data.local.DateSortOrder
 import com.proj.Musicality.data.local.LibraryCollectionType
 import com.proj.Musicality.data.local.LibraryRepository
@@ -309,7 +310,7 @@ private fun SavedLibrarySection(
     val backdropPalette = LocalPlaybackBackdropPalette.current
     val segmentedActiveContainerColor = backdropPalette?.middle
         ?: MaterialTheme.colorScheme.secondaryContainer
-    val segmentedActiveContentColor = Color.White
+    val segmentedActiveContentColor = readableContentColor(segmentedActiveContainerColor)
 
     val filteredEntries = remember(snapshot, selectedSavedFilter, sortOrder) {
         val base = snapshot.entriesFor(selectedSavedFilter)

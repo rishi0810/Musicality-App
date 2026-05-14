@@ -37,7 +37,7 @@ import com.proj.Musicality.data.parser.MoodCategoryParser
 import com.proj.Musicality.ui.components.ContentCard
 import com.proj.Musicality.ui.components.ErrorMessage
 import com.proj.Musicality.ui.components.SectionHeader
-import com.proj.Musicality.ui.components.ShimmerSection
+import com.proj.Musicality.ui.components.PageLoader
 import com.proj.Musicality.viewmodel.MoodCategoryViewModel
 import kotlinx.coroutines.launch
 
@@ -94,7 +94,7 @@ fun MoodCategoryScreen(
 
             when (val s = state) {
                 is MoodCategoryViewModel.UiState.Loading -> {
-                    items(5, key = { "mood-shimmer-$it" }) { ShimmerSection() }
+                    item(key = "mood-loader") { PageLoader() }
                 }
 
                 is MoodCategoryViewModel.UiState.Error -> {

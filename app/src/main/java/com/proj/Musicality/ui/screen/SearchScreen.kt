@@ -83,6 +83,7 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -109,6 +110,7 @@ import com.proj.Musicality.ui.components.HapticIconButton
 import com.proj.Musicality.ui.components.hapticClickable
 import com.proj.Musicality.ui.components.SongListItem
 import com.proj.Musicality.ui.theme.LocalPlaybackBackdropPalette
+import com.proj.Musicality.ui.theme.readableContentColor
 import com.proj.Musicality.util.toCompactSongTitle
 import com.proj.Musicality.util.upscaleThumbnail
 import com.proj.Musicality.viewmodel.SearchViewModel
@@ -142,6 +144,7 @@ fun SearchScreen(
     onAlbumMenuTap: (String, String, String?, String?) -> Unit,
     onPlaylistTap: (String, String, String?, String?) -> Unit,
     onMoodTap: (MoodCategoryParser.Mood) -> Unit,
+    onExplorePlayed: () -> Unit = {},
     collapsedMiniPlayerHeight: Dp = 0.dp,
     modifier: Modifier = Modifier
 ) {
@@ -157,7 +160,7 @@ fun SearchScreen(
     val backdropPalette = LocalPlaybackBackdropPalette.current
     val selectedChipContainerColor = backdropPalette?.middle
         ?: MaterialTheme.colorScheme.secondaryContainer
-    val selectedChipLabelColor = Color.White
+    val selectedChipLabelColor = readableContentColor(selectedChipContainerColor)
     val context = LocalContext.current
     val repository = remember(context.applicationContext) {
         LibraryRepository.getInstance(context.applicationContext)
@@ -231,8 +234,9 @@ fun SearchScreen(
                 placeholder = {
                     Text(
                         "Search songs, artists, albums...",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 },
                 trailingIcon = {
@@ -271,7 +275,8 @@ fun SearchScreen(
                 onArtistTap = { name, id, thumb, audience -> onArtistTap(name, id, thumb, audience) },
                 onAlbumTap = onAlbumTap,
                 onPlaylistTap = onPlaylistTap,
-                onMoodTap = onMoodTap
+                onMoodTap = onMoodTap,
+                onExplorePlayed = onExplorePlayed
             )
         } else {
             AnimatedContent(

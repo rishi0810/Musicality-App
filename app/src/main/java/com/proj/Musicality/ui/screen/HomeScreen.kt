@@ -47,6 +47,7 @@ import androidx.compose.material.icons.rounded.Podcasts
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Widgets
+import androidx.compose.material.icons.rounded.WifiOff
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -85,6 +86,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -94,6 +96,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.proj.Musicality.data.local.LibraryRepository
 import com.proj.Musicality.data.local.MediaDownloadState
 import com.proj.Musicality.data.local.MediaLibraryState
+import com.proj.Musicality.data.network.NetworkStatus
+import com.proj.Musicality.data.network.NetworkStatusMonitor
 import coil3.compose.AsyncImage
 import com.proj.Musicality.data.model.HomeItem
 import com.proj.Musicality.data.model.HomeMoreEndpoint
@@ -107,6 +111,7 @@ import com.proj.Musicality.ui.components.ContentCard
 import com.proj.Musicality.ui.components.ErrorMessage
 import com.proj.Musicality.ui.components.HapticIconButton
 import com.proj.Musicality.ui.components.HapticTextButton
+import com.proj.Musicality.ui.components.OfflinePanel
 import com.proj.Musicality.ui.components.SectionHeader
 import com.proj.Musicality.ui.components.SongListItem
 import com.proj.Musicality.ui.components.Thumbnail
@@ -151,6 +156,7 @@ fun HomeScreen(
     onAlbumTap: (String, String, String?, String?) -> Unit,
     onPlaylistTap: (String, String, String?, String?) -> Unit,
     onSettingsTap: () -> Unit = {},
+    onExplorePlayed: () -> Unit = {},
     collapsedMiniPlayerHeight: Dp = 0.dp,
     modifier: Modifier = Modifier
 ) {
@@ -158,6 +164,10 @@ fun HomeScreen(
     val repository = remember(context.applicationContext) {
         LibraryRepository.getInstance(context.applicationContext)
     }
+    val networkMonitor = remember(context.applicationContext) {
+        NetworkStatusMonitor.getInstance(context.applicationContext)
+    }
+    val networkStatus by networkMonitor.status.collectAsStateWithLifecycle()
     val viewModel: HomeViewModel = viewModel()
     val state by viewModel.state.collectAsStateWithLifecycle()
     val isLoadingMore by viewModel.isLoadingMore.collectAsStateWithLifecycle()
@@ -170,9 +180,51 @@ fun HomeScreen(
     val playbackUiPalette = LocalPlaybackUiPalette.current
     val refreshContainerColor = playbackUiPalette?.accent ?: MaterialTheme.colorScheme.primary
     val refreshIndicatorColor = playbackUiPalette?.onAccent ?: MaterialTheme.colorScheme.onPrimary
+    val isOffline = networkStatus is NetworkStatus.None
 
     LaunchedEffect(Unit) {
         viewModel.initialize()
+    }
+
+    // When the connection comes back, refresh the home feed so the user immediately gets
+    // fresh content instead of needing a manual pull-to-refresh.
+    var wasOffline by remember { mutableStateOf(isOffline) }
+    LaunchedEffect(isOffline) {
+        if (wasOffline && !isOffline) {
+            scope.launch {
+                isRefreshing = true
+                viewModel.refresh()
+                isRefreshing = false
+            }
+        }
+        wasOffline = isOffline
+    }
+
+    if (isOffline) {
+        Column(modifier = modifier.fillMaxSize()) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, end = 4.dp, top = 10.dp, bottom = 10.dp)
+            ) {
+                Text(
+                    text = "Home",
+                    style = MaterialTheme.typography.headlineLarge,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f)
+                )
+                HapticIconButton(onClick = onSettingsTap) {
+                    Icon(Icons.Rounded.Settings, contentDescription = "Settings")
+                }
+            }
+            OfflinePanel(
+                onExplorePlayed = onExplorePlayed,
+                bottomPadding = collapsedMiniPlayerHeight + 8.dp,
+                modifier = Modifier.weight(1f)
+            )
+        }
+        return
     }
 
     PullToRefreshBox(

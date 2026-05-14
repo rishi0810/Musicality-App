@@ -69,6 +69,7 @@ import com.proj.Musicality.navigation.Route
 import com.proj.Musicality.ui.components.ExpressiveBottomNavBar
 import com.proj.Musicality.ui.components.ExpressiveBottomNavItem
 import com.proj.Musicality.ui.components.HapticIconButton
+import com.proj.Musicality.ui.components.NetworkStatusToast
 import com.proj.Musicality.ui.player.PlayerSheet
 import com.proj.Musicality.ui.screen.*
 import com.proj.Musicality.ui.theme.LocalPlaybackBackdropPalette
@@ -413,6 +414,7 @@ fun MusicApp() {
                 }
             }
         ) {
+            Box(modifier = Modifier.fillMaxSize()) {
             BottomSheetScaffold(
             scaffoldState = sheetState,
             sheetPeekHeight = sheetPeekHeight,
@@ -525,7 +527,10 @@ fun MusicApp() {
                         onArtistTap = navToArtist,
                         onAlbumTap = navToAlbum,
                         onPlaylistTap = navToPlaylist,
-                        onSettingsTap = { navController.navigate(Route.Settings) }
+                        onSettingsTap = { navController.navigate(Route.Settings) },
+                        onExplorePlayed = {
+                            navController.navigate(Route.LibraryCollection(LibraryCollectionType.PLAYED.name))
+                        }
                     )
                     }
 
@@ -561,6 +566,9 @@ fun MusicApp() {
                             onPlaylistTap = navToPlaylist,
                             onMoodTap = { mood ->
                                 navController.navigate(Route.MoodCategory(mood.name))
+                            },
+                            onExplorePlayed = {
+                                navController.navigate(Route.LibraryCollection(LibraryCollectionType.PLAYED.name))
                             }
                         )
                     }
@@ -610,6 +618,9 @@ fun MusicApp() {
                         onPlaylistTap = navToPlaylist,
                         onMoodTap = { mood ->
                             navController.navigate(Route.MoodCategory(mood.name))
+                        },
+                        onExplorePlayed = {
+                            navController.navigate(Route.LibraryCollection(LibraryCollectionType.PLAYED.name))
                         }
                     )
                     }
@@ -752,6 +763,11 @@ fun MusicApp() {
         }
     }
 }
+            NetworkStatusToast(
+                isActive = true,
+                modifier = Modifier.align(Alignment.TopCenter)
+            )
+            }
         }
     }
 }

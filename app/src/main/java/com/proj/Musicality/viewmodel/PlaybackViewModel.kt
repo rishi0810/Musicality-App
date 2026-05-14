@@ -391,23 +391,21 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
 
     private fun advanceToNextInternal() {
         val current = _state.value
-        val next = current.queue.currentIndex + 1
+        val next = nextIndexForQueue(current.queue) ?: return
         Log.d(TAG, "skipNext: currentIndex=${current.queue.currentIndex}, next=$next, queueSize=${current.queue.items.size}")
-        if (next < current.queue.items.size) {
-            val nextItem = current.queue.items[next]
-            _state.update {
-                it.copy(
-                    currentItem = nextItem,
-                    queue = it.queue.copy(currentIndex = next),
-                    isPlaying = false,
-                    durationMs = 0L
-                )
-            }
-            _positionMs.value = 0L
-            fetchAndPlay(nextItem)
-            prefetchNext(_state.value.queue)
-            maybeExtendLibraryQueueFromCurrentPosition()
+        val nextItem = current.queue.items[next]
+        _state.update {
+            it.copy(
+                currentItem = nextItem,
+                queue = it.queue.copy(currentIndex = next),
+                isPlaying = false,
+                durationMs = 0L
+            )
         }
+        _positionMs.value = 0L
+        fetchAndPlay(nextItem)
+        prefetchNext(_state.value.queue)
+        maybeExtendLibraryQueueFromCurrentPosition()
     }
 
     fun skipToIndex(index: Int) {
@@ -494,22 +492,20 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
             lastRewindRealtimeMs = SystemClock.elapsedRealtime()
             return
         }
-        val prev = current.queue.currentIndex - 1
+        val prev = prevIndexForQueue(current.queue) ?: return
         Log.d(TAG, "skipPrev: currentIndex=${current.queue.currentIndex}, prev=$prev")
-        if (prev >= 0) {
-            val prevItem = current.queue.items[prev]
-            _state.update {
-                it.copy(
-                    currentItem = prevItem,
-                    queue = it.queue.copy(currentIndex = prev),
-                    isPlaying = false,
-                    durationMs = 0L
-                )
-            }
-            _positionMs.value = 0L
-            fetchAndPlay(prevItem)
-            clearCrossfadePreviousWindow()
+        val prevItem = current.queue.items[prev]
+        _state.update {
+            it.copy(
+                currentItem = prevItem,
+                queue = it.queue.copy(currentIndex = prev),
+                isPlaying = false,
+                durationMs = 0L
+            )
         }
+        _positionMs.value = 0L
+        fetchAndPlay(prevItem)
+        clearCrossfadePreviousWindow()
     }
 
     fun removeFromQueue(index: Int) {
@@ -590,8 +586,8 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
 
     private fun autoAdvance() {
         val current = _state.value
-        val next = current.queue.currentIndex + 1
-        if (next < current.queue.items.size) {
+        val next = nextIndexForQueue(current.queue)
+        if (next != null) {
             Log.d(TAG, "autoAdvance: advancing to index $next")
             skipNext()
         } else {
@@ -639,14 +635,21 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
 
             withContext(Dispatchers.Main) {
                 setupPlayerListener()
+                // Pause the active player to silence the previous track while we resolve the
+                // new audio source, but leave its MediaItem in place. Clearing it here would
+                // wipe MediaSession metadata, which makes AVRCP show "Unknown artist" on the
+                // car and causes SystemUI's media notification widget to dismiss and rebuild.
+                // The later setMediaItem(real) in startExoPlayback atomically swaps both the
+                // metadata and the URI in a single call, so the old metadata just rests for
+                // the lookup window.
                 getDelegatingPlayer()?.let { dp ->
-                    dp.activePlayer.stop()
-                    dp.activePlayer.clearMediaItems()
+                    if (dp.activePlayer.isPlaying) dp.activePlayer.pause()
+                    // The inactive player may be holding a primed crossfade target that's no
+                    // longer relevant after a user-driven skip; clear it so it can't bleed in.
                     dp.inactivePlayer.stop()
                     dp.inactivePlayer.clearMediaItems()
                 } ?: activePlayer()?.let { exo ->
-                    exo.stop()
-                    exo.clearMediaItems()
+                    if (exo.isPlaying) exo.pause()
                 }
             }
 
@@ -660,6 +663,15 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                 val fileUri = localFile.toURI().toString()
                 startExoPlayback(fileUri, item)
                 cacheToPlayedCollection(item, localFile)
+                return@launch
+            }
+
+            // Played-section queues are a local-only contract: every entry must already be on
+            // disk (played cache or downloads). If the file is gone we abort instead of falling
+            // through to the network path — otherwise an offline swipe through Played stalls on
+            // a doomed stream request.
+            if (isLocalOnlyQueue(_state.value.queue.source)) {
+                Log.w(TAG, "fetchAndPlay: PLAYED entry '${item.videoId}' has no local file; skipping network fallback")
                 return@launch
             }
 
@@ -789,14 +801,18 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
 
     private suspend fun prepareCrossfadeNextTrack(): CrossfadeNextTrack? {
         val current = _state.value
-        val nextIndex = current.queue.currentIndex + 1
-        if (nextIndex !in current.queue.items.indices) return null
+        val nextIndex = nextIndexForQueue(current.queue) ?: return null
 
         val nextItem = current.queue.items[nextIndex]
         val localFile = withContext(Dispatchers.IO) { libraryRepository.findLocalAudioFile(nextItem.videoId) }
         val file = if (localFile != null) {
             Log.d(TAG, "prepareCrossfade: reusing local file for '${nextItem.videoId}' (${localFile.length() / 1024}KB)")
             localFile
+        } else if (isLocalOnlyQueue(current.queue.source)) {
+            // Local-only queues (PLAYED) must never reach for the network. If the file is
+            // missing, skip the crossfade prep — the user will hard-cut at end of track.
+            Log.w(TAG, "prepareCrossfade: PLAYED next '${nextItem.videoId}' has no local file; skipping prep")
+            return null
         } else {
             AudioFileCache.getOrDownload(nextItem.videoId) ?: return null
         }
@@ -884,10 +900,10 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                         val currentState = _state.value
                         val currentTrackId = currentState.currentItem?.videoId
                         val duration = currentState.durationMs
-                        val nextIndex = currentState.queue.currentIndex + 1
-                        val hasNext = nextIndex < currentState.queue.items.size
+                        val nextIndex = nextIndexForQueue(currentState.queue)
+                        val hasNext = nextIndex != null
                         val currentIsLongForm = currentState.currentItem?.let { isLongFormContent(it) } == true
-                        val nextIsLongForm = hasNext && isLongFormContent(currentState.queue.items[nextIndex])
+                        val nextIsLongForm = hasNext && isLongFormContent(currentState.queue.items[nextIndex!!])
                         crossfadeManager.monitor(
                             scope = viewModelScope,
                             trackId = currentTrackId,
@@ -917,26 +933,29 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
             Log.d(TAG, "prefetchNext: skipping — current track is long-form")
             return
         }
-        val nextIdx = queue.currentIndex + 1
-        if (nextIdx < queue.items.size) {
-            val nextItem = queue.items[nextIdx]
-            if (isLongFormContent(nextItem)) {
-                Log.d(TAG, "prefetchNext: skipping long-form '${nextItem.videoId}' (${nextItem.durationText})")
-                return
+        val nextIdx = nextIndexForQueue(queue) ?: return
+        val nextItem = queue.items[nextIdx]
+        if (isLongFormContent(nextItem)) {
+            Log.d(TAG, "prefetchNext: skipping long-form '${nextItem.videoId}' (${nextItem.durationText})")
+            return
+        }
+        val nextId = nextItem.videoId
+        val localOnly = isLocalOnlyQueue(queue.source)
+        viewModelScope.launch(Dispatchers.IO) {
+            val localFile = libraryRepository.findLocalAudioFile(nextId)
+            if (localFile != null) {
+                Log.d(TAG, "prefetchNext: already local for '$nextId' (${localFile.length() / 1024}KB)")
+                return@launch
             }
-            val nextId = nextItem.videoId
-            viewModelScope.launch(Dispatchers.IO) {
-                val localFile = libraryRepository.findLocalAudioFile(nextId)
-                if (localFile != null) {
-                    Log.d(TAG, "prefetchNext: already local for '$nextId' (${localFile.length() / 1024}KB)")
-                    return@launch
+            if (localOnly) {
+                Log.d(TAG, "prefetchNext: PLAYED next '$nextId' missing locally; skipping network prefetch")
+                return@launch
+            }
+            runCatching {
+                AudioFileCache.getOrDownload(nextId)?.let {
+                    Log.d(TAG, "prefetchNext: downloaded '$nextId' (${it.length() / 1024}KB)")
                 }
-                runCatching {
-                    AudioFileCache.getOrDownload(nextId)?.let {
-                        Log.d(TAG, "prefetchNext: downloaded '$nextId' (${it.length() / 1024}KB)")
-                    }
-                }.onFailure { Log.e(TAG, "prefetchNext: FAILED for '$nextId'", it) }
-            }
+            }.onFailure { Log.e(TAG, "prefetchNext: FAILED for '$nextId'", it) }
         }
     }
 
@@ -1142,6 +1161,33 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         controllerFuture = null
         mediaController = null
         observedPlayer = null
+    }
+
+    // PLAYED is a local-only circular queue: every entry must already be on disk and the queue
+    // loops at both ends. Other sources stop at the end; LIBRARY may extend itself via the
+    // up-next mash, but that's handled separately in [maybeExtendLibraryQueueFromCurrentPosition].
+    private fun isLocalOnlyQueue(source: QueueSource): Boolean = source == QueueSource.PLAYED
+
+    private fun nextIndexForQueue(queue: PlaybackQueue): Int? {
+        val size = queue.items.size
+        if (size == 0) return null
+        val raw = queue.currentIndex + 1
+        return when {
+            raw < size -> raw
+            isLocalOnlyQueue(queue.source) && size > 0 -> 0
+            else -> null
+        }
+    }
+
+    private fun prevIndexForQueue(queue: PlaybackQueue): Int? {
+        val size = queue.items.size
+        if (size == 0) return null
+        val raw = queue.currentIndex - 1
+        return when {
+            raw >= 0 -> raw
+            isLocalOnlyQueue(queue.source) && size > 0 -> size - 1
+            else -> null
+        }
     }
 
     private fun cancelUserDrivenCrossfade(reason: String) {
