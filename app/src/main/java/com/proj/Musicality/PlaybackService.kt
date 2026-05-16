@@ -248,6 +248,10 @@ class PlaybackService : MediaLibraryService() {
                 }
                 "recent" -> historyRepo.getSnapshot().recentlyPlayed.map { it.toAppMediaItem() }
                 "top" -> historyRepo.getSnapshot().topSongs.map { it.toAppMediaItem() }
+                // Search results have no enumerable backing folder. Auto's
+                // next/prev on a search-initiated track falls back to repeat-1
+                // semantics; the user can re-issue search to pick another track.
+                "search" -> emptyList()
                 else -> emptyList()
             }
         }
