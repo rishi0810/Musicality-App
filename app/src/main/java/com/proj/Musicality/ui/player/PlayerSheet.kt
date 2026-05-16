@@ -2131,12 +2131,22 @@ private fun LyricsPanel(
     val haptic = LocalHapticFeedback.current
     val wordSyncEnabled by AppConfig.wordSyncLyrics.collectAsStateWithLifecycle()
     val positionMs by positionMsFlow.collectAsStateWithLifecycle()
-    val smoothedPositionMsFloat by animateFloatAsState(
-        targetValue = positionMs.toFloat(),
-        animationSpec = tween(durationMillis = 280, easing = LinearEasing),
-        label = "lyricsSmoothedPosition"
-    )
-    val syncPositionMs = smoothedPositionMsFloat.toLong()
+    // Smoothed value is for word-emphasis interpolation between 300ms position polls.
+    // Big deltas (seeks, track changes) snap so we don't sweep through the lyrics.
+    // Line selection uses raw positionMs directly to avoid steady-state lag.
+    val smoothedPosition = remember { Animatable(positionMs.toFloat()) }
+    LaunchedEffect(positionMs) {
+        val delta = (positionMs.toFloat() - smoothedPosition.value).absoluteValue
+        if (delta > 1000f) {
+            smoothedPosition.snapTo(positionMs.toFloat())
+        } else {
+            smoothedPosition.animateTo(
+                targetValue = positionMs.toFloat(),
+                animationSpec = tween(durationMillis = 280, easing = LinearEasing)
+            )
+        }
+    }
+    val syncPositionMs = smoothedPosition.value.toLong()
     val lyricsState by lyricsStateFlow.collectAsStateWithLifecycle()
     val playbackProgress = if (durationMs > 0) positionMs.toFloat() / durationMs else 0f
     val listState = rememberLazyListState()
@@ -2193,14 +2203,14 @@ private fun LyricsPanel(
     }
 
     val syncedLines = (lyricsState as? LyricsState.Loaded)?.takeIf { it.isSynced }?.lines
-    val currentLineIndex = remember(syncPositionMs, syncedLines) {
+    val currentLineIndex = remember(positionMs, syncedLines) {
         syncedLines?.let { lines ->
             var lo = 0
             var hi = lines.size - 1
             var result = -1
             while (lo <= hi) {
                 val mid = (lo + hi) ushr 1
-                if (lines[mid].timeMs <= syncPositionMs) {
+                if (lines[mid].timeMs <= positionMs) {
                     result = mid
                     lo = mid + 1
                 } else {
@@ -2420,11 +2430,20 @@ private fun LyricsPanel(
                             val isSelected = shareMode && index in selectedIndices
                             val distance = if (ls.isSynced) (index - currentLineIndex).absoluteValue else 0
                             val isCurrentSyncedLine = !shareMode && ls.isSynced && distance == 0
-                            val lineAlpha = when {
+                            val targetLineAlpha = when {
                                 shareMode -> if (line.text.isBlank()) 0.3f else 1f
                                 !ls.isSynced -> 1f
+                                isCurrentSyncedLine -> 1f
                                 else -> syncedMutedAlpha
                             }
+                            val lineAlpha by animateFloatAsState(
+                                targetValue = targetLineAlpha,
+                                animationSpec = tween(
+                                    durationMillis = 280,
+                                    easing = FastOutSlowInEasing
+                                ),
+                                label = "lyricsLineAlpha"
+                            )
                             val seekModifier = if (!shareMode && ls.isSynced) {
                                 Modifier
                                     .fillMaxWidth()
@@ -2490,6 +2509,7 @@ private fun LyricsPanel(
 
                                     val highlightAlpha = FloatArray(words.size) { syncedMutedAlpha }
                                     val pulseTop = syncGlowPulse.coerceIn(syncedMutedAlpha, 1f)
+                                    val sungAlpha = 0.88f
                                     val pos = syncPositionMs
                                     val lastIdx = words.lastIndex
 
@@ -2497,23 +2517,37 @@ private fun LyricsPanel(
                                         val primaryIdx = words.indexOfLast { it.startMs <= pos }
                                         when {
                                             primaryIdx < 0 -> {
-                                                highlightAlpha[0] = pulseTop
+                                                val firstStart = words[0].startMs
+                                                val leadInMs = 200L
+                                                val fadeStart = firstStart - leadInMs
+                                                if (pos >= fadeStart) {
+                                                    val tRaw = ((pos - fadeStart).toFloat() / leadInMs)
+                                                        .coerceIn(0f, 1f)
+                                                    val t = tRaw * tRaw * (3f - 2f * tRaw)
+                                                    highlightAlpha[0] =
+                                                        syncedMutedAlpha + (pulseTop - syncedMutedAlpha) * t
+                                                }
                                             }
 
                                             primaryIdx >= lastIdx -> {
+                                                for (i in 0 until lastIdx) highlightAlpha[i] = sungAlpha
                                                 highlightAlpha[lastIdx] = pulseTop
                                             }
 
                                             else -> {
+                                                // Past words stay lit at sungAlpha so the line reads as
+                                                // "already sung" rather than snapping back to muted.
+                                                for (i in 0 until primaryIdx) highlightAlpha[i] = sungAlpha
+
                                                 val currentStart = words[primaryIdx].startMs
                                                 val nextStart = max(words[primaryIdx + 1].startMs, currentStart + 1L)
                                                 val tRaw =
                                                     ((pos - currentStart).toFloat() / (nextStart - currentStart).toFloat())
                                                         .coerceIn(0f, 1f)
-                                                // Smoothstep for gentle handoff between consecutive words.
+                                                // Smoothstep for a gentle handoff between consecutive words.
                                                 val t = tRaw * tRaw * (3f - 2f * tRaw)
                                                 highlightAlpha[primaryIdx] =
-                                                    syncedMutedAlpha + (pulseTop - syncedMutedAlpha) * (1f - t)
+                                                    sungAlpha + (pulseTop - sungAlpha) * (1f - t)
                                                 highlightAlpha[primaryIdx + 1] =
                                                     syncedMutedAlpha + (pulseTop - syncedMutedAlpha) * t
                                             }

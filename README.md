@@ -6,7 +6,7 @@
 
 A modern, feature-rich Android music player that brings millions of songs, albums, and playlists to your fingertips — beautifully.
 
-<img src="https://img.shields.io/badge/Latest%20Version-v1.1.13-blue" alt="Latest Version"/>
+<img src="https://img.shields.io/badge/Latest%20Version-v1.1.14-blue" alt="Latest Version"/>
 
 <br/>
 
