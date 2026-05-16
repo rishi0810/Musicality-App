@@ -79,6 +79,14 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
     private val _positionMs = MutableStateFlow(0L)
     val positionMs: StateFlow<Long> = _positionMs.asStateFlow()
 
+    // The videoId currently being resolved/downloaded before playback can start.
+    // Non-null while fetchAndPlay is waiting on a stream URL or file download. The UI
+    // shows a wavy indeterminate progress bar during this window and the MediaSession
+    // metadata is pre-swapped to the target track so the notification, mini player,
+    // and full sheet all reference the same song even before any audio is buffered.
+    private val _loadingTrackId = MutableStateFlow<String?>(null)
+    val loadingTrackId: StateFlow<String?> = _loadingTrackId.asStateFlow()
+
     private val _lyricsState = MutableStateFlow<LyricsState>(LyricsState.Idle)
     val lyricsState: StateFlow<LyricsState> = _lyricsState.asStateFlow()
 
@@ -610,6 +618,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         crossfadeManager.resetTriggerForTrack(item.videoId)
         fetchLyrics(item)
         ensureServiceStarted()
+        _loadingTrackId.value = item.videoId
         viewModelScope.launch(Dispatchers.IO) {
             if (!com.proj.Musicality.config.AppConfig.listeningHistoryPaused.value) {
                 runCatching { listeningHistoryRepository.recordPlayback(item) }
@@ -630,26 +639,29 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
             }
             if (activePlayer() == null) {
                 Log.e(TAG, "fetchAndPlay: Service player not available after 5s")
+                clearLoadingIfMatches(item.videoId)
                 return@launch
             }
 
             withContext(Dispatchers.Main) {
                 setupPlayerListener()
-                // Pause the active player to silence the previous track while we resolve the
-                // new audio source, but leave its MediaItem in place. Clearing it here would
-                // wipe MediaSession metadata, which makes AVRCP show "Unknown artist" on the
-                // car and causes SystemUI's media notification widget to dismiss and rebuild.
-                // The later setMediaItem(real) in startExoPlayback atomically swaps both the
-                // metadata and the URI in a single call, so the old metadata just rests for
-                // the lookup window.
+                // Atomically swap MediaSession metadata to the target track BEFORE the
+                // audio resolves. Without this, the notification / Bluetooth / Auto would
+                // keep showing the previous track for the entire download window. The
+                // placeholder carries the new title/artist/artwork but has no URI, so the
+                // player sits in STATE_IDLE — the real setMediaItem in startExoPlayback
+                // then replaces both metadata and URI together when the audio is ready.
+                val placeholder = buildSessionPlaceholderMedia(item)
                 getDelegatingPlayer()?.let { dp ->
                     if (dp.activePlayer.isPlaying) dp.activePlayer.pause()
                     // The inactive player may be holding a primed crossfade target that's no
                     // longer relevant after a user-driven skip; clear it so it can't bleed in.
                     dp.inactivePlayer.stop()
                     dp.inactivePlayer.clearMediaItems()
+                    runCatching { dp.activePlayer.setMediaItem(placeholder) }
                 } ?: activePlayer()?.let { exo ->
                     if (exo.isPlaying) exo.pause()
+                    runCatching { exo.setMediaItem(placeholder) }
                 }
             }
 
@@ -672,6 +684,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
             // a doomed stream request.
             if (isLocalOnlyQueue(_state.value.queue.source)) {
                 Log.w(TAG, "fetchAndPlay: PLAYED entry '${item.videoId}' has no local file; skipping network fallback")
+                clearLoadingIfMatches(item.videoId)
                 return@launch
             }
 
@@ -697,6 +710,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                     startLongFormPlayback(playableUrl, item)
                 } else {
                     Log.e(TAG, "fetchAndPlay: stream URL unavailable for long-form '${item.videoId}'")
+                    clearLoadingIfMatches(item.videoId)
                 }
                 return@launch
             }
@@ -709,14 +723,36 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                 cacheToPlayedCollection(item, file)
             } else {
                 Log.e(TAG, "fetchAndPlay: Failed to download audio for '${item.videoId}'")
+                clearLoadingIfMatches(item.videoId)
             }
         }
+    }
+
+    private fun buildSessionPlaceholderMedia(item: MediaItem): androidx.media3.common.MediaItem {
+        // No URI: ExoPlayer holds this in STATE_IDLE without I/O. Only the metadata
+        // propagates to MediaSession.
+        return androidx.media3.common.MediaItem.Builder()
+            .setMediaId(item.videoId)
+            .setMediaMetadata(
+                MediaMetadata.Builder()
+                    .setTitle(item.title)
+                    .setArtist(item.artistName)
+                    .setAlbumTitle(item.albumName)
+                    .setArtworkUri(item.thumbnailUrl?.let { Uri.parse(it) })
+                    .build()
+            )
+            .build()
+    }
+
+    private fun clearLoadingIfMatches(videoId: String) {
+        _loadingTrackId.update { current -> if (current == videoId) null else current }
     }
 
     private suspend fun startExoPlayback(url: String, item: MediaItem) {
         withContext(Dispatchers.Main) {
             if (_state.value.currentItem?.videoId != item.videoId) {
                 Log.d(TAG, "startExoPlayback: skipping stale playback for '${item.videoId}'")
+                clearLoadingIfMatches(item.videoId)
                 return@withContext
             }
             val exo = activePlayer() ?: return@withContext
@@ -739,6 +775,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
             exo.setMediaItem(media3Item)
             exo.prepare()
             exo.play()
+            clearLoadingIfMatches(item.videoId)
         }
     }
 
@@ -747,6 +784,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         withContext(Dispatchers.Main) {
             if (_state.value.currentItem?.videoId != item.videoId) {
                 Log.d(TAG, "startLongFormPlayback: skipping stale playback for '${item.videoId}'")
+                clearLoadingIfMatches(item.videoId)
                 return@withContext
             }
             val dp = getDelegatingPlayer() ?: return@withContext
@@ -794,6 +832,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
             exo.setMediaSource(mediaSource)
             exo.prepare()
             exo.play()
+            clearLoadingIfMatches(item.videoId)
         }
     }
 

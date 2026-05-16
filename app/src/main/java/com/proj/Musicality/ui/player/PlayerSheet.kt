@@ -106,6 +106,8 @@ import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.CircularWavyProgressIndicator
+import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -125,6 +127,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.media3.common.Player
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.State
@@ -228,34 +231,28 @@ private val PlayerHeroMaxHeight = 440.dp
 private val PlayerControlsTopDistanceFromScreenTop = 525.dp
 private const val PlayerOverlayDismissFraction = 0.2f
 private const val PlayerOverlayDismissVelocityPx = 1200f
-private val LyricsShareBackgroundColors = listOf(
-    Color(0xFF2563EB),
-    Color(0xFFDC2626),
-    Color(0xFF16A34A),
-    Color(0xFFF59E0B),
-    Color(0xFF3B99AA),
-    Color(0xFF2B1944),
-    Color(0xFF0C1F36),
-    Color(0xFF6A2D45),
-    Color(0xFF1F4037),
-    Color(0xFFF2EBD7),
-    Color(0xFF4C1D95),
-    Color(0xFF8B5CF6),
-    Color(0xFF9F1239),
-    Color(0xFF0F2A4A)
+@Immutable
+private data class LyricsShareColorCombo(
+    val name: String,
+    val background: Color,
+    val textColor: Color
 )
-private val LyricsShareTextColors = listOf(
-    Color(0xFF000000),
-    Color(0xFFFFFFFF),
-    Color(0xFF111111),
-    Color(0xFF08131D),
-    Color(0xFFF7E7CE),
-    Color(0xFFB8FFD7),
-    Color(0xFFFFF6D6),
-    Color(0xFFDBEAFE),
-    Color(0xFFFDE68A),
-    Color(0xFFF5F5F4),
-    Color(0xFFFCE7F3)
+
+// Curated aesthetic background/text pairs. The first slot is reserved at runtime
+// for a combo derived from the current song's extracted palette.
+private val LyricsShareStaticCombos = listOf(
+    LyricsShareColorCombo("Ink", Color(0xFF0D1117), Color(0xFFEDEDED)),
+    LyricsShareColorCombo("Cream", Color(0xFFF2EBD7), Color(0xFF1B1A17)),
+    LyricsShareColorCombo("Navy", Color(0xFF0F2A4A), Color(0xFFF7E7CE)),
+    LyricsShareColorCombo("Forest", Color(0xFF1F4037), Color(0xFFE9F5DB)),
+    LyricsShareColorCombo("Plum", Color(0xFF2B1944), Color(0xFFE9D5FF)),
+    LyricsShareColorCombo("Crimson", Color(0xFF9F1239), Color(0xFFFFE4E6)),
+    LyricsShareColorCombo("Amber", Color(0xFFF59E0B), Color(0xFF1F1209)),
+    LyricsShareColorCombo("Charcoal", Color(0xFF1F2937), Color(0xFF86EFAC)),
+    LyricsShareColorCombo("Blush", Color(0xFFFFE4E6), Color(0xFF7C2D12)),
+    LyricsShareColorCombo("Electric", Color(0xFF2563EB), Color(0xFFE0F2FE)),
+    LyricsShareColorCombo("Jet", Color(0xFF111111), Color(0xFFFCD34D)),
+    LyricsShareColorCombo("Paper", Color(0xFFFFFFFF), Color(0xFF0A0A0A))
 )
 
 // Spring spec matching the nav transitions – no bounce, medium-low stiffness
@@ -272,6 +269,7 @@ private val lyricsSpring = spring<Float>(
 fun PlayerSheet(
     state: PlaybackState,
     positionMsFlow: StateFlow<Long>,
+    loadingTrackIdFlow: StateFlow<String?>,
     lyricsStateFlow: StateFlow<LyricsState>,
     isExpanded: Boolean,
     expandProgressState: State<Float>,
@@ -295,6 +293,8 @@ fun PlayerSheet(
 ) {
     val item = state.currentItem ?: return
     val queue = state.queue
+    val loadingTrackId by loadingTrackIdFlow.collectAsStateWithLifecycle()
+    val isCurrentLoading = loadingTrackId != null && loadingTrackId == item.videoId
     var displayIndex by remember { mutableIntStateOf(queue.currentIndex) }
     LaunchedEffect(queue.currentIndex) { displayIndex = queue.currentIndex }
     val displayItem = queue.items.getOrElse(displayIndex) { item }
@@ -727,6 +727,7 @@ fun PlayerSheet(
                                 durationText = item.durationText,
                                 crossfadeEnabled = crossfadeEnabled,
                                 hasNextTrack = queue.currentIndex + 1 < queue.items.size,
+                                isLoading = isCurrentLoading,
                                 onSeek = onSeek,
                                 onProgressBarInteractingChange = onProgressBarInteractingChange,
                                 playbackAccent = playbackAccent,
@@ -1143,6 +1144,7 @@ fun PlayerSheet(
             item = item,
             artworkUrl = artworkUrl,
             isPlaying = state.isPlaying,
+            isLoading = isCurrentLoading,
             isExpanded = isExpanded,
             miniPlayerHeight = miniPlayerHeight,
             miniContentAlpha = miniContentAlpha,
@@ -1165,7 +1167,8 @@ fun PlayerSheet(
         PlayerOverlayBottomSheet(
             visible = isLyricsOpen,
             onDismiss = ::closeLyricsScreen,
-            containerColor = mediaPalette.bottom
+            containerColor = mediaPalette.bottom,
+            swipeEnabled = !lyricsShareMode
         ) { nestedScrollConnection ->
                 LyricsPanel(
                     positionMsFlow = positionMsFlow,
@@ -1193,6 +1196,8 @@ fun PlayerSheet(
                     backgroundColor = mediaPalette.bottom,
                     playbackAccent = playbackAccent,
                     playbackButton = playbackAccent,
+                    songPaletteBackground = mediaPalette.bottom,
+                    songPaletteTextColor = mediaPalette.accent,
                     onProgressBarInteractingChange = onProgressBarInteractingChange,
                     nestedScrollConnection = nestedScrollConnection,
                     modifier = Modifier
@@ -1207,6 +1212,7 @@ private fun PlayerOverlayBottomSheet(
     visible: Boolean,
     onDismiss: () -> Unit,
     containerColor: Color,
+    swipeEnabled: Boolean = true,
     modifier: Modifier = Modifier,
     content: @Composable (NestedScrollConnection) -> Unit
 ) {
@@ -1272,6 +1278,7 @@ private fun PlayerOverlayBottomSheet(
             }
         }
 
+        val swipeEnabledState = rememberUpdatedState(swipeEnabled)
         val nestedScrollConnection = remember(sheetHeightPx) {
             object : NestedScrollConnection {
                 private var topReached = false
@@ -1280,6 +1287,7 @@ private fun PlayerOverlayBottomSheet(
                     available: Offset,
                     source: NestedScrollSource
                 ): Offset {
+                    if (!swipeEnabledState.value) return Offset.Zero
                     if (source != NestedScrollSource.UserInput || isSettling) return Offset.Zero
 
                     if (available.y < 0f) {
@@ -1298,6 +1306,7 @@ private fun PlayerOverlayBottomSheet(
                     available: Offset,
                     source: NestedScrollSource
                 ): Offset {
+                    if (!swipeEnabledState.value) return Offset.Zero
                     if (source != NestedScrollSource.UserInput || isSettling) return Offset.Zero
 
                     if (!topReached) {
@@ -1312,6 +1321,7 @@ private fun PlayerOverlayBottomSheet(
                 }
 
                 override suspend fun onPreFling(available: Velocity): Velocity {
+                    if (!swipeEnabledState.value) return Velocity.Zero
                     return if (topReached && available.y > 0f) {
                         settleSheet(available.y)
                         available
@@ -1324,6 +1334,7 @@ private fun PlayerOverlayBottomSheet(
                     consumed: Velocity,
                     available: Velocity
                 ): Velocity {
+                    if (!swipeEnabledState.value) return Velocity.Zero
                     if (topReached && sheetOffsetY > 0f) {
                         settleSheet(available.y)
                     }
@@ -1342,8 +1353,8 @@ private fun PlayerOverlayBottomSheet(
                 .graphicsLayer { translationY = sheetOffsetY }
                 .clip(sheetShape)
                 .background(containerColor)
-                .pointerInput(sheetHeightPx, isSettling) {
-                    if (isSettling) return@pointerInput
+                .pointerInput(sheetHeightPx, isSettling, swipeEnabled) {
+                    if (isSettling || !swipeEnabled) return@pointerInput
 
                     val velocityTracker = VelocityTracker()
                     detectDragGestures(
@@ -1382,6 +1393,7 @@ private fun ExpandedPlaybackProgressSection(
     durationText: String?,
     crossfadeEnabled: Boolean,
     hasNextTrack: Boolean,
+    isLoading: Boolean,
     onSeek: (Long) -> Unit,
     onProgressBarInteractingChange: (Boolean) -> Unit,
     playbackAccent: Color,
@@ -1392,17 +1404,26 @@ private fun ExpandedPlaybackProgressSection(
     val playbackProgress = playbackProgress(positionMs, durationMs)
 
     Column(modifier = modifier) {
-        SeekablePlaybackBar(
-            progress = playbackProgress,
-            durationMs = durationMs,
-            onSeek = onSeek,
-            onInteractingChange = onProgressBarInteractingChange,
-            modifier = Modifier.fillMaxWidth(),
-            color = Color.White,
-            trackColor = Color(0xFF6A6A6A),
-            trackHeight = 6.dp,
-            expandedTrackHeight = 12.dp
-        )
+        if (isLoading) {
+            LoadingPlaybackBar(
+                modifier = Modifier.fillMaxWidth(),
+                color = Color.White.copy(alpha = 0.55f),
+                trackColor = Color(0xFF6A6A6A).copy(alpha = 0.55f),
+                height = 12.dp
+            )
+        } else {
+            SeekablePlaybackBar(
+                progress = playbackProgress,
+                durationMs = durationMs,
+                onSeek = onSeek,
+                onInteractingChange = onProgressBarInteractingChange,
+                modifier = Modifier.fillMaxWidth(),
+                color = Color.White,
+                trackColor = Color(0xFF6A6A6A),
+                trackHeight = 6.dp,
+                expandedTrackHeight = 12.dp
+            )
+        }
 
         Box(
             modifier = Modifier
@@ -1415,18 +1436,22 @@ private fun ExpandedPlaybackProgressSection(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(
-                    text = formatMs(positionMs),
+                    text = if (isLoading) "--:--" else formatMs(positionMs),
                     style = MaterialTheme.typography.labelLarge.copy(fontFeatureSettings = "tnum"),
-                    color = onSurface.copy(alpha = 0.85f)
+                    color = onSurface.copy(alpha = if (isLoading) 0.5f else 0.85f)
                 )
                 Text(
-                    text = if (durationMs > 0) formatMs(durationMs) else (durationText ?: ""),
+                    text = when {
+                        isLoading -> durationText ?: "--:--"
+                        durationMs > 0 -> formatMs(durationMs)
+                        else -> durationText ?: ""
+                    },
                     style = MaterialTheme.typography.labelLarge.copy(fontFeatureSettings = "tnum"),
-                    color = onSurface.copy(alpha = 0.85f)
+                    color = onSurface.copy(alpha = if (isLoading) 0.5f else 0.85f)
                 )
             }
             CrossfadeCountdownCue(
-                visible = showCrossfadeCue(
+                visible = !isLoading && showCrossfadeCue(
                     positionMs = positionMs,
                     durationMs = durationMs,
                     crossfadeEnabled = crossfadeEnabled,
@@ -1474,6 +1499,7 @@ private fun QueueActionSheetHost(
     )
 }
 
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun BoxScope.MiniPlayerBar(
     positionMsFlow: StateFlow<Long>,
@@ -1481,6 +1507,7 @@ private fun BoxScope.MiniPlayerBar(
     item: MediaItem,
     artworkUrl: String?,
     isPlaying: Boolean,
+    isLoading: Boolean,
     isExpanded: Boolean,
     miniPlayerHeight: Dp,
     miniContentAlpha: Float,
@@ -1617,13 +1644,21 @@ private fun BoxScope.MiniPlayerBar(
                         modifier = Modifier.size(44.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        CircularProgressIndicator(
-                            progress = { progress },
-                            modifier = Modifier.fillMaxSize(),
-                            color = miniTitleColor.copy(alpha = 0.92f),
-                            trackColor = miniTitleColor.copy(alpha = 0.18f),
-                            strokeWidth = 3.dp
-                        )
+                        if (isLoading) {
+                            CircularWavyProgressIndicator(
+                                modifier = Modifier.fillMaxSize(),
+                                color = miniTitleColor.copy(alpha = 0.55f),
+                                trackColor = miniTitleColor.copy(alpha = 0.14f)
+                            )
+                        } else {
+                            CircularProgressIndicator(
+                                progress = { progress },
+                                modifier = Modifier.fillMaxSize(),
+                                color = miniTitleColor.copy(alpha = 0.92f),
+                                trackColor = miniTitleColor.copy(alpha = 0.18f),
+                                strokeWidth = 3.dp
+                            )
+                        }
                         AsyncImage(
                             model = artworkUrl,
                             contentDescription = null,
@@ -2086,6 +2121,8 @@ private fun LyricsPanel(
     backgroundColor: Color,
     playbackAccent: Color,
     playbackButton: Color,
+    songPaletteBackground: Color,
+    songPaletteTextColor: Color,
     nestedScrollConnection: NestedScrollConnection? = null,
     modifier: Modifier = Modifier
 ) {
@@ -2109,14 +2146,18 @@ private fun LyricsPanel(
 
     // Share-mode state (resets per song)
     var selectedIndices by remember(shareItem.videoId) { mutableStateOf<Set<Int>>(emptySet()) }
-    var selectedBackground by remember(shareItem.videoId) {
-        mutableStateOf(LyricsShareBackgroundColors.first())
+    // Combo index 0 is reserved for the song-derived palette, so it tracks the
+    // current artwork even when the user keeps the default selected across tracks.
+    var selectedComboIndex by remember(shareItem.videoId) { mutableIntStateOf(0) }
+    val shareCombos = remember(songPaletteBackground, songPaletteTextColor) {
+        buildList {
+            add(LyricsShareColorCombo("Song", songPaletteBackground, songPaletteTextColor))
+            addAll(LyricsShareStaticCombos)
+        }
     }
-    var selectedTextColor by remember(shareItem.videoId) {
-        mutableStateOf(
-            if (LyricsShareBackgroundColors.first().luminance() > 0.45f) Color(0xFF0D1A24) else Color.White
-        )
-    }
+    val selectedCombo = shareCombos.getOrElse(selectedComboIndex) { shareCombos.first() }
+    val selectedBackground = selectedCombo.background
+    val selectedTextColor = selectedCombo.textColor
     var isGenerating by remember(shareItem.videoId) { mutableStateOf(false) }
     var showCustomizeSheet by remember(shareItem.videoId) { mutableStateOf(false) }
     var dragAnchorIndex by remember(shareItem.videoId) { mutableStateOf<Int?>(null) }
@@ -2710,14 +2751,9 @@ private fun LyricsPanel(
                 artist = shareItem.artistName,
                 artworkUrl = shareArtworkUrl,
                 selectedLyrics = selectedLyrics,
-                selectedBackground = selectedBackground,
-                onSelectBackground = { bg ->
-                    selectedBackground = bg
-                    selectedTextColor =
-                        if (bg.luminance() > 0.45f) Color(0xFF0D1A24) else Color.White
-                },
-                selectedTextColor = selectedTextColor,
-                onSelectTextColor = { selectedTextColor = it },
+                combos = shareCombos,
+                selectedComboIndex = selectedComboIndex,
+                onSelectCombo = { selectedComboIndex = it },
                 isGenerating = isGenerating,
                 onEditLyrics = { showCustomizeSheet = false },
                 onDismiss = { if (!isGenerating) showCustomizeSheet = false },
@@ -2888,15 +2924,15 @@ private fun LyricsShareCustomizeSheet(
     artist: String,
     artworkUrl: String?,
     selectedLyrics: List<String>,
-    selectedBackground: Color,
-    onSelectBackground: (Color) -> Unit,
-    selectedTextColor: Color,
-    onSelectTextColor: (Color) -> Unit,
+    combos: List<LyricsShareColorCombo>,
+    selectedComboIndex: Int,
+    onSelectCombo: (Int) -> Unit,
     isGenerating: Boolean,
     onEditLyrics: () -> Unit,
     onShare: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    val selectedCombo = combos.getOrElse(selectedComboIndex) { combos.first() }
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -2928,8 +2964,8 @@ private fun LyricsShareCustomizeSheet(
                     artist = artist,
                     artworkUrl = artworkUrl,
                     lyricLines = selectedLyrics,
-                    backgroundColor = selectedBackground,
-                    textColor = selectedTextColor,
+                    backgroundColor = selectedCombo.background,
+                    textColor = selectedCombo.textColor,
                     modifier = Modifier
                         .fillMaxWidth(0.72f)
                         .wrapContentHeight()
@@ -2937,18 +2973,10 @@ private fun LyricsShareCustomizeSheet(
             }
 
             Spacer(Modifier.height(18.dp))
-            ThemedColorSwatchRow(
-                label = "Background",
-                options = LyricsShareBackgroundColors,
-                selected = selectedBackground,
-                onSelect = onSelectBackground
-            )
-            Spacer(Modifier.height(14.dp))
-            ThemedColorSwatchRow(
-                label = "Text",
-                options = LyricsShareTextColors,
-                selected = selectedTextColor,
-                onSelect = onSelectTextColor
+            LyricsShareCombosRow(
+                combos = combos,
+                selectedIndex = selectedComboIndex,
+                onSelect = onSelectCombo
             )
 
             Spacer(Modifier.height(22.dp))
@@ -2997,48 +3025,54 @@ private fun LyricsShareCustomizeSheet(
 }
 
 @Composable
-private fun ThemedColorSwatchRow(
-    label: String,
-    options: List<Color>,
-    selected: Color,
-    onSelect: (Color) -> Unit
+private fun LyricsShareCombosRow(
+    combos: List<LyricsShareColorCombo>,
+    selectedIndex: Int,
+    onSelect: (Int) -> Unit
 ) {
     Column {
         Text(
-            text = label,
+            text = "Theme",
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.labelLarge,
             fontWeight = FontWeight.SemiBold
         )
         Spacer(Modifier.height(8.dp))
         LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            items(options) { color ->
-                val isSelected = color == selected
-                Box(
-                    modifier = Modifier
-                        .size(34.dp)
-                        .clip(CircleShape)
-                        .background(color)
-                        .border(
-                            width = if (isSelected) 2.dp else 1.dp,
-                            color = if (isSelected) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
-                            },
-                            shape = CircleShape
-                        )
-                        .hapticClickable { onSelect(color) },
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (isSelected) {
-                        Icon(
-                            imageVector = Icons.Rounded.Check,
-                            contentDescription = null,
-                            tint = if (color.luminance() > 0.45f) Color.Black else Color.White,
-                            modifier = Modifier.size(16.dp)
+            itemsIndexed(combos) { index, combo ->
+                val isSelected = index == selectedIndex
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Box(
+                        modifier = Modifier
+                            .size(width = 56.dp, height = 56.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(combo.background)
+                            .border(
+                                width = if (isSelected) 2.5.dp else 1.dp,
+                                color = if (isSelected) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.outline.copy(alpha = 0.45f)
+                                },
+                                shape = RoundedCornerShape(14.dp)
+                            )
+                            .hapticClickable { onSelect(index) },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "Aa",
+                            color = combo.textColor,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold
                         )
                     }
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = combo.name,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium
+                    )
                 }
             }
         }
@@ -3111,29 +3145,8 @@ private fun LyricsShareCardPreview(
                 lineHeight = lyricLineHeight,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier
-                    .padding(top = 10.dp)
+                    .padding(top = 10.dp, bottom = 8.dp)
             )
-
-            Spacer(Modifier.height(12.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    painter = painterResource(id = R.mipmap.ic_launcher_foreground),
-                    contentDescription = null,
-                    tint = textColor.copy(alpha = 0.5f),
-                    modifier = Modifier.size(12.dp)
-                )
-                Text(
-                    text = "Musicality",
-                    color = textColor.copy(alpha = 0.52f),
-                    fontSize = 9.sp,
-                    fontWeight = FontWeight.Normal,
-                    modifier = Modifier.padding(start = 5.dp)
-                )
-            }
         }
     }
 }
@@ -3239,6 +3252,28 @@ private fun SeekablePlaybackBar(
                     .background(color)
             )
         }
+    }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun LoadingPlaybackBar(
+    modifier: Modifier = Modifier,
+    color: Color,
+    trackColor: Color,
+    height: Dp
+) {
+    // M3 Expressive indeterminate wavy bar — shown while the track audio is being
+    // resolved/downloaded so the bar visually distinguishes loading from playback.
+    Box(
+        modifier = modifier.height(height),
+        contentAlignment = Alignment.Center
+    ) {
+        LinearWavyProgressIndicator(
+            modifier = Modifier.fillMaxWidth(),
+            color = color,
+            trackColor = trackColor
+        )
     }
 }
 

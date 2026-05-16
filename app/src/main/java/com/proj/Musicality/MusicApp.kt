@@ -427,6 +427,7 @@ fun MusicApp() {
                 PlayerSheet(
                     state = playbackState,
                     positionMsFlow = playbackViewModel.positionMs,
+                    loadingTrackIdFlow = playbackViewModel.loadingTrackId,
                     lyricsStateFlow = playbackViewModel.lyricsState,
                     isExpanded = isPlayerScreenOpen,
                     expandProgressState = expandProgressState,

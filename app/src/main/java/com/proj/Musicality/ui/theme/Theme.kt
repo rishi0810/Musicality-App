@@ -23,8 +23,8 @@ val LocalSharedTransitionScope = compositionLocalOf<SharedTransitionScope> {
     error("No SharedTransitionScope provided")
 }
 
-private val GoogleSansFlexFamily = FontFamily(
-    Font(R.font.google_sans_flex_variable)
+private val RobotoFlexFamily = FontFamily(
+    Font(R.font.roboto_flex_variable)
 )
 
 private fun typographyWithFontFamily(base: Typography, fontFamily: FontFamily): Typography {
@@ -70,7 +70,7 @@ fun MusicAppTheme(content: @Composable () -> Unit) {
 
     MaterialExpressiveTheme(
         colorScheme = colorScheme,
-        typography = typographyWithFontFamily(Typography(), GoogleSansFlexFamily),
+        typography = typographyWithFontFamily(Typography(), RobotoFlexFamily),
         motionScheme = MotionScheme.expressive()
     ) {
         CompositionLocalProvider(

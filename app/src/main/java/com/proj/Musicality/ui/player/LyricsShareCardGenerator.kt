@@ -249,7 +249,7 @@ object LyricsShareCardGenerator {
 
     private fun shareTypeface(context: Context, style: Int): Typeface {
         val base = shareTypefaceBase
-            ?: ResourcesCompat.getFont(context, R.font.google_sans_flex_variable)
+            ?: ResourcesCompat.getFont(context, R.font.roboto_flex_variable)
             ?: Typeface.SANS_SERIF
         if (shareTypefaceBase == null) shareTypefaceBase = base
         return Typeface.create(base, style)
@@ -257,7 +257,7 @@ object LyricsShareCardGenerator {
 
     private fun shareTypefaceWeighted(context: Context, weight: Int): Typeface {
         val base = shareTypefaceBase
-            ?: ResourcesCompat.getFont(context, R.font.google_sans_flex_variable)
+            ?: ResourcesCompat.getFont(context, R.font.roboto_flex_variable)
             ?: Typeface.SANS_SERIF
         if (shareTypefaceBase == null) shareTypefaceBase = base
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
