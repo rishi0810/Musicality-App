@@ -34,6 +34,7 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowForward
 import androidx.compose.material.icons.rounded.Add
@@ -73,6 +74,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -121,6 +123,7 @@ import com.proj.Musicality.ui.theme.GradientTheme
 import com.proj.Musicality.ui.theme.LocalSharedTransitionScope
 import com.proj.Musicality.ui.theme.MediaBoundsSpring
 import com.proj.Musicality.ui.theme.rememberMediaBackdropPalette
+import com.proj.Musicality.util.upscaleThumbnail
 import com.proj.Musicality.viewmodel.ArtistViewModel
 import com.proj.Musicality.viewmodel.ArtistViewModelFactory
 import kotlinx.coroutines.launch
@@ -638,29 +641,41 @@ private fun ArtistTopSongActionsSheet(
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        sheetState = sheetState
+        sheetState = sheetState,
+        shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
+        containerColor = MaterialTheme.colorScheme.surface
     ) {
         Column(modifier = Modifier.padding(bottom = 16.dp)) {
+            ArtistTopSongSheetHeader(model = model)
+            HorizontalDivider()
             ArtistTopSongActionItem(
                 label = if (isLiked) "Remove from liked songs" else "Add to liked songs",
+                supportingText = if (isLiked) "Take it out of your Liked songs" else "Save this track in Liked",
                 icon = if (isLiked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
                 enabled = true,
                 onClick = onToggleLike
             )
             ArtistTopSongActionItem(
                 label = "View Artist",
+                supportingText = "More from ${model.artistName}",
                 icon = Icons.Rounded.Person,
+                leadingThumbnailUrl = model.thumb,
+                leadingThumbnailShape = CircleShape,
                 enabled = true,
                 onClick = onViewArtist
             )
             ArtistTopSongActionItem(
                 label = "View Album",
+                supportingText = model.albumName ?: "Open album",
                 icon = Icons.Rounded.Album,
+                leadingThumbnailUrl = model.thumb,
+                leadingThumbnailShape = RoundedCornerShape(8.dp),
                 enabled = model.albumId != null,
                 onClick = onViewAlbum
             )
             ArtistTopSongActionItem(
                 label = "Share",
+                supportingText = "Send a link to this song",
                 icon = Icons.Rounded.Share,
                 enabled = true,
                 onClick = onShare
@@ -670,6 +685,11 @@ private fun ArtistTopSongActionsSheet(
                     downloadState?.isDownloading == true -> "Downloading ${(downloadState.progress * 100).toInt()}%"
                     downloadState?.isDownloaded == true -> "Downloaded"
                     else -> "Download"
+                },
+                supportingText = when {
+                    downloadState?.isDownloading == true -> "${(downloadState.progress * 100).toInt()}% complete"
+                    downloadState?.isDownloaded == true -> "Saved for offline"
+                    else -> "Listen without a connection"
                 },
                 icon = Icons.Rounded.Download,
                 enabled = downloadState?.isDownloading != true,
@@ -708,29 +728,98 @@ private fun ArtistTopSongActionItem(
     label: String,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     enabled: Boolean,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    supportingText: String? = null,
+    leadingThumbnailUrl: String? = null,
+    leadingThumbnailShape: androidx.compose.ui.graphics.Shape? = null
 ) {
     val alpha = if (enabled) 1f else 0.5f
+    val useThumbnail = !leadingThumbnailUrl.isNullOrBlank() && leadingThumbnailShape != null
     ListItem(
         headlineContent = {
             Text(
                 text = label,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 2.dp),
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = alpha)
             )
         },
+        supportingContent = supportingText?.let {
+            {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        },
         leadingContent = {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha)
-            )
+            if (useThumbnail) {
+                AsyncImage(
+                    model = upscaleThumbnail(leadingThumbnailUrl),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(leadingThumbnailShape!!)
+                )
+            } else {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha)
+                )
+            }
         },
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
         modifier = Modifier.hapticClickable(enabled = enabled, onClick = onClick)
     )
+}
+
+@Composable
+private fun ArtistTopSongSheetHeader(model: ArtistTopSongMenuModel) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp, vertical = 16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (!model.thumb.isNullOrBlank()) {
+            AsyncImage(
+                model = upscaleThumbnail(model.thumb),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(56.dp)
+                    .clip(RoundedCornerShape(12.dp))
+            )
+            Spacer(Modifier.width(16.dp))
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = model.title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            val secondary = listOfNotNull(
+                model.artistName.takeIf { it.isNotBlank() },
+                model.albumName?.takeIf { it.isNotBlank() }
+            ).joinToString(" • ")
+            if (secondary.isNotBlank()) {
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = secondary,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
 }
 
 @Composable

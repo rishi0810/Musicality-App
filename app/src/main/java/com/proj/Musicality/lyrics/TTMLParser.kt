@@ -93,8 +93,13 @@ object TTMLParser {
             if (head != null) {
                 val meta = findChild(head, "metadata")
                 if (meta != null) {
-                    val audio = findChild(meta, "audio")
-                    if (audio != null) {
+                    // Apple TTML nests <audio lyricOffset="..."/> inside <iTunesMetadata>.
+                    // The offset on <audio role="spatial"> is the alignment delta for the
+                    // Dolby Atmos / spatial mix only — applying it to the stereo mix we
+                    // actually play shifts lyrics ~half a second late. Skip those; honour
+                    // any non-spatial offset (rare in practice but the parser stays correct).
+                    val audio = findDescendant(meta, "audio")
+                    if (audio != null && audio.getAttribute("role") != "spatial") {
                         globalOffset = audio.getAttribute("lyricOffset").toDoubleOrNull() ?: 0.0
                     }
                 }
@@ -115,6 +120,19 @@ object TTMLParser {
             if (child is Element) {
                 val name = child.localName ?: child.nodeName.substringAfterLast(':')
                 if (name == localName) return child
+            }
+            child = child.nextSibling
+        }
+        return null
+    }
+
+    private fun findDescendant(parent: Element, localName: String): Element? {
+        var child = parent.firstChild
+        while (child != null) {
+            if (child is Element) {
+                val name = child.localName ?: child.nodeName.substringAfterLast(':')
+                if (name == localName) return child
+                findDescendant(child, localName)?.let { return it }
             }
             child = child.nextSibling
         }

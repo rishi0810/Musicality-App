@@ -29,3 +29,22 @@ sealed class LyricsState {
     @Immutable
     data class Error(val message: String) : LyricsState()
 }
+
+/** Parsed snapshot for one provider, ready to swap into LyricsState.Loaded. */
+@Immutable
+data class ProviderLyricsSnapshot(
+    val lines: List<LyricLine>,
+    val isSynced: Boolean,
+)
+
+@Immutable
+sealed class ProviderLoadState {
+    /** Not attempted yet. */
+    @Immutable object Idle : ProviderLoadState()
+    /** Fetch in flight. */
+    @Immutable object Loading : ProviderLoadState()
+    /** Fetched and parsed; ready to display. */
+    @Immutable data class Loaded(val snapshot: ProviderLyricsSnapshot) : ProviderLoadState()
+    /** Fetch attempted, provider has nothing for this track. */
+    @Immutable object Unavailable : ProviderLoadState()
+}

@@ -15,6 +15,7 @@ private data class LrcLibTrack(
     val trackName: String,
     val artistName: String,
     val duration: Double,
+    val instrumental: Boolean = false,
     val plainLyrics: String? = null,
     val syncedLyrics: String? = null,
 )
@@ -70,6 +71,9 @@ object LrcLibProvider : LyricsProvider {
         if (response.status.isSuccess()) response.body<List<LrcLibTrack>>() else emptyList()
     }.getOrElse { emptyList() }
 
+    private fun List<LrcLibTrack>.usable(): List<LrcLibTrack> =
+        filter { !it.instrumental && (it.syncedLyrics != null || it.plainLyrics != null) }
+
     private suspend fun searchWithStrategies(
         artist: String,
         title: String,
@@ -78,25 +82,26 @@ object LrcLibProvider : LyricsProvider {
         val ct = cleanTitle(title)
         val ca = cleanArtist(artist)
 
-        query(trackName = ct, artistName = ca, albumName = album)
-            .filter { it.syncedLyrics != null || it.plainLyrics != null }
-            .takeIf { it.isNotEmpty() }?.let { return it }
+        if (!album.isNullOrBlank()) {
+            query(trackName = ct, artistName = ca, albumName = album)
+                .usable().takeIf { it.isNotEmpty() }?.let { return it }
+        }
+
+        // (track + artist, no album) — covers deluxe/standard album mismatches.
+        query(trackName = ct, artistName = ca)
+            .usable().takeIf { it.isNotEmpty() }?.let { return it }
 
         query(trackName = ct)
-            .filter { it.syncedLyrics != null || it.plainLyrics != null }
-            .takeIf { it.isNotEmpty() }?.let { return it }
+            .usable().takeIf { it.isNotEmpty() }?.let { return it }
 
         query(q = "$ca $ct")
-            .filter { it.syncedLyrics != null || it.plainLyrics != null }
-            .takeIf { it.isNotEmpty() }?.let { return it }
+            .usable().takeIf { it.isNotEmpty() }?.let { return it }
 
         query(q = ct)
-            .filter { it.syncedLyrics != null || it.plainLyrics != null }
-            .takeIf { it.isNotEmpty() }?.let { return it }
+            .usable().takeIf { it.isNotEmpty() }?.let { return it }
 
         if (ct != title.trim()) {
-            return query(trackName = title.trim(), artistName = artist.trim())
-                .filter { it.syncedLyrics != null || it.plainLyrics != null }
+            return query(trackName = title.trim(), artistName = artist.trim()).usable()
         }
         return emptyList()
     }

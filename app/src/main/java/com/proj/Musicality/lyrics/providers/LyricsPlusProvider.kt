@@ -8,6 +8,7 @@ import io.ktor.client.request.get
 import io.ktor.client.request.parameter
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.isSuccess
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -61,19 +62,41 @@ object LyricsPlusProvider : LyricsProvider {
     private const val ISRC_PATTERN = "^[A-Z]{2}[A-Z0-9]{3}\\d{2}\\d{5}$"
     private val ISRC_REGEX by lazy { Regex(ISRC_PATTERN) }
 
+    // lyricsplus.binimum.org currently 302-redirects here; calling the canonical
+    // endpoint directly saves one RTT per request.
     private val baseUrls = listOf(
+        "https://lyrics.geeked.wtf",
         "https://lyricsplus.binimum.org",
-        "https://lyricsplus.atomix.one/",
-        "https://lyricsplus.prjktla.my.id",
-        "https://lyricsplus-seven.vercel.app",
     )
+
+    // Short-lived blacklist for mirrors that just failed; avoids paying the
+    // socket timeout on every request while they recover.
+    private const val MIRROR_FAILURE_TTL_MS = 5 * 60_000L
+    private val mirrorFailures = ConcurrentHashMap<String, Long>()
 
     @Volatile
     private var lastWorkingServer: String? = null
 
+    private fun markFailure(base: String) {
+        mirrorFailures[base] = System.currentTimeMillis()
+    }
+
+    private fun markSuccess(base: String) {
+        mirrorFailures.remove(base)
+        lastWorkingServer = base
+    }
+
+    private fun isBlacklisted(base: String): Boolean {
+        val ts = mirrorFailures[base] ?: return false
+        if (System.currentTimeMillis() - ts < MIRROR_FAILURE_TTL_MS) return true
+        mirrorFailures.remove(base)
+        return false
+    }
+
     private fun prioritized(): List<String> {
+        val live = baseUrls.filterNot { isBlacklisted(it) }.ifEmpty { baseUrls }
         val last = lastWorkingServer
-        return if (last != null && last in baseUrls) listOf(last) + baseUrls.filter { it != last } else baseUrls
+        return if (last != null && last in live) listOf(last) + live.filter { it != last } else live
     }
 
     override suspend fun getLyrics(
@@ -112,8 +135,9 @@ object LyricsPlusProvider : LyricsProvider {
     ): LyricsPlusResponse? {
         if (title.isBlank() || artist.isBlank()) return null
         for (base in prioritized()) {
+            val normalized = base.trimEnd('/')
             try {
-                val response = lyricsHttpClient.get("$base/v2/lyrics/get") {
+                val response = lyricsHttpClient.get("$normalized/v2/lyrics/get") {
                     parameter("title", title)
                     parameter("artist", artist)
                     if (duration > 0) parameter("duration", duration)
@@ -122,11 +146,16 @@ object LyricsPlusProvider : LyricsProvider {
                 if (response.status == HttpStatusCode.OK) {
                     val parsed = runCatching { response.body<LyricsPlusResponse>() }.getOrNull()
                     if (parsed != null && !parsed.lyrics.isNullOrEmpty()) {
-                        lastWorkingServer = base
+                        markSuccess(base)
                         return parsed
                     }
+                    // 200 with empty/garbage body = no match here, but mirror is live.
+                } else {
+                    markFailure(base)
                 }
-            } catch (_: Exception) { /* try next mirror */ }
+            } catch (_: Exception) {
+                markFailure(base)
+            }
         }
         return null
     }

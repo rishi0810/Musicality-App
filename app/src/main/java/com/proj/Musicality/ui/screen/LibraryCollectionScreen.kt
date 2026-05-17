@@ -67,9 +67,12 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.ui.layout.ContentScale
+import coil3.compose.AsyncImage
 import com.proj.Musicality.config.LocalCornerRadius
 import com.proj.Musicality.config.scaled
 import com.proj.Musicality.R
+import com.proj.Musicality.util.upscaleThumbnail
 import com.proj.Musicality.data.local.LibraryCollectionType
 import com.proj.Musicality.data.local.MediaDownloadState
 import com.proj.Musicality.data.local.LibraryRepository
@@ -435,48 +438,66 @@ private fun LibraryTrackActionsSheet(
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        sheetState = sheetState
+        sheetState = sheetState,
+        shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
+        containerColor = MaterialTheme.colorScheme.surface
     ) {
         Column(modifier = Modifier.padding(bottom = 16.dp)) {
+            LibraryTrackSheetHeader(model = model)
+            HorizontalDivider()
             if (hasVideoId) {
                 LibraryActionItem(
                     label = if (isLiked) "Remove from liked songs" else "Add to liked songs",
                     icon = if (isLiked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
-                    onClick = onToggleLike
+                    onClick = onToggleLike,
+                    supportingText = if (isLiked) "Take it out of your Liked songs" else "Save this track in Liked"
                 )
             }
             LibraryActionItem(
                 label = "Remove song",
                 icon = Icons.Rounded.DeleteForever,
-                onClick = onRemoveFromCollection
+                onClick = onRemoveFromCollection,
+                supportingText = "Take this song out of the collection"
             )
             if (hasVideoId) {
                 LibraryActionItem(
                     label = "Play next",
                     icon = Icons.Rounded.PlayArrow,
-                    onClick = onPlayNext
+                    onClick = onPlayNext,
+                    supportingText = "Play right after the current song"
                 )
                 LibraryActionItem(
                     label = "Add to Queue",
                     icon = Icons.Rounded.Add,
-                    onClick = onAddToQueue
+                    onClick = onAddToQueue,
+                    supportingText = "Append to the end of your queue"
                 )
             }
             if (model.artistId != null) {
+                val artistThumb = model.mediaItem.thumbnailUrl?.takeIf { it.isNotBlank() }
                 LibraryActionItem(
                     label = "View Artist",
                     icon = Icons.Rounded.Person,
-                    onClick = onViewArtist
+                    onClick = onViewArtist,
+                    supportingText = "More from ${model.artistName}",
+                    leadingImageUrl = artistThumb,
+                    leadingShape = CircleShape
                 )
             }
             if (model.shareUrl != null) {
                 LibraryActionItem(
                     label = "Share",
                     icon = Icons.Rounded.Share,
-                    onClick = onShare
+                    onClick = onShare,
+                    supportingText = "Send a link to this song"
                 )
             }
             if (hasVideoId && showDownloadAction) {
+                val downloadSupporting = when {
+                    downloadState?.isDownloading == true -> "${(downloadState.progress * 100).toInt()}% downloaded"
+                    downloadState?.isDownloaded == true -> "Saved for offline"
+                    else -> "Listen without a connection"
+                }
                 LibraryActionItem(
                     label = when {
                         downloadState?.isDownloading == true -> "Downloading ${(downloadState.progress * 100).toInt()}%"
@@ -485,7 +506,8 @@ private fun LibraryTrackActionsSheet(
                     },
                     icon = Icons.Rounded.Download,
                     onClick = onDownload,
-                    enabled = downloadState?.isDownloading != true
+                    enabled = downloadState?.isDownloading != true,
+                    supportingText = downloadSupporting
                 )
             }
 
@@ -517,13 +539,71 @@ private fun LibraryTrackActionsSheet(
 }
 
 @Composable
+private fun LibraryTrackSheetHeader(model: LibraryTrackMenuModel) {
+    val rawThumb = model.mediaItem.thumbnailUrl
+    val thumbUrl = remember(rawThumb) { upscaleThumbnail(rawThumb) }
+    val subtitle = remember(model.artistName, model.mediaItem.albumName) {
+        val album = model.mediaItem.albumName?.takeIf { it.isNotBlank() }
+        listOfNotNull(model.artistName.takeIf { it.isNotBlank() }, album)
+            .joinToString(" • ")
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp, vertical = 16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        val thumbModifier = Modifier
+            .size(56.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+        if (!thumbUrl.isNullOrBlank()) {
+            AsyncImage(
+                model = thumbUrl,
+                contentDescription = null,
+                modifier = thumbModifier,
+                contentScale = ContentScale.Crop
+            )
+        } else {
+            Box(modifier = thumbModifier)
+        }
+        Spacer(Modifier.size(16.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = model.title,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+            )
+            if (subtitle.isNotBlank()) {
+                Spacer(Modifier.size(2.dp))
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun LibraryActionItem(
     label: String,
     icon: ImageVector,
     onClick: () -> Unit,
-    enabled: Boolean = true
+    enabled: Boolean = true,
+    supportingText: String? = null,
+    leadingImageUrl: String? = null,
+    leadingShape: androidx.compose.ui.graphics.Shape = RoundedCornerShape(8.dp)
 ) {
     val alpha = if (enabled) 1f else 0.5f
+    val resolvedLeadingUrl = remember(leadingImageUrl) {
+        leadingImageUrl?.takeIf { it.isNotBlank() }?.let { upscaleThumbnail(it) }
+    }
     ListItem(
         headlineContent = {
             Text(
@@ -534,12 +614,33 @@ private fun LibraryActionItem(
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = alpha)
             )
         },
+        supportingContent = supportingText?.let {
+            {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha)
+                )
+            }
+        },
         leadingContent = {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha)
-            )
+            if (!resolvedLeadingUrl.isNullOrBlank()) {
+                AsyncImage(
+                    model = resolvedLeadingUrl,
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(leadingShape)
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+                    contentScale = ContentScale.Crop
+                )
+            } else {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha)
+                )
+            }
         },
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
         modifier = Modifier.hapticClickable(enabled = enabled, onClick = onClick)

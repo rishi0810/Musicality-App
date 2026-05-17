@@ -35,7 +35,45 @@ object LyricsHelper {
         LrcLibProvider,         // Line-level, widest coverage
     )
 
+    /** Ordered, stable display names — drives the provider-switch dropdown. */
+    val providerNames: List<String> = providers.map { it.name }
+
     private val cache = LruCache<String, LyricsWithProvider>(MAX_CACHE_SIZE)
+
+    // Per-(provider, cacheKey) cache so the switch dropdown is instant on second open
+    // and so the race + lazy-load paths don't duplicate work for the same track.
+    private val providerCache = LruCache<String, LyricsWithProvider>(MAX_CACHE_SIZE * 2)
+
+    private fun providerCacheKey(providerName: String, cacheKey: String) =
+        "$providerName::$cacheKey"
+
+    /** Fetch from one specific provider by display name. Cached. */
+    suspend fun fetchByProvider(
+        providerName: String,
+        cacheKey: String,
+        id: String,
+        title: String,
+        artist: String,
+        duration: Int,
+        album: String?,
+    ): LyricsWithProvider? {
+        val provider = providers.firstOrNull { it.name == providerName } ?: return null
+        val pcKey = providerCacheKey(providerName, cacheKey)
+        providerCache.get(pcKey)?.let { return it }
+
+        val cleanedTitle = cleanTitleForSearch(title)
+        val result = runCatching {
+            provider.getLyrics(id, cleanedTitle, artist, duration, album)
+        }.getOrElse {
+            Log.w(TAG, "${provider.name} threw", it)
+            return null
+        }
+        if (result.isFailure) return null
+        val lrc = result.getOrNull() ?: return null
+        val out = LyricsWithProvider(lrc, provider.name)
+        providerCache.put(pcKey, out)
+        return out
+    }
 
     suspend fun getLyrics(
         cacheKey: String,
@@ -49,11 +87,11 @@ object LyricsHelper {
 
         val cleanedTitle = cleanTitleForSearch(title)
         val winner = withTimeoutOrNull(MAX_LYRICS_FETCH_MS) {
-            raceProviders(id, cleanedTitle, artist, duration, album)
+            raceProviders(cacheKey, id, cleanedTitle, artist, duration, album)
         }
 
         if (winner != null) {
-            val filtered = winner.copy(lrc = filterLyricsCreditLines(winner.lrc))
+            val filtered = winner.copy(lrc = filterLyricsCreditLines(winner.lrc, title, artist))
             cache.put(cacheKey, filtered)
             return filtered
         }
@@ -61,6 +99,7 @@ object LyricsHelper {
     }
 
     private suspend fun raceProviders(
+        cacheKey: String,
         id: String,
         title: String,
         artist: String,
@@ -72,7 +111,7 @@ object LyricsHelper {
 
         // Launch the first tier.
         for (i in 0 until minOf(TIER_SIZE, providers.size)) {
-            launched += launchProvider(i, providers[i], id, title, artist, duration, album, channel)
+            launched += launchProvider(i, providers[i], cacheKey, id, title, artist, duration, album, channel)
         }
 
         var nextTier = TIER_SIZE
@@ -100,7 +139,7 @@ object LyricsHelper {
             delay(GRACE_PERIOD_MS)
             if (bestResult == null && collector.isActive) {
                 for (i in nextTier until minOf(nextTier + TIER_SIZE, providers.size)) {
-                    launched += launchProvider(i, providers[i], id, title, artist, duration, album, channel)
+                    launched += launchProvider(i, providers[i], cacheKey, id, title, artist, duration, album, channel)
                 }
                 nextTier += TIER_SIZE
             } else break
@@ -114,6 +153,7 @@ object LyricsHelper {
     private fun CoroutineScope.launchProvider(
         index: Int,
         provider: LyricsProvider,
+        cacheKey: String,
         id: String,
         title: String,
         artist: String,
@@ -126,7 +166,12 @@ object LyricsHelper {
             if (result.isSuccess) {
                 val lrc = result.getOrNull()!!
                 Log.i(TAG, "${provider.name} won (index=$index)")
-                channel.send(index to LyricsWithProvider(lrc, provider.name))
+                val out = LyricsWithProvider(lrc, provider.name)
+                // Pre-populate the per-provider cache so the dropdown switch is
+                // instant for any provider that finished its fetch (even ones the
+                // race didn't pick).
+                providerCache.put(providerCacheKey(provider.name, cacheKey), out)
+                channel.send(index to out)
             } else {
                 Log.d(TAG, "${provider.name} failed: ${result.exceptionOrNull()?.message}")
                 channel.send(index to null)

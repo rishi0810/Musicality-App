@@ -26,8 +26,13 @@ object BetterLyricsProvider : LyricsProvider {
         album: String?,
     ): Result<String> = runCatching {
         val response = lyricsHttpClient.get("$BASE/getLyrics") {
-            header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-            header("Accept", "application/json")
+            // Upstream gates uncached lookups behind an API key UNLESS the request
+            // claims to come from music.youtube.com. Without these headers every
+            // uncached song returns HTTP 401 ("Uncached queries require ... X-API-Key").
+            header("Origin", "https://music.youtube.com")
+            header("Referer", "https://music.youtube.com/")
+            header("User-Agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1")
+            header("Accept", "*/*")
             parameter("s", title)
             parameter("a", artist)
             if (duration > 0) parameter("d", duration)

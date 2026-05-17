@@ -26,6 +26,8 @@ import com.proj.Musicality.data.local.ListeningHistoryRepository
 import java.io.File
 import com.proj.Musicality.data.model.LyricsState
 import com.proj.Musicality.data.model.MediaItem
+import com.proj.Musicality.data.model.ProviderLoadState
+import com.proj.Musicality.lyrics.LyricsHelper
 import com.proj.Musicality.data.model.PlaybackQueue
 import com.proj.Musicality.data.model.QueueSource
 import com.proj.Musicality.data.resolver.SongArtResolver
@@ -89,6 +91,17 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
 
     private val _lyricsState = MutableStateFlow<LyricsState>(LyricsState.Idle)
     val lyricsState: StateFlow<LyricsState> = _lyricsState.asStateFlow()
+
+    // Per-provider load state for the dropdown switcher. Reset when the active track
+    // changes. Populated lazily — the race wins one provider on initial load; the
+    // others are fetched the first time the user opens the dropdown.
+    private val _lyricsProviderStates = MutableStateFlow<Map<String, ProviderLoadState>>(emptyMap())
+    val lyricsProviderStates: StateFlow<Map<String, ProviderLoadState>> = _lyricsProviderStates.asStateFlow()
+
+    // videoId the lyricsProviderStates map currently corresponds to. Guards against
+    // racing fetches when the user skips tracks rapidly.
+    private var lyricsProviderTrackId: String? = null
+    private var lyricsLazyLoadJob: Job? = null
 
     // ── Crossfade ──
     private val crossfadeManager = SimpleCrossfadeManager(application.applicationContext)
@@ -605,13 +618,87 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
     }
 
     private fun fetchLyrics(item: MediaItem) {
+        lyricsLazyLoadJob?.cancel()
+        lyricsLazyLoadJob = null
+        lyricsProviderTrackId = item.videoId
+        // All providers start Idle; the race winner is promoted to Loaded below.
+        _lyricsProviderStates.value = LyricsHelper.providerNames.associateWith { ProviderLoadState.Idle }
+
         viewModelScope.launch {
             val current = _lyricsState.value
             if (current !is LyricsState.Loading) {
                 _lyricsState.value = LyricsState.Loading
             }
-            _lyricsState.value = LyricsRepository.fetchLyrics(item)
+            val state = LyricsRepository.fetchLyrics(item)
+            // If the user already moved on to a new track, ignore this stale result.
+            if (lyricsProviderTrackId != item.videoId) return@launch
+            _lyricsState.value = state
+            if (state is LyricsState.Loaded) {
+                state.provider?.let { winnerName ->
+                    val snapshot = com.proj.Musicality.data.model.ProviderLyricsSnapshot(
+                        lines = state.lines,
+                        isSynced = state.isSynced,
+                    )
+                    _lyricsProviderStates.update { current ->
+                        current + (winnerName to ProviderLoadState.Loaded(snapshot))
+                    }
+                }
+            } else if (state is LyricsState.NotFound) {
+                // No provider had anything; mark them all unavailable so the dropdown
+                // doesn't pretend we can try again.
+                _lyricsProviderStates.update { current ->
+                    current.mapValues { ProviderLoadState.Unavailable }
+                }
+            }
         }
+    }
+
+    /**
+     * Fetches every still-Idle provider for the given track in parallel and updates
+     * [lyricsProviderStates]. Safe to call repeatedly; the actual fetches are deduped
+     * by [LyricsHelper.fetchByProvider]'s per-provider cache.
+     */
+    fun loadRemainingLyricsProviders(item: MediaItem) {
+        if (lyricsProviderTrackId != item.videoId) return
+        if (lyricsLazyLoadJob?.isActive == true) return
+        val targets = _lyricsProviderStates.value
+            .filter { it.value is ProviderLoadState.Idle }
+            .keys
+        if (targets.isEmpty()) return
+
+        // Optimistically flip them to Loading so the dropdown shows spinners.
+        _lyricsProviderStates.update { current ->
+            current.mapValues { (name, st) ->
+                if (name in targets) ProviderLoadState.Loading else st
+            }
+        }
+
+        lyricsLazyLoadJob = viewModelScope.launch {
+            targets.forEach { name ->
+                launch {
+                    val raw = LyricsRepository.fetchProvider(item, name)
+                    if (lyricsProviderTrackId != item.videoId) return@launch
+                    val snapshot = raw?.let { LyricsRepository.toSnapshot(item, it) }
+                    _lyricsProviderStates.update { current ->
+                        current + (name to (snapshot?.let { ProviderLoadState.Loaded(it) }
+                            ?: ProviderLoadState.Unavailable))
+                    }
+                }
+            }
+        }
+    }
+
+    /** Swap the active lyrics view to the given provider. No-op if not yet loaded. */
+    fun switchLyricsProvider(providerName: String) {
+        val states = _lyricsProviderStates.value
+        val loaded = states[providerName] as? ProviderLoadState.Loaded ?: return
+        val current = _lyricsState.value as? LyricsState.Loaded
+        if (current?.provider == providerName) return
+        _lyricsState.value = LyricsState.Loaded(
+            lines = loaded.snapshot.lines,
+            isSynced = loaded.snapshot.isSynced,
+            provider = providerName,
+        )
     }
 
     private fun fetchAndPlay(item: MediaItem) {

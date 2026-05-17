@@ -1075,40 +1075,90 @@ private fun HomeSongActionsSheet(
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        sheetState = sheetState
+        sheetState = sheetState,
+        shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
+        containerColor = MaterialTheme.colorScheme.surface
     ) {
         Column(modifier = Modifier.padding(bottom = 16.dp)) {
+            HomeSongMenuHeader(model = model)
+            HorizontalDivider()
             HomeSongActionItem(
                 label = if (isLiked) "Remove from liked songs" else "Add to liked songs",
+                supportingText = if (isLiked) "Take it out of your Liked songs" else "Save this track in Liked",
                 icon = if (isLiked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
                 onClick = onToggleLike
             )
             HomeSongActionItem(
                 label = "Play next",
+                supportingText = "Play right after the current song",
                 icon = Icons.Rounded.PlayArrow,
                 onClick = onPlayNext
             )
             HomeSongActionItem(
                 label = "Add to Queue",
+                supportingText = "Append to the end of your queue",
                 icon = Icons.Rounded.Add,
                 onClick = onAddToQueue
             )
             if (model.artistId != null) {
                 HomeSongActionItem(
                     label = "View Artist",
+                    supportingText = "More from ${model.artistName}",
                     icon = Icons.Rounded.Person,
+                    leading = {
+                        val artistThumb = model.mediaItem.thumbnailUrl
+                        if (!artistThumb.isNullOrBlank()) {
+                            AsyncImage(
+                                model = upscaleThumbnail(artistThumb),
+                                contentDescription = null,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Rounded.Person,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    },
                     onClick = onViewArtist
                 )
             }
             if (model.albumId != null) {
                 HomeSongActionItem(
                     label = "View Album",
+                    supportingText = model.mediaItem.albumName ?: "Open album",
                     icon = Icons.Rounded.Album,
+                    leading = {
+                        val albumThumb = model.mediaItem.thumbnailUrl
+                        if (!albumThumb.isNullOrBlank()) {
+                            AsyncImage(
+                                model = upscaleThumbnail(albumThumb),
+                                contentDescription = null,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Rounded.Album,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    },
                     onClick = onViewAlbum
                 )
             }
             HomeSongActionItem(
                 label = "Share",
+                supportingText = "Send a link to this song",
                 icon = Icons.Rounded.Share,
                 onClick = onShare
             )
@@ -1117,6 +1167,11 @@ private fun HomeSongActionsSheet(
                     downloadState?.isDownloading == true -> "Downloading ${(downloadState.progress * 100).toInt()}%"
                     downloadState?.isDownloaded == true -> "Downloaded"
                     else -> "Download"
+                },
+                supportingText = when {
+                    downloadState?.isDownloading == true -> "${(downloadState.progress * 100).toInt()}% complete"
+                    downloadState?.isDownloaded == true -> "Saved for offline"
+                    else -> "Listen without a connection"
                 },
                 icon = Icons.Rounded.Download,
                 onClick = onDownload,
@@ -1151,11 +1206,71 @@ private fun HomeSongActionsSheet(
 }
 
 @Composable
+private fun HomeSongMenuHeader(model: HomeSongMenuModel) {
+    val thumbUrl = remember(model.mediaItem.thumbnailUrl) {
+        upscaleThumbnail(model.mediaItem.thumbnailUrl)
+    }
+    val subtitle = remember(model.artistName, model.albumName) {
+        listOfNotNull(
+            model.artistName.takeIf { it.isNotBlank() },
+            model.albumName?.takeIf { it.isNotBlank() }
+        ).joinToString(" • ")
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp, vertical = 16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (!thumbUrl.isNullOrBlank()) {
+            AsyncImage(
+                model = thumbUrl,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(60.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .size(60.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+            )
+        }
+        Spacer(Modifier.width(16.dp))
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Text(
+                text = model.title,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (subtitle.isNotBlank()) {
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun HomeSongActionItem(
     label: String,
     icon: ImageVector,
     onClick: () -> Unit,
-    enabled: Boolean = true
+    enabled: Boolean = true,
+    supportingText: String? = null,
+    leading: (@Composable () -> Unit)? = null
 ) {
     val alpha = if (enabled) 1f else 0.5f
     ListItem(
@@ -1168,12 +1283,27 @@ private fun HomeSongActionItem(
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = alpha)
             )
         },
+        supportingContent = supportingText?.takeIf { it.isNotBlank() }?.let {
+            {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        },
         leadingContent = {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha)
-            )
+            if (leading != null) {
+                leading()
+            } else {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha)
+                )
+            }
         },
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
         modifier = Modifier

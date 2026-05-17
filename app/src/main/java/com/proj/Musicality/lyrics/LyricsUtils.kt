@@ -22,10 +22,21 @@ fun cleanTitleForSearch(title: String): String =
 
 /**
  * Strip "Lyrics by ...", "Synced by ...", "[foo synced by bar]", etc.
+ * When `title`/`artist` are provided, also drops the leading `[00:00.00] Title - Artist`
+ * header row that LrcLib often prefixes to synced lyrics.
+ *
  * Works on raw LRC *and* on text that still carries `{agent}`/`{bg}` tags.
  */
-fun filterLyricsCreditLines(lyrics: String): String =
-    lyrics.lines().filter { line ->
+fun filterLyricsCreditLines(
+    lyrics: String,
+    title: String? = null,
+    artist: String? = null,
+): String {
+    val titleNorm = title?.let(::normalizeForCreditMatch)
+    val artistNorm = artist?.let(::normalizeForCreditMatch)
+    var dropHeaderRow = !titleNorm.isNullOrBlank()
+
+    return lyrics.lines().filter { line ->
         var text = line.trim()
         var changed = true
         while (changed) {
@@ -43,8 +54,31 @@ fun filterLyricsCreditLines(lyrics: String): String =
             lower.startsWith("music by") ||
             lower.startsWith("arranged by") ||
             (lower.startsWith("[") && lower.endsWith("]") && lower.length < 40 && lower.contains("synced by"))
-        !isCredit
+
+        val isHeaderRow = dropHeaderRow && looksLikeTitleArtistHeader(text, titleNorm, artistNorm)
+        if (isHeaderRow) dropHeaderRow = false // only ever strip the first occurrence
+
+        !isCredit && !isHeaderRow
     }.joinToString("\n")
+}
+
+private fun normalizeForCreditMatch(s: String): String =
+    s.lowercase(Locale.US).replace(Regex("[\\s\\p{Punct}]+"), "").trim()
+
+private fun looksLikeTitleArtistHeader(
+    text: String,
+    titleNorm: String?,
+    artistNorm: String?,
+): Boolean {
+    if (titleNorm.isNullOrBlank() || text.isBlank()) return false
+    val candidate = normalizeForCreditMatch(text)
+    if (candidate == titleNorm) return true
+    if (!artistNorm.isNullOrBlank()) {
+        if (candidate == titleNorm + artistNorm) return true
+        if (candidate == artistNorm + titleNorm) return true
+    }
+    return false
+}
 
 /**
  *   [mm:ss.xx]{agent:v1}text

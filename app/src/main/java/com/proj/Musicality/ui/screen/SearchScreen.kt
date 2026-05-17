@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import coil3.compose.AsyncImage
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -78,6 +79,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -967,24 +969,31 @@ private fun SearchResultActionsSheet(
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        sheetState = sheetState
+        sheetState = sheetState,
+        shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
+        containerColor = MaterialTheme.colorScheme.surface
     ) {
         Column(modifier = Modifier.padding(bottom = 16.dp)) {
+            SearchActionsSheetHeader(model = model)
+            HorizontalDivider()
             if (hasPlayableMedia) {
                 SearchActionItem(
                     label = if (isLiked) "Remove from liked songs" else "Add to liked songs",
+                    supportingText = if (isLiked) "Take it out of your Liked songs" else "Save this track in Liked",
                     icon = if (isLiked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
                     enabled = true,
                     onClick = onToggleLike
                 )
                 SearchActionItem(
                     label = "Play next",
+                    supportingText = "Play right after the current song",
                     icon = Icons.Rounded.PlayArrow,
                     enabled = true,
                     onClick = onPlayNext
                 )
                 SearchActionItem(
                     label = "Add to Queue",
+                    supportingText = "Append to the end of your queue",
                     icon = Icons.Rounded.Add,
                     enabled = true,
                     onClick = onAddToQueue
@@ -992,18 +1001,66 @@ private fun SearchResultActionsSheet(
             }
             SearchActionItem(
                 label = "View Artist",
+                supportingText = model.artistName?.takeIf { it.isNotBlank() }?.let { "More from $it" },
                 icon = Icons.Rounded.Person,
                 enabled = model.artistId != null,
-                onClick = onViewArtist
+                onClick = onViewArtist,
+                leading = {
+                    val artistThumb = model.mediaItem?.thumbnailUrl?.takeIf { it.isNotBlank() }
+                    if (artistThumb != null) {
+                        AsyncImage(
+                            model = com.proj.Musicality.util.upscaleThumbnail(artistThumb),
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Rounded.Person,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(
+                                alpha = if (model.artistId != null) 1f else 0.5f
+                            )
+                        )
+                    }
+                }
             )
             SearchActionItem(
                 label = "View Album",
+                supportingText = model.mediaItem?.albumName?.takeIf { it.isNotBlank() } ?: "Open album",
                 icon = Icons.Rounded.Album,
                 enabled = model.albumId != null,
-                onClick = onViewAlbum
+                onClick = onViewAlbum,
+                leading = {
+                    val albumThumb = model.mediaItem?.thumbnailUrl?.takeIf { it.isNotBlank() }
+                        ?: model.thumb?.takeIf { it.isNotBlank() }
+                    if (albumThumb != null) {
+                        AsyncImage(
+                            model = com.proj.Musicality.util.upscaleThumbnail(albumThumb),
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Rounded.Album,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(
+                                alpha = if (model.albumId != null) 1f else 0.5f
+                            )
+                        )
+                    }
+                }
             )
             SearchActionItem(
                 label = "Share",
+                supportingText = "Send a link to this song",
                 icon = Icons.Rounded.Share,
                 enabled = true,
                 onClick = onShare
@@ -1013,6 +1070,11 @@ private fun SearchResultActionsSheet(
                     downloadState?.isDownloading == true -> "Downloading ${(downloadState.progress * 100).toInt()}%"
                     downloadState?.isDownloaded == true -> "Downloaded"
                     else -> "Download"
+                },
+                supportingText = when {
+                    downloadState?.isDownloading == true -> "Saving for offline playback"
+                    downloadState?.isDownloaded == true -> "Saved for offline"
+                    else -> "Listen without a connection"
                 },
                 icon = Icons.Rounded.Download,
                 enabled = hasPlayableMedia && downloadState?.isDownloading != true,
@@ -1051,7 +1113,9 @@ private fun SearchActionItem(
     label: String,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     enabled: Boolean,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    supportingText: String? = null,
+    leading: (@Composable () -> Unit)? = null
 ) {
     val alpha = if (enabled) 1f else 0.5f
     ListItem(
@@ -1064,14 +1128,81 @@ private fun SearchActionItem(
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = alpha)
             )
         },
+        supportingContent = supportingText?.let {
+            {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        },
         leadingContent = {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha)
-            )
+            if (leading != null) {
+                leading()
+            } else {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha)
+                )
+            }
         },
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
         modifier = Modifier.hapticClickable(enabled = enabled, onClick = onClick)
     )
+}
+
+@Composable
+private fun SearchActionsSheetHeader(model: SearchResultMenuModel) {
+    val thumbUrl = model.mediaItem?.thumbnailUrl?.takeIf { it.isNotBlank() }
+        ?: model.thumb?.takeIf { it.isNotBlank() }
+    val subtitle = listOfNotNull(
+        model.artistName?.takeIf { it.isNotBlank() },
+        model.albumName?.takeIf { it.isNotBlank() }
+    ).joinToString(" • ").ifBlank { model.subtitle ?: model.typeLabel }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp, vertical = 16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(60.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+        ) {
+            if (thumbUrl != null) {
+                AsyncImage(
+                    model = com.proj.Musicality.util.upscaleThumbnail(thumbUrl),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+        }
+        Spacer(modifier = Modifier.width(14.dp))
+        Column(modifier = Modifier.weight(1f, fill = true)) {
+            Text(
+                text = model.title,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (subtitle.isNotBlank()) {
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
 }

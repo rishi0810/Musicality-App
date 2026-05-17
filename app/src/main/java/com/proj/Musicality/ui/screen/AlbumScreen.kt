@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Check
@@ -30,9 +31,11 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -41,6 +44,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import coil3.compose.AsyncImage
 import com.proj.Musicality.data.local.LibraryRepository
 import com.proj.Musicality.data.local.MediaDownloadState
 import com.proj.Musicality.data.local.MediaLibraryState
@@ -544,30 +548,79 @@ private fun AlbumTrackActionsSheet(
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        sheetState = sheetState
+        sheetState = sheetState,
+        shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
+        containerColor = MaterialTheme.colorScheme.surface
     ) {
         Column(modifier = Modifier.padding(bottom = 16.dp)) {
+            val headerThumbUrl = upscaleThumbnail(model.mediaItem.thumbnailUrl)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp, vertical = 16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                AsyncImage(
+                    model = headerThumbUrl,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .size(60.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                )
+                Spacer(Modifier.width(16.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = model.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    val subtitle = listOfNotNull(
+                        model.artistName.takeIf { it.isNotBlank() },
+                        model.mediaItem.albumName?.takeIf { it.isNotBlank() }
+                    ).joinToString(" • ")
+                    if (subtitle.isNotBlank()) {
+                        Text(
+                            text = subtitle,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+            HorizontalDivider()
+
             if (hasVideoId) {
                 AlbumActionItem(
                     label = if (isLiked) "Remove from liked songs" else "Add to liked songs",
                     icon = if (isLiked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                    supportingText = if (isLiked) "Take it out of your Liked songs" else "Save this track in Liked",
                     onClick = onToggleLike
                 )
                 AlbumActionItem(
                     label = "Play next",
                     icon = Icons.Rounded.PlayArrow,
+                    supportingText = "Play right after the current song",
                     onClick = onPlayNext
                 )
                 AlbumActionItem(
                     label = "Add to Queue",
                     icon = Icons.Rounded.Add,
+                    supportingText = "Append to the end of your queue",
                     onClick = onAddToQueue
                 )
             }
             if (model.artistId != null) {
+                val artistAvatarUrl = upscaleThumbnail(model.mediaItem.thumbnailUrl)
                 AlbumActionItem(
                     label = "View Artist",
                     icon = Icons.Rounded.Person,
+                    supportingText = "More from ${model.artistName}",
+                    leadingImageUrl = artistAvatarUrl,
                     onClick = onViewArtist
                 )
             }
@@ -575,6 +628,7 @@ private fun AlbumTrackActionsSheet(
                 AlbumActionItem(
                     label = "Share",
                     icon = Icons.Rounded.Share,
+                    supportingText = "Send a link to this song",
                     onClick = onShare
                 )
             }
@@ -586,6 +640,11 @@ private fun AlbumTrackActionsSheet(
                         else -> "Download"
                     },
                     icon = Icons.Rounded.Download,
+                    supportingText = when {
+                        downloadState?.isDownloading == true -> "${(downloadState.progress * 100).toInt()}% complete"
+                        downloadState?.isDownloaded == true -> "Saved for offline"
+                        else -> "Listen without a connection"
+                    },
                     onClick = onDownload,
                     enabled = downloadState?.isDownloading != true
                 )
@@ -623,25 +682,45 @@ private fun AlbumActionItem(
     label: String,
     icon: ImageVector,
     onClick: () -> Unit,
-    enabled: Boolean = true
+    enabled: Boolean = true,
+    supportingText: String? = null,
+    leadingImageUrl: String? = null
 ) {
     val alpha = if (enabled) 1f else 0.5f
     ListItem(
         headlineContent = {
             Text(
                 text = label,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 2.dp),
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = alpha)
             )
         },
+        supportingContent = supportingText?.let {
+            {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha)
+                )
+            }
+        },
         leadingContent = {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha)
-            )
+            if (!leadingImageUrl.isNullOrBlank()) {
+                AsyncImage(
+                    model = leadingImageUrl,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                )
+            } else {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha)
+                )
+            }
         },
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
         modifier = Modifier.hapticClickable(enabled = enabled, onClick = onClick)

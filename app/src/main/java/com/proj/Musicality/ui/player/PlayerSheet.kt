@@ -2,6 +2,7 @@ package com.proj.Musicality.ui.player
 
 import android.content.Intent
 import android.content.ClipData
+import android.os.SystemClock
 import android.util.Log
 import android.widget.Toast
 import android.app.Activity
@@ -64,6 +65,7 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -97,6 +99,7 @@ import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
@@ -110,13 +113,17 @@ import androidx.compose.material3.CircularWavyProgressIndicator
 import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MenuDefaults
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -129,7 +136,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -193,7 +202,9 @@ import com.proj.Musicality.data.local.MediaLibraryState
 import com.proj.Musicality.data.model.LyricsState
 import com.proj.Musicality.data.model.MediaItem
 import com.proj.Musicality.data.model.PlaybackQueue
+import com.proj.Musicality.data.model.ProviderLoadState
 import com.proj.Musicality.data.model.QueueSource
+import com.proj.Musicality.lyrics.LyricsHelper
 import com.proj.Musicality.ui.components.pressScale
 import com.proj.Musicality.ui.components.HapticIconButton
 import com.proj.Musicality.ui.components.hapticClickable
@@ -221,6 +232,9 @@ private const val TAG = "PlayerSheet"
 private const val CROSSFADE_UI_LEAD_MS = 10_000L
 private const val DEFAULT_MINI_SWIPE_SENSITIVITY = 0.73f
 private const val MAX_LYRICS_SHARE_LINES = 6
+// Active-line transition fires this many ms before the line's timestamp, matching
+// the anticipatory feel of Apple-Music-style synced lyrics.
+private const val LINE_LOOKAHEAD_MS = 100L
 private const val PlayerHeroHeightFraction = 0.47f
 private val PlayerHorizontalPadding = 20.dp
 private val PlayerHeroMinHeight = 360.dp
@@ -271,6 +285,7 @@ fun PlayerSheet(
     positionMsFlow: StateFlow<Long>,
     loadingTrackIdFlow: StateFlow<String?>,
     lyricsStateFlow: StateFlow<LyricsState>,
+    lyricsProviderStatesFlow: StateFlow<Map<String, ProviderLoadState>>,
     isExpanded: Boolean,
     expandProgressState: State<Float>,
     onCollapse: () -> Unit,
@@ -285,6 +300,8 @@ fun PlayerSheet(
     onAlbumTap: (String, String, String?) -> Unit,
     onRemoveFromQueue: (Int) -> Unit,
     onMoveInQueue: (Int, Int) -> Unit,
+    onLyricsLoadAllProviders: (MediaItem) -> Unit,
+    onLyricsSwitchProvider: (String) -> Unit,
     crossfadeEnabled: Boolean = false,
     onToggleCrossfade: () -> Unit = {},
     miniPlayerHeight: Dp = 70.dp,
@@ -963,14 +980,85 @@ fun PlayerSheet(
                 }
                 seconds > 900L
             }
+            val downloadStatesMap by libraryRepository.downloadStates.collectAsStateWithLifecycle()
+            val downloadState = downloadStatesMap[item.videoId]
+            val optionsArtworkUrl = remember(item.thumbnailUrl) { upscaleThumbnail(item.thumbnailUrl) }
+            val hasArtwork = !item.thumbnailUrl.isNullOrBlank()
             ModalBottomSheet(
                 onDismissRequest = {
                     dismissOptionsAfterDownload = false
                     showOptionsSheet = false
                 },
-                sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+                sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+                shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
+                containerColor = MaterialTheme.colorScheme.surface
             ) {
                 Column(modifier = Modifier.padding(bottom = 16.dp)) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 24.dp, vertical = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (hasArtwork) {
+                            AsyncImage(
+                                model = ImageRequest.Builder(context)
+                                    .data(optionsArtworkUrl)
+                                    .crossfade(true)
+                                    .memoryCachePolicy(CachePolicy.ENABLED)
+                                    .build(),
+                                contentDescription = item.title,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .size(56.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                            )
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .size(56.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    Icons.Rounded.Album,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        Spacer(Modifier.width(16.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = item.title,
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Spacer(Modifier.height(2.dp))
+                            val subtitle = buildString {
+                                append(item.artistName)
+                                item.albumName?.takeIf { it.isNotBlank() }?.let {
+                                    append("  ·  ")
+                                    append(it)
+                                }
+                            }
+                            Text(
+                                text = subtitle,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                    HorizontalDivider(
+                        modifier = Modifier.padding(horizontal = 24.dp),
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                    )
+                    Spacer(Modifier.height(8.dp))
                     val crossfadeDisabledByLongForm = isCurrentLongForm
                     val effectiveCrossfade = crossfadeEnabled && !crossfadeDisabledByLongForm
                     val disabledAlpha = if (crossfadeDisabledByLongForm) 0.38f else 1f
@@ -1006,9 +1094,14 @@ fun PlayerSheet(
                         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                         modifier = if (crossfadeDisabledByLongForm) Modifier else Modifier.clickable { onToggleCrossfade() }
                     )
+                    val repeatSupportingText = when (state.repeatMode) {
+                        Player.REPEAT_MODE_ONE -> "Repeat one"
+                        Player.REPEAT_MODE_ALL -> "Repeat all"
+                        else -> "Off"
+                    }
                     ListItem(
                         headlineContent = { Text("Loop song") },
-                        supportingContent = { Text("Repeat the current track") },
+                        supportingContent = { Text(repeatSupportingText) },
                         leadingContent = {
                             Icon(
                                 Icons.Rounded.Repeat,
@@ -1026,42 +1119,85 @@ fun PlayerSheet(
                         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                         modifier = Modifier.clickable { onToggleRepeat() }
                     )
-                    ListItem(
-                        headlineContent = { Text("View Artist") },
-                        leadingContent = {
-                            Icon(
-                                Icons.Rounded.Person,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        },
-                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                        modifier = Modifier.clickable {
-                            showOptionsSheet = false
-                            // Song page has track art, not canonical artist art.
-                            // Pass null so ArtistScreen fetches proper artist image.
-                            item.artistId?.let { onArtistTap(it, item.artistName, null) }
-                        }
-                    )
-                    ListItem(
-                        headlineContent = { Text("View Album") },
-                        leadingContent = {
-                            Icon(
-                                Icons.Rounded.Album,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        },
-                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                        modifier = Modifier.clickable {
-                            showOptionsSheet = false
-                            item.albumId?.let { onAlbumTap(it, item.albumName ?: "", null) }
-                        }
-                    )
+                    item.artistId?.let { artistId ->
+                        ListItem(
+                            headlineContent = { Text("View Artist") },
+                            supportingContent = { Text("More from ${item.artistName}") },
+                            leadingContent = {
+                                if (hasArtwork) {
+                                    AsyncImage(
+                                        model = ImageRequest.Builder(context)
+                                            .data(optionsArtworkUrl)
+                                            .crossfade(true)
+                                            .memoryCachePolicy(CachePolicy.ENABLED)
+                                            .build(),
+                                        contentDescription = null,
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier
+                                            .size(40.dp)
+                                            .clip(CircleShape)
+                                    )
+                                } else {
+                                    Icon(
+                                        Icons.Rounded.Person,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            },
+                            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                            modifier = Modifier.clickable {
+                                showOptionsSheet = false
+                                // Song page has track art, not canonical artist art.
+                                // Pass null so ArtistScreen fetches proper artist image.
+                                onArtistTap(artistId, item.artistName, null)
+                            }
+                        )
+                    }
+                    item.albumId?.let { albumId ->
+                        ListItem(
+                            headlineContent = { Text("View Album") },
+                            supportingContent = { Text(item.albumName ?: "Open album") },
+                            leadingContent = {
+                                if (hasArtwork) {
+                                    AsyncImage(
+                                        model = ImageRequest.Builder(context)
+                                            .data(optionsArtworkUrl)
+                                            .crossfade(true)
+                                            .memoryCachePolicy(CachePolicy.ENABLED)
+                                            .build(),
+                                        contentDescription = null,
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier
+                                            .size(40.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                    )
+                                } else {
+                                    Icon(
+                                        Icons.Rounded.Album,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            },
+                            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                            modifier = Modifier.clickable {
+                                showOptionsSheet = false
+                                onAlbumTap(albumId, item.albumName ?: "", null)
+                            }
+                        )
+                    }
+                    val downloadSupportingText = when {
+                        downloadState?.isDownloading == true ->
+                            "${(downloadState.progress * 100).toInt()}% complete"
+                        mediaLibraryState.isDownloaded -> "Saved for offline"
+                        else -> "Listen without a connection"
+                    }
                     ListItem(
                         headlineContent = {
                             Text(if (mediaLibraryState.isDownloaded) "Downloaded" else "Download song")
                         },
+                        supportingContent = { Text(downloadSupportingText) },
                         leadingContent = {
                             if (mediaLibraryState.isDownloaded) {
                                 Icon(
@@ -1101,6 +1237,7 @@ fun PlayerSheet(
                     )
                     ListItem(
                         headlineContent = { Text("Share song") },
+                        supportingContent = { Text("Send a link to this song") },
                         leadingContent = {
                             Icon(
                                 painter = painterResource(id = R.drawable.share_24px),
@@ -1173,6 +1310,7 @@ fun PlayerSheet(
                 LyricsPanel(
                     positionMsFlow = positionMsFlow,
                     lyricsStateFlow = lyricsStateFlow,
+                    lyricsProviderStatesFlow = lyricsProviderStatesFlow,
                     durationMs = state.durationMs,
                     isPlaying = state.isPlaying,
                     onClose = ::closeLyricsScreen,
@@ -1193,6 +1331,8 @@ fun PlayerSheet(
                     onSkipPrev = onSkipPrev,
                     onSkipNext = onSkipNext,
                     onPlayPause = onPlayPause,
+                    onLoadAllProviders = { onLyricsLoadAllProviders(item) },
+                    onSwitchProvider = onLyricsSwitchProvider,
                     backgroundColor = mediaPalette.bottom,
                     playbackAccent = playbackAccent,
                     playbackButton = playbackAccent,
@@ -2105,6 +2245,7 @@ private fun CrossfadeCountdownCue(
 private fun LyricsPanel(
     positionMsFlow: StateFlow<Long>,
     lyricsStateFlow: StateFlow<LyricsState>,
+    lyricsProviderStatesFlow: StateFlow<Map<String, ProviderLoadState>>,
     durationMs: Long,
     isPlaying: Boolean,
     onClose: () -> Unit,
@@ -2117,6 +2258,8 @@ private fun LyricsPanel(
     onSkipPrev: () -> Unit,
     onSkipNext: () -> Unit,
     onPlayPause: () -> Unit,
+    onLoadAllProviders: () -> Unit,
+    onSwitchProvider: (String) -> Unit,
     onProgressBarInteractingChange: (Boolean) -> Unit,
     backgroundColor: Color,
     playbackAccent: Color,
@@ -2131,22 +2274,24 @@ private fun LyricsPanel(
     val haptic = LocalHapticFeedback.current
     val wordSyncEnabled by AppConfig.wordSyncLyrics.collectAsStateWithLifecycle()
     val positionMs by positionMsFlow.collectAsStateWithLifecycle()
-    // Smoothed value is for word-emphasis interpolation between 300ms position polls.
-    // Big deltas (seeks, track changes) snap so we don't sweep through the lyrics.
-    // Line selection uses raw positionMs directly to avoid steady-state lag.
-    val smoothedPosition = remember { Animatable(positionMs.toFloat()) }
-    LaunchedEffect(positionMs) {
-        val delta = (positionMs.toFloat() - smoothedPosition.value).absoluteValue
-        if (delta > 1000f) {
-            smoothedPosition.snapTo(positionMs.toFloat())
-        } else {
-            smoothedPosition.animateTo(
-                targetValue = positionMs.toFloat(),
-                animationSpec = tween(durationMillis = 280, easing = LinearEasing)
-            )
+    // Project position forward from the last poll using the monotonic clock, so word
+    // emphasis tracks real audio at frame rate instead of trailing behind the 300 ms
+    // poll cadence. Held as a State<Long> (not a delegated Long) because the
+    // derivedStateOf below needs to observe the underlying State directly — a local
+    // `val` captured by the remember'd lambda would freeze at its first value.
+    val syncPositionState = produceState(initialValue = positionMs, positionMs, isPlaying) {
+        if (!isPlaying) {
+            value = positionMs
+            return@produceState
+        }
+        val anchorPos = positionMs
+        val anchorClock = SystemClock.elapsedRealtime()
+        while (true) {
+            withFrameNanos { }
+            value = anchorPos + (SystemClock.elapsedRealtime() - anchorClock)
         }
     }
-    val syncPositionMs = smoothedPosition.value.toLong()
+    val syncPositionMs = syncPositionState.value
     val lyricsState by lyricsStateFlow.collectAsStateWithLifecycle()
     val playbackProgress = if (durationMs > 0) positionMs.toFloat() / durationMs else 0f
     val listState = rememberLazyListState()
@@ -2203,22 +2348,33 @@ private fun LyricsPanel(
     }
 
     val syncedLines = (lyricsState as? LyricsState.Loaded)?.takeIf { it.isSynced }?.lines
-    val currentLineIndex = remember(positionMs, syncedLines) {
-        syncedLines?.let { lines ->
-            var lo = 0
-            var hi = lines.size - 1
-            var result = -1
-            while (lo <= hi) {
-                val mid = (lo + hi) ushr 1
-                if (lines[mid].timeMs <= positionMs) {
-                    result = mid
-                    lo = mid + 1
-                } else {
-                    hi = mid - 1
+    // Reads syncPositionState.value INSIDE the derivedStateOf block — that's what
+    // registers it with the snapshot system so the lambda re-evaluates each frame the
+    // position changes. Reading the parent's captured `syncPositionMs` Long would
+    // freeze the active line at index 0 (a remember'd lambda only ever sees the
+    // locals captured the first time it ran).
+    //
+    // The 100 ms lookahead biases the transition slightly ahead of the line's
+    // timestamp, matching the Apple-Music-style "anticipate the next line" feel.
+    val currentLineIndex by remember(syncedLines) {
+        derivedStateOf {
+            syncedLines?.let { lines ->
+                val pos = syncPositionState.value + LINE_LOOKAHEAD_MS
+                var lo = 0
+                var hi = lines.size - 1
+                var result = -1
+                while (lo <= hi) {
+                    val mid = (lo + hi) ushr 1
+                    if (lines[mid].timeMs <= pos) {
+                        result = mid
+                        lo = mid + 1
+                    } else {
+                        hi = mid - 1
+                    }
                 }
-            }
-            result.coerceAtLeast(0)
-        } ?: 0
+                result.coerceAtLeast(0)
+            } ?: 0
+        }
     }
 
     var userScrolled by remember { mutableStateOf(false) }
@@ -2240,52 +2396,76 @@ private fun LyricsPanel(
         }
     }
 
+    val providerStates by lyricsProviderStatesFlow.collectAsStateWithLifecycle()
+    val activeProvider = (lyricsState as? LyricsState.Loaded)?.provider
+
     Column(
         modifier = modifier
             .fillMaxSize()
             .background(backgroundColor)
     ) {
         // ── Header ──
-        Box(
+        // Share mode keeps the original centered "Drag to select" layout. The default
+        // mode now uses a Row with "Lyrics" anchored left and the provider switcher
+        // anchored right, with a centered drag handle bar above for visual hint.
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .statusBarsPadding()
-                .padding(horizontal = 8.dp, vertical = 6.dp),
-            contentAlignment = Alignment.Center
+                .padding(horizontal = 16.dp, vertical = 6.dp)
         ) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterHorizontally)
+                    .width(42.dp)
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(100))
+                    .background(Color.White.copy(alpha = 0.42f))
+            )
+            Spacer(Modifier.height(10.dp))
             if (shareMode) {
-                HapticIconButton(
-                    onClick = { onShareModeChange(false) },
-                    modifier = Modifier.align(Alignment.CenterStart)
-                ) {
-                    Icon(
-                        Icons.Rounded.Close,
-                        contentDescription = "Cancel selection",
-                        tint = Color.White,
-                        modifier = Modifier.size(24.dp)
+                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    HapticIconButton(
+                        onClick = { onShareModeChange(false) },
+                        modifier = Modifier.align(Alignment.CenterStart)
+                    ) {
+                        Icon(
+                            Icons.Rounded.Close,
+                            contentDescription = "Cancel selection",
+                            tint = Color.White,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                    Text(
+                        text = "Drag to select · ${selectedLyrics.size}/$MAX_LYRICS_SHARE_LINES",
+                        color = Color.White,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center
                     )
                 }
-            }
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(
-                    modifier = Modifier
-                        .width(42.dp)
-                        .height(4.dp)
-                        .clip(RoundedCornerShape(100))
-                        .background(Color.White.copy(alpha = 0.42f))
-                )
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    text = if (shareMode) {
-                        "Drag to select · ${selectedLyrics.size}/$MAX_LYRICS_SHARE_LINES"
-                    } else {
-                        "Lyrics"
-                    },
-                    color = Color.White,
-                    fontSize = if (shareMode) 18.sp else 24.sp,
-                    fontWeight = FontWeight.Bold,
-                    textAlign = TextAlign.Center
-                )
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "Lyrics",
+                        color = Color.White,
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    if (providerStates.isNotEmpty()) {
+                        LyricsProviderDropdown(
+                            providers = providerStates,
+                            activeProvider = activeProvider,
+                            accentColor = playbackAccent,
+                            onMenuOpen = onLoadAllProviders,
+                            onSelect = onSwitchProvider
+                        )
+                    }
+                }
             }
         }
 
@@ -2845,6 +3025,115 @@ private fun LyricsPanel(
                     }
                 }
             )
+        }
+    }
+}
+
+@Composable
+private fun LyricsProviderDropdown(
+    providers: Map<String, ProviderLoadState>,
+    activeProvider: String?,
+    accentColor: Color,
+    onMenuOpen: () -> Unit,
+    onSelect: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val displayLabel = activeProvider ?: "Provider"
+
+    Box(modifier = modifier) {
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(100))
+                .background(Color.White.copy(alpha = 0.14f))
+                .hapticClickable {
+                    expanded = true
+                    onMenuOpen()
+                }
+                .padding(horizontal = 14.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Text(
+                text = displayLabel,
+                color = Color.White,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Icon(
+                imageVector = Icons.Rounded.ExpandMore,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(18.dp)
+            )
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            shape = RoundedCornerShape(20.dp),
+            containerColor = Color(0xFF1A1A1A),
+            tonalElevation = 0.dp,
+            shadowElevation = 8.dp,
+            modifier = Modifier.widthIn(min = 200.dp)
+        ) {
+            // Preserve the canonical provider order from LyricsHelper, not the map's
+            // iteration order (which depends on insertion sequence at runtime).
+            LyricsHelper.providerNames.forEach { name ->
+                val state = providers[name] ?: ProviderLoadState.Idle
+                val isActive = name == activeProvider
+                val enabled = state is ProviderLoadState.Loaded && !isActive
+                DropdownMenuItem(
+                    text = {
+                        Column {
+                            Text(
+                                text = name,
+                                fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Medium,
+                                color = if (isActive) accentColor
+                                else if (state is ProviderLoadState.Unavailable) Color.White.copy(alpha = 0.38f)
+                                else Color.White
+                            )
+                            val sub = when (state) {
+                                is ProviderLoadState.Loaded -> if (state.snapshot.isSynced) "Synced" else "Plain lyrics"
+                                ProviderLoadState.Loading -> "Loading…"
+                                ProviderLoadState.Idle -> "Tap to load"
+                                ProviderLoadState.Unavailable -> "Unavailable"
+                            }
+                            Text(
+                                text = sub,
+                                fontSize = 11.sp,
+                                color = Color.White.copy(alpha = 0.55f)
+                            )
+                        }
+                    },
+                    leadingIcon = {
+                        when {
+                            isActive -> Icon(
+                                imageVector = Icons.Rounded.CheckCircle,
+                                contentDescription = "Active",
+                                tint = accentColor,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            state is ProviderLoadState.Loading -> CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                color = Color.White.copy(alpha = 0.7f),
+                                strokeWidth = 2.dp
+                            )
+                            else -> Spacer(Modifier.size(20.dp))
+                        }
+                    },
+                    enabled = enabled,
+                    colors = MenuDefaults.itemColors(
+                        textColor = Color.White,
+                        disabledTextColor = Color.White.copy(alpha = 0.5f)
+                    ),
+                    onClick = {
+                        expanded = false
+                        onSelect(name)
+                    }
+                )
+            }
         }
     }
 }
