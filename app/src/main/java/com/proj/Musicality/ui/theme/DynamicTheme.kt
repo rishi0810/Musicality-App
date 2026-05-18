@@ -353,7 +353,7 @@ private fun buildMediaBackdropPalette(
     )
 }
 
-private fun defaultMediaBackdropPalette(surface: Color): MediaBackdropPalette {
+internal fun defaultMediaBackdropPalette(surface: Color): MediaBackdropPalette {
     val s = GradientSurface
     val top = lerp(s, Color.Black, 0.12f)
     val middle = lerp(s, Color.Black, 0.22f)

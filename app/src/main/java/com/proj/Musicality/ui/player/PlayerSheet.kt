@@ -172,6 +172,7 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -190,7 +191,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.core.content.FileProvider
-import androidx.core.graphics.ColorUtils
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import coil3.request.CachePolicy
@@ -210,7 +210,7 @@ import com.proj.Musicality.ui.components.HapticIconButton
 import com.proj.Musicality.ui.components.hapticClickable
 import com.proj.Musicality.ui.theme.LocalPlaybackBackdropPalette
 import com.proj.Musicality.ui.theme.LocalPlaybackUiPalette
-import com.proj.Musicality.ui.theme.rememberMediaBackdropPalette
+import com.proj.Musicality.ui.theme.defaultMediaBackdropPalette
 import com.proj.Musicality.config.AppConfig
 import com.proj.Musicality.util.formatMs
 import com.proj.Musicality.util.toCleanSongTitle
@@ -361,14 +361,14 @@ fun PlayerSheet(
     LaunchedEffect(item.videoId, artworkUrl) {
         Log.d(TAG, "PlayerSheet hero artwork url=$artworkUrl for videoId=${item.videoId}")
     }
-    val sharedBackdropPalette = LocalPlaybackBackdropPalette.current
-    // Reuse the root palette when available so first playback doesn't decode
-    // and extract the same artwork colors twice in parallel.
-    val mediaPalette = sharedBackdropPalette ?: rememberMediaBackdropPalette(
-        imageUrl = artworkUrl,
-        fallbackSurface = surface,
-        animateTransitions = false
-    )
+    // Always read the root-provided palette. Running a parallel extraction here
+    // would diverge in timing (root animates, this one didn't) and produce
+    // visibly mismatched colors between the mini/full player and consumers like
+    // the bottom nav bar. When the root palette is briefly null (no artwork
+    // available yet) fall back to the synchronous default so every component
+    // still sees a consistent value.
+    val mediaPalette = LocalPlaybackBackdropPalette.current
+        ?: remember(surface) { defaultMediaBackdropPalette(surface) }
     val primary = mediaPalette.accent
     val onSurface = mediaPalette.title
     val onSurfaceVariant = mediaPalette.body
@@ -450,13 +450,19 @@ fun PlayerSheet(
         handleBackCta()
     }
 
-    // Keep collapsed state fully off, but start tinting immediately once expansion begins.
-    // This avoids a visible "nothing, then sudden color" threshold while dragging.
-    val playerBackgroundAlpha = run {
-        val t = clampedExpandProgress.coerceIn(0f, 1f)
-        val smoothstep = t * t * (3f - 2f * t)
-        smoothstep * 0.96f
-    }
+    // Anchor the gradient brush to a fixed screen-sized reference rather than the
+    // sheet's current bounds. Without this, the gradient stops would squash into
+    // the 74dp mini bar when collapsed and then stretch out as the sheet expanded
+    // — which is exactly what made the mini bar and the expanded full player show
+    // different colors at the same on-screen Y position during the transition.
+    // With a fixed reference, the top of the gradient is always `mediaPalette.top`
+    // at the very top of the sheet regardless of how tall the sheet currently is,
+    // so the mini bar's `top`-tinted background lines up pixel-for-pixel with the
+    // expanded gradient at the same location.
+    val configuration = LocalConfiguration.current
+    val sheetDensity = LocalDensity.current
+    val gradientReferenceWidthPx = with(sheetDensity) { configuration.screenWidthDp.dp.toPx() }
+    val gradientReferenceHeightPx = with(sheetDensity) { configuration.screenHeightDp.dp.toPx() }
 
     Box(
         modifier = Modifier.fillMaxSize()
@@ -464,9 +470,9 @@ fun PlayerSheet(
         // Memoize gradient colors to avoid allocations during animation frames
         val meshGradientColors = remember(mediaPalette.top, mediaPalette.middle, mediaPalette.bottom) {
             listOf(
-                mediaPalette.top.copy(alpha = 0.96f),
-                mediaPalette.middle.copy(alpha = 0.84f),
-                mediaPalette.bottom.copy(alpha = 0.98f)
+                mediaPalette.top,
+                mediaPalette.middle,
+                mediaPalette.bottom
             )
         }
         val meshGlowColors = remember(mediaPalette.accent, mediaPalette.middle) {
@@ -482,27 +488,35 @@ fun PlayerSheet(
             modifier = Modifier
                 .fillMaxSize()
                 .drawBehind {
-                    // Opaque surface base — gradient colors have alpha < 1, so this prevents bleed-through
+                    // Opaque surface base in case the brush has any transparency
                     drawRect(surface)
                     drawRect(
                         brush = Brush.linearGradient(
                             colors = meshGradientColors,
                             start = Offset(0f, 0f),
-                            end = Offset(size.width, size.height)
+                            end = Offset(
+                                gradientReferenceWidthPx,
+                                gradientReferenceHeightPx
+                            )
                         )
                     )
                     drawCircle(
                         brush = Brush.radialGradient(
                             colors = meshGlowColors,
-                            center = Offset(size.width, size.height),
-                            radius = size.maxDimension * 0.7f
+                            center = Offset(
+                                gradientReferenceWidthPx,
+                                gradientReferenceHeightPx
+                            ),
+                            radius = gradientReferenceHeightPx * 0.7f
                         ),
-                        center = Offset(size.width, size.height),
-                        radius = size.maxDimension * 0.7f
+                        center = Offset(
+                            gradientReferenceWidthPx,
+                            gradientReferenceHeightPx
+                        ),
+                        radius = gradientReferenceHeightPx * 0.7f
                     )
                     drawRect(meshTintColor)
                 }
-                .graphicsLayer { alpha = playerBackgroundAlpha }
         )
 
         val effectiveFullContentAlpha = fullContentAlpha
@@ -1268,13 +1282,14 @@ fun PlayerSheet(
         }
 
         // ── Mini player with horizontal swipe ──
-        val miniContainerColor = remember(mediaPalette.middle, mediaPalette.bottom) {
-            opaqueColorForWhiteForeground(
-                lerp(mediaPalette.middle, mediaPalette.bottom, 0.48f).copy(alpha = 1f)
-            )
-        }
-        val miniTitleColor = readableContentColor(miniContainerColor)
-        val miniSubtitleColor = miniTitleColor.copy(alpha = 0.78f)
+        // Use the top of the same gradient that paints the full player so the
+        // mini bar's solid color matches the color the expanded background
+        // shows at the mini bar's on-screen position. Combined with the fixed
+        // gradient anchor above, this makes the collapse/expand transition
+        // visually continuous — no color jump between the two states.
+        val miniContainerColor = mediaPalette.top
+        val miniTitleColor = mediaPalette.title
+        val miniSubtitleColor = mediaPalette.body
         MiniPlayerBar(
             positionMsFlow = positionMsFlow,
             durationMs = state.durationMs,
@@ -3621,26 +3636,4 @@ private fun showCrossfadeCue(
 
 private fun lerpFloat(start: Float, end: Float, fraction: Float): Float {
     return start + (end - start) * fraction.coerceIn(0f, 1f)
-}
-
-private fun readableContentColor(background: Color): Color {
-    val blackContrast = ColorUtils.calculateContrast(Color.Black.toArgb(), background.toArgb())
-    val whiteContrast = ColorUtils.calculateContrast(Color.White.toArgb(), background.toArgb())
-    return if (blackContrast >= whiteContrast) Color.Black else Color.White
-}
-
-private fun opaqueColorForWhiteForeground(
-    color: Color,
-    minContrast: Double = 4.5
-): Color {
-    val hsl = FloatArray(3)
-    ColorUtils.colorToHSL(color.copy(alpha = 1f).toArgb(), hsl)
-    var candidate = Color(ColorUtils.HSLToColor(hsl)).copy(alpha = 1f)
-    repeat(10) {
-        val contrast = ColorUtils.calculateContrast(Color.White.toArgb(), candidate.toArgb())
-        if (contrast >= minContrast) return candidate
-        hsl[2] = (hsl[2] - 0.06f).coerceAtLeast(0.12f)
-        candidate = Color(ColorUtils.HSLToColor(hsl)).copy(alpha = 1f)
-    }
-    return candidate
 }

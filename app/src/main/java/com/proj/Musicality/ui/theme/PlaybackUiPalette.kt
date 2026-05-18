@@ -20,6 +20,10 @@ data class PlaybackUiPalette(
 val LocalPlaybackUiPalette = staticCompositionLocalOf<PlaybackUiPalette?> { null }
 val LocalPlaybackBackdropPalette = staticCompositionLocalOf<MediaBackdropPalette?> { null }
 
+// When artworkUrl is blank we return null so non-playback consumers can keep
+// their Material defaults. When it's present we always return a non-null
+// palette — the underlying extractor seeds with the default and animates to
+// the real swatches, so every consumer reads the same value at the same time.
 @Composable
 fun rememberPlaybackBackdropPalette(
     artworkUrl: String?
