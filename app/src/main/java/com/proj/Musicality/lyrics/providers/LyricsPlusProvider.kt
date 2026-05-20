@@ -106,15 +106,16 @@ object LyricsPlusProvider : LyricsProvider {
         duration: Int,
         album: String?,
     ): Result<String> = runCatching {
-        val binimum = fetchBinimum(id, title, artist, duration, album)
-        if (binimum?.isWordSync == true) return@runCatching binimum.lrc
-
+        // Binimum (fetchBinimum / resolve) is intentionally bypassed: as of 2026-05
+        // lyrics-api.binimum.org returns 404 "Application not found" after ~22s TTFB,
+        // adding ~15s (Ktor request timeout) of dead wait to every fetch. The mirrors
+        // below already serve word-sync lyrics with `syllabus[]`, so we lose nothing.
+        // Helpers are kept on disk so the branch is one edit away if upstream returns.
         val jsonResponse = fetchLyricsPlus(title, artist, duration, album)
-        val jsonLrc = convertToLrc(jsonResponse)
-        resolve(binimum, jsonResponse, jsonLrc)
-            ?: throw IllegalStateException("No LyricsPlus match")
+        convertToLrc(jsonResponse) ?: throw IllegalStateException("No LyricsPlus match")
     }
 
+    @Suppress("unused")
     private fun resolve(
         binimum: BinimumFetch?,
         response: LyricsPlusResponse?,
@@ -160,6 +161,7 @@ object LyricsPlusProvider : LyricsProvider {
         return null
     }
 
+    @Suppress("unused")
     private suspend fun fetchBinimum(
         id: String,
         title: String,

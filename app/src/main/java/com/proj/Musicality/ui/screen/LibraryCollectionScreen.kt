@@ -121,7 +121,7 @@ fun LibraryCollectionScreen(
     }
 
     val title = when (collectionType) {
-        LibraryCollectionType.LIKED -> "Songs"
+        LibraryCollectionType.LIKED -> "Liked Songs"
         LibraryCollectionType.TOP_SONGS -> "Top Songs"
         LibraryCollectionType.DOWNLOADED -> "Downloads"
         LibraryCollectionType.PLAYED -> "Played"

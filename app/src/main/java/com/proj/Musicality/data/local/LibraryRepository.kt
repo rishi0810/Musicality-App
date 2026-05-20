@@ -442,9 +442,7 @@ class LibraryRepository private constructor(
             Log.d(TAG, "PlayedCache: lock acquired for '${item.videoId}'")
             val existing = db.getPlayedCacheEntry(item.videoId)
             if (existing != null) {
-                Log.d(TAG, "PlayedCache: already cached '${item.videoId}', updating timestamp")
-                db.upsertPlayedCacheEntry(existing.copy(cachedAt = System.currentTimeMillis()))
-                _snapshot.value = loadSnapshot()
+                Log.d(TAG, "PlayedCache: already cached '${item.videoId}', skipping timestamp update")
                 return@withLock
             }
 
@@ -568,7 +566,19 @@ class LibraryRepository private constructor(
         val likedSongs = db.getLikedSongs()
             .sortedByDescending { it.dateAdded }
             .map { it.toMediaItem() }
-        val topSongs = likedSongs
+        val topSongs = db.getTopPlayedSongs(50).map { row ->
+            MediaItem(
+                videoId = row.videoId,
+                title = row.title,
+                artistName = row.artistName,
+                artistId = row.artistId,
+                albumName = null,
+                albumId = null,
+                thumbnailUrl = row.thumbnailUrl,
+                durationText = null,
+                musicVideoType = "MUSIC_VIDEO_TYPE_ATV"
+            )
+        }
 
         val downloadedSongs = db.getDownloadedSongs()
         val downloadedVideos = db.getDownloadedVideos()

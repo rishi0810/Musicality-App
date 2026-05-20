@@ -1282,12 +1282,13 @@ fun PlayerSheet(
         }
 
         // ── Mini player with horizontal swipe ──
-        // Use the top of the same gradient that paints the full player so the
-        // mini bar's solid color matches the color the expanded background
-        // shows at the mini bar's on-screen position. Combined with the fixed
-        // gradient anchor above, this makes the collapse/expand transition
-        // visually continuous — no color jump between the two states.
-        val miniContainerColor = mediaPalette.top
+        // Use `bottom` so the mini bar matches the other solid surfaces in the
+        // playback UI (lyrics screen, queue sheet, floating controls) rather than
+        // matching the top of the expanded gradient. The mini bar fades out by
+        // ~25% expand progress (see miniContentAlpha), so any momentary mismatch
+        // with the gradient's top edge during the transition is masked by the
+        // crossfade.
+        val miniContainerColor = mediaPalette.bottom
         val miniTitleColor = mediaPalette.title
         val miniSubtitleColor = mediaPalette.body
         MiniPlayerBar(

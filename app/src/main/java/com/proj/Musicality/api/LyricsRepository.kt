@@ -15,9 +15,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * Ported multi-provider lyrics flow: races LrcLib / BetterLyrics / LyricsPlus and
- * returns the first (highest-priority) winner. Supports word-level timing when the
- * winning provider gives us an extended LRC block.
+ * Multi-provider lyrics flow: tries LyricsPlus first, falls back to LrcLib.
+ * Supports word-level timing when the active provider returns extended LRC.
  */
 object LyricsRepository {
     private const val TAG = "LyricsRepository"

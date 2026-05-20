@@ -238,7 +238,7 @@ private fun YouLibrarySection(
 ) {
     val collections = remember(snapshot) {
         listOf(
-            Triple("Songs", "${snapshot.likedSongs.size} items", LibraryCollectionType.LIKED),
+            Triple("Liked Songs", "${snapshot.likedSongs.size} items", LibraryCollectionType.LIKED),
             Triple("Top Songs", "${snapshot.topSongs.size} items", LibraryCollectionType.TOP_SONGS),
             Triple("Downloads", "${snapshot.downloadedMedia.size} items", LibraryCollectionType.DOWNLOADED),
             Triple("Played", "${snapshot.playedSongs.size} items", LibraryCollectionType.PLAYED)

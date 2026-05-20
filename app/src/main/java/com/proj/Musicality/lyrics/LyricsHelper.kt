@@ -6,33 +6,30 @@ import com.proj.Musicality.lyrics.providers.BetterLyricsProvider
 import com.proj.Musicality.lyrics.providers.LrcLibProvider
 import com.proj.Musicality.lyrics.providers.LyricsPlusProvider
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 
 data class LyricsWithProvider(val lrc: String, val provider: String)
 
 /**
- * Orchestrates a tiered race across the enabled providers.
- * Simplified vs. upstream: provider order is fixed (no DataStore / no user
- * reordering), all providers are always "enabled".
+ * Sequential lyrics fetch across enabled providers.
+ * Order matters: the first provider that returns a usable LRC wins, no race.
+ *
+ * BetterLyrics is intentionally excluded from [providers] right now (its
+ * upstream has been unreliable). The class is still imported and kept on
+ * disk so re-enabling it later is a one-line change.
  */
 object LyricsHelper {
 
     private const val TAG = "LyricsHelper"
     private const val MAX_LYRICS_FETCH_MS = 30_000L
-    private const val GRACE_PERIOD_MS = 4_000L
-    private const val TIER_SIZE = 2
     private const val MAX_CACHE_SIZE = 64
 
+    @Suppress("unused")
+    private val disabledProviders: List<LyricsProvider> = listOf(BetterLyricsProvider)
+
     private val providers: List<LyricsProvider> = listOf(
-        BetterLyricsProvider,   // Apple-Music-style word sync, highest quality
-        LyricsPlusProvider,     // Word sync via Binimum + LyricsPlus mirrors
-        LrcLibProvider,         // Line-level, widest coverage
+        LyricsPlusProvider,     // Primary: word-sync via Binimum + LyricsPlus mirrors
+        LrcLibProvider,         // Fallback: line-level, widest coverage
     )
 
     /** Ordered, stable display names — drives the provider-switch dropdown. */
@@ -41,7 +38,7 @@ object LyricsHelper {
     private val cache = LruCache<String, LyricsWithProvider>(MAX_CACHE_SIZE)
 
     // Per-(provider, cacheKey) cache so the switch dropdown is instant on second open
-    // and so the race + lazy-load paths don't duplicate work for the same track.
+    // and so the sequential fetch + lazy-load paths don't duplicate work for the same track.
     private val providerCache = LruCache<String, LyricsWithProvider>(MAX_CACHE_SIZE * 2)
 
     private fun providerCacheKey(providerName: String, cacheKey: String) =
@@ -86,101 +83,48 @@ object LyricsHelper {
         cache.get(cacheKey)?.let { return it }
 
         val cleanedTitle = cleanTitleForSearch(title)
-        val winner = withTimeoutOrNull(MAX_LYRICS_FETCH_MS) {
-            raceProviders(cacheKey, id, cleanedTitle, artist, duration, album)
+        val result = withTimeoutOrNull(MAX_LYRICS_FETCH_MS) {
+            fetchSequential(cacheKey, id, cleanedTitle, artist, duration, album)
         }
 
-        if (winner != null) {
-            val filtered = winner.copy(lrc = filterLyricsCreditLines(winner.lrc, title, artist))
+        if (result != null) {
+            val filtered = result.copy(lrc = filterLyricsCreditLines(result.lrc, title, artist))
             cache.put(cacheKey, filtered)
             return filtered
         }
         return null
     }
 
-    private suspend fun raceProviders(
+    private suspend fun fetchSequential(
         cacheKey: String,
         id: String,
         title: String,
         artist: String,
         duration: Int,
         album: String?,
-    ): LyricsWithProvider? = coroutineScope {
-        val channel = Channel<Pair<Int, LyricsWithProvider?>>(capacity = providers.size)
-        val launched = mutableListOf<Job>()
-
-        // Launch the first tier.
-        for (i in 0 until minOf(TIER_SIZE, providers.size)) {
-            launched += launchProvider(i, providers[i], cacheKey, id, title, artist, duration, album, channel)
-        }
-
-        var nextTier = TIER_SIZE
-        var bestIndex = Int.MAX_VALUE
-        var bestResult: LyricsWithProvider? = null
-        val remaining = (0 until providers.size).toMutableSet()
-
-        val collector = launch {
-            for ((index, res) in channel) {
-                remaining.remove(index)
-                if (res != null && index < bestIndex) {
-                    bestIndex = index
-                    bestResult = res
-                }
-                // No higher-priority provider can still beat our best? Done.
-                if (remaining.none { it < bestIndex }) {
-                    channel.cancel()
-                    break
-                }
+    ): LyricsWithProvider? {
+        for (provider in providers) {
+            val attempt = try {
+                provider.getLyrics(id, title, artist, duration, album)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "${provider.name} threw", e)
+                continue
             }
-        }
 
-        // Stagger in additional tiers only while we have nothing yet.
-        while (nextTier < providers.size && collector.isActive) {
-            delay(GRACE_PERIOD_MS)
-            if (bestResult == null && collector.isActive) {
-                for (i in nextTier until minOf(nextTier + TIER_SIZE, providers.size)) {
-                    launched += launchProvider(i, providers[i], cacheKey, id, title, artist, duration, album, channel)
-                }
-                nextTier += TIER_SIZE
-            } else break
-        }
-
-        collector.join()
-        launched.forEach { it.cancel() }
-        bestResult
-    }
-
-    private fun CoroutineScope.launchProvider(
-        index: Int,
-        provider: LyricsProvider,
-        cacheKey: String,
-        id: String,
-        title: String,
-        artist: String,
-        duration: Int,
-        album: String?,
-        channel: Channel<Pair<Int, LyricsWithProvider?>>,
-    ): Job = launch {
-        try {
-            val result = provider.getLyrics(id, title, artist, duration, album)
-            if (result.isSuccess) {
-                val lrc = result.getOrNull()!!
-                Log.i(TAG, "${provider.name} won (index=$index)")
-                val out = LyricsWithProvider(lrc, provider.name)
-                // Pre-populate the per-provider cache so the dropdown switch is
-                // instant for any provider that finished its fetch (even ones the
-                // race didn't pick).
-                providerCache.put(providerCacheKey(provider.name, cacheKey), out)
-                channel.send(index to out)
-            } else {
-                Log.d(TAG, "${provider.name} failed: ${result.exceptionOrNull()?.message}")
-                channel.send(index to null)
+            if (attempt.isFailure) {
+                Log.d(TAG, "${provider.name} failed: ${attempt.exceptionOrNull()?.message}")
+                continue
             }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            Log.w(TAG, "${provider.name} threw", e)
-            channel.send(index to null)
+            val lrc = attempt.getOrNull() ?: continue
+            Log.i(TAG, "${provider.name} returned lyrics")
+            val out = LyricsWithProvider(lrc, provider.name)
+            // Pre-populate the per-provider cache so the dropdown is instant if the
+            // user opens it without triggering the lazy-load path.
+            providerCache.put(providerCacheKey(provider.name, cacheKey), out)
+            return out
         }
+        return null
     }
 }
