@@ -14,48 +14,27 @@ object StreamRequestResolver {
             return null
         }
 
-        val reelDetails = runCatching {
-            val json = RequestExecutor.executeReelRequest(videoId, streamVisitorId)
+        val firstAttempt = runCatching {
+            val json = RequestExecutor.executePlayerRequest(videoId, streamVisitorId)
             StreamParser.extractSongDetails(json)
         }.onFailure { throwable ->
-            Log.e(TAG, "fetchSongPlaybackDetails: reel request failed for '$videoId'", throwable)
+            Log.e(TAG, "fetchSongPlaybackDetails: player request failed for '$videoId'", throwable)
         }.getOrNull()
 
-        if (!reelDetails?.streamUrl.isNullOrBlank()) {
-            return reelDetails
+        if (!firstAttempt?.streamUrl.isNullOrBlank()) {
+            return firstAttempt
         }
 
-        // If reel returned no playable URL, refresh stream visitor ID once and retry reel.
-        val refreshedStreamVisitorId = VisitorManager.refreshStreamVisitorId()
-        if (refreshedStreamVisitorId.isNotBlank() && refreshedStreamVisitorId != streamVisitorId) {
-            val refreshedReelDetails = runCatching {
-                val json = RequestExecutor.executeReelRequest(videoId, refreshedStreamVisitorId)
-                StreamParser.extractSongDetails(json)
-            }.onFailure { throwable ->
-                Log.e(TAG, "fetchSongPlaybackDetails: reel retry failed for '$videoId'", throwable)
-            }.getOrNull()
-            if (!refreshedReelDetails?.streamUrl.isNullOrBlank()) {
-                return refreshedReelDetails
-            }
-        }
-
-        Log.d(TAG, "fetchSongPlaybackDetails: reel stream URL missing, trying VR player fallback for '$videoId'")
-
-        val browseVisitorId = resolveBrowseVisitorId()
-        if (browseVisitorId.isBlank()) {
-            Log.e(TAG, "fetchSongPlaybackDetails: browse visitor ID unavailable for fallback")
-            return reelDetails
+        val refreshedVisitorId = VisitorManager.refreshStreamVisitorId()
+        if (refreshedVisitorId.isBlank() || refreshedVisitorId == streamVisitorId) {
+            return firstAttempt
         }
 
         return runCatching {
-            val fallbackJson = RequestExecutor.executeVrPlayerRequest(videoId, browseVisitorId)
-            StreamParser.extractSongDetails(fallbackJson)
+            val json = RequestExecutor.executePlayerRequest(videoId, refreshedVisitorId)
+            StreamParser.extractSongDetails(json)
         }.onFailure { throwable ->
-            Log.e(TAG, "fetchSongPlaybackDetails: fallback request failed for '$videoId'", throwable)
-        }.getOrDefault(reelDetails)
-    }
-
-    private suspend fun resolveBrowseVisitorId(): String {
-        return VisitorManager.ensureBrowseVisitorId()
+            Log.e(TAG, "fetchSongPlaybackDetails: player retry failed for '$videoId'", throwable)
+        }.getOrDefault(firstAttempt)
     }
 }

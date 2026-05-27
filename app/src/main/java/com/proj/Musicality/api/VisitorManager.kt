@@ -89,7 +89,7 @@ object VisitorManager {
         val current = ensureStreamVisitorId()
         if (current.isBlank()) return@withContext
         val isHealthy = runCatching {
-            val json = RequestExecutor.executeReelRequest(STREAM_HEALTHCHECK_VIDEO_ID, current)
+            val json = RequestExecutor.executePlayerRequest(STREAM_HEALTHCHECK_VIDEO_ID, current)
             val details = StreamParser.extractSongDetails(json)
             !details?.streamUrl.isNullOrBlank()
         }.onFailure {

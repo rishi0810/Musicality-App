@@ -1,7 +1,6 @@
 package com.proj.Musicality.api
 
 import android.util.Log
-import com.proj.Musicality.util.CpnGenerator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -238,103 +237,40 @@ object RequestExecutor {
         }
     }
 
-    suspend fun executeReelRequest(videoId: String, visitorId: String): String = withContext(Dispatchers.IO) {
-        Log.d(TAG, "executeReelRequest: videoId='$videoId', visitorId='${visitorId.take(20)}...' (${visitorId.length} chars)")
+    suspend fun executePlayerRequest(videoId: String, visitorId: String): String = withContext(Dispatchers.IO) {
+        Log.d(TAG, "executePlayerRequest: videoId='$videoId', visitorId='${visitorId.take(20)}...' (${visitorId.length} chars)")
         if (visitorId.isBlank()) {
-            Log.e(TAG, "executeReelRequest: WARNING - visitorId is BLANK! Request will likely fail.")
+            Log.e(TAG, "executePlayerRequest: WARNING - visitorId is BLANK! Request will likely fail.")
         }
 
-        val cpn = CpnGenerator.generate()
-        val url = "${ApiConstants.REEL_URL}?prettyPrint=false&id=$videoId&\$fields=playerResponse"
-        Log.d(TAG, "executeReelRequest: URL=$url")
-
-        val bodyStr = """{"context":{"client":{"clientName":"${ApiConstants.ANDROID_CLIENT_NAME}","clientVersion":"${ApiConstants.ANDROID_CLIENT_VERSION}","clientScreen":"WATCH","platform":"MOBILE","visitorData":"$visitorId","osName":"Android","osVersion":"16","androidSdkVersion":36,"hl":"en-GB","gl":"GB","utcOffsetMinutes":0},"request":{"internalExperimentFlags":[],"useSsl":true},"user":{"lockedSafetyMode":false}},"playerRequest":{"videoId":"$videoId","cpn":"$cpn","contentCheckOk":true,"racyCheckOk":true},"disablePlayerResponse":false}"""
-        val body = bodyStr.trimIndent().toRequestBody(jsonMediaType)
-
-        val request = Request.Builder()
-            .url(url)
-            .addHeader("user-agent", ApiConstants.ANDROID_USER_AGENT)
-            .addHeader("x-goog-api-format-version", "2")
-            .addHeader("content-type", "application/json")
-            .addHeader("accept-language", "en-GB, en;q=0.9")
-            .post(body)
-            .build()
-
-        client.newCall(request).execute().use { response ->
-            val code = response.code
-            val responseBody = response.body?.string() ?: ""
-            Log.d(TAG, "executeReelRequest: HTTP $code, body length=${responseBody.length}")
-            if (code != 200) {
-                Log.e(TAG, "executeReelRequest: NON-200 response: $code")
-                Log.e(TAG, "executeReelRequest: response body (first 500): ${responseBody.take(500)}")
-            } else {
-                Log.d(TAG, "executeReelRequest: response body (first 300): ${responseBody.take(300)}")
-            }
-            responseBody
-        }
-    }
-
-    suspend fun executeVrPlayerRequest(videoId: String, visitorId: String): String = withContext(Dispatchers.IO) {
-        Log.d(
-            TAG,
-            "executeVrPlayerRequest: videoId='$videoId', visitorId='${visitorId.take(20)}...' (${visitorId.length} chars)"
-        )
-        if (visitorId.isBlank()) {
-            Log.e(TAG, "executeVrPlayerRequest: WARNING - visitorId is BLANK! Request will likely fail.")
-        }
-
-        val body = """
-            {
-              "videoId": "$videoId",
-              "context": {
-                "client": {
-                  "clientName": "${ApiConstants.ANDROID_VR_CLIENT_NAME}",
-                  "clientVersion": "${ApiConstants.ANDROID_VR_CLIENT_VERSION}",
-                  "deviceMake": "Oculus",
-                  "deviceModel": "Quest 3",
-                  "androidSdkVersion": 32,
-                  "userAgent": "com.google.android.apps.youtube.vr.oculus/1.71.26 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip",
-                  "osName": "Android",
-                  "osVersion": "12L",
-                  "hl": "en",
-                  "gl": "IN",
-                  "timeZone": "UTC",
-                  "utcOffsetMinutes": 0
-                }
-              },
-              "contentCheckOk": true,
-              "racyCheckOk": true,
-              "playbackContext": {
-                "contentPlaybackContext": {
-                  "html5Preference": "HTML5_PREF_WANTS"
-                }
-              }
-            }
-        """.trimIndent().toRequestBody(jsonMediaType)
+        val body = """{"context":{"client":{"clientName":"${ApiConstants.ANDROID_VR_CLIENT_NAME}","clientVersion":"${ApiConstants.ANDROID_VR_CLIENT_VERSION}","osName":"Android","osVersion":"12","deviceMake":"Oculus","deviceModel":"Quest 3","androidSdkVersion":"32","gl":"US","hl":"en","visitorData":"$visitorId"},"request":{"internalExperimentFlags":[],"useSsl":true},"user":{"lockedSafetyMode":false}},"videoId":"$videoId","contentCheckOk":true,"racyCheckOk":true}"""
+            .toRequestBody(jsonMediaType)
 
         val request = Request.Builder()
             .url(ApiConstants.PLAYER_URL)
-            .addHeader("Content-Type", "application/json")
-            .addHeader(
-                "User-Agent",
-                "com.google.android.apps.youtube.vr.oculus/1.71.26 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip"
-            )
-            .addHeader("X-Youtube-Client-Name", "28")
-            .addHeader("X-Youtube-Client-Version", ApiConstants.ANDROID_VR_CLIENT_VERSION)
-            .addHeader("Origin", "https://www.youtube.com")
-            .addHeader("X-Goog-Visitor-Id", visitorId)
+            .addHeader("x-goog-api-format-version", "1")
+            .addHeader("x-youtube-client-name", "28")
+            .addHeader("x-youtube-client-version", ApiConstants.ANDROID_VR_CLIENT_VERSION)
+            .addHeader("x-origin", "https://music.youtube.com")
+            .addHeader("referer", "https://music.youtube.com/")
+            .addHeader("x-goog-visitor-id", visitorId)
+            .addHeader("user-agent", ApiConstants.ANDROID_VR_USER_AGENT)
+            .addHeader("accept", "application/json")
+            .addHeader("accept-language", "en-US,en;q=0.9")
+            .addHeader("cache-control", "no-cache")
+            .addHeader("content-type", "application/json")
             .post(body)
             .build()
 
         client.newCall(request).execute().use { response ->
             val code = response.code
             val responseBody = response.body?.string() ?: ""
-            Log.d(TAG, "executeVrPlayerRequest: HTTP $code, body length=${responseBody.length}")
+            Log.d(TAG, "executePlayerRequest: HTTP $code, body length=${responseBody.length}")
             if (code != 200) {
-                Log.e(TAG, "executeVrPlayerRequest: NON-200 response: $code")
-                Log.e(TAG, "executeVrPlayerRequest: response body (first 500): ${responseBody.take(500)}")
+                Log.e(TAG, "executePlayerRequest: NON-200 response: $code")
+                Log.e(TAG, "executePlayerRequest: response body (first 500): ${responseBody.take(500)}")
             } else {
-                Log.d(TAG, "executeVrPlayerRequest: response body (first 300): ${responseBody.take(300)}")
+                Log.d(TAG, "executePlayerRequest: response body (first 300): ${responseBody.take(300)}")
             }
             responseBody
         }
