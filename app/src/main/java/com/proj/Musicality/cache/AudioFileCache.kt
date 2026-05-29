@@ -77,10 +77,13 @@ object AudioFileCache {
         }
     }
 
-    /** Unpin all and optionally evict everything except [keep]. */
-    fun unpinAll() {
+    fun unpinAll(except: String? = null) {
         synchronized(stateLock) {
-            pinned.clear()
+            if (except != null) {
+                pinned.retainAll(setOf(except))
+            } else {
+                pinned.clear()
+            }
         }
     }
 

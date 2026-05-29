@@ -47,7 +47,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -76,6 +75,9 @@ import com.proj.Musicality.ui.components.hapticClickable
 import com.proj.Musicality.ui.components.pressScale
 import com.proj.Musicality.ui.components.SectionHeader
 import com.proj.Musicality.ui.components.PageLoader
+import com.proj.Musicality.ui.components.rememberScrimGradient
+import com.proj.Musicality.ui.theme.AppColors
+import com.proj.Musicality.ui.theme.AppSpacing
 import com.proj.Musicality.ui.theme.LocalSharedTransitionScope
 import com.proj.Musicality.ui.theme.MediaBoundsSpring
 import com.proj.Musicality.viewmodel.ExploreViewModel
@@ -122,7 +124,7 @@ fun ExploreScreen(
     if (isOffline) {
         OfflinePanel(
             onExplorePlayed = onExplorePlayed,
-            bottomPadding = collapsedMiniPlayerHeight + 8.dp,
+            bottomPadding = collapsedMiniPlayerHeight + AppSpacing.MiniPlayerBottomExtra,
             modifier = modifier.fillMaxSize()
         )
         return
@@ -149,7 +151,7 @@ fun ExploreScreen(
     ) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = collapsedMiniPlayerHeight + 8.dp)
+            contentPadding = PaddingValues(bottom = collapsedMiniPlayerHeight + AppSpacing.MiniPlayerBottomExtra)
         ) {
             item(key = "explore-top-space") {
                 Spacer(Modifier.height(12.dp))
@@ -173,7 +175,7 @@ fun ExploreScreen(
                     }
                     item(key = "genres-row") {
                         GenresRow(onMoodTap = onMoodTap)
-                        Spacer(Modifier.height(14.dp))
+                        Spacer(Modifier.height(AppSpacing.SectionGap))
                     }
 
                     // ── 1b. Moods (chips, remaining) ──────────────────────────
@@ -182,7 +184,7 @@ fun ExploreScreen(
                     }
                     item(key = "moods-row") {
                         MoodsRow(onMoodTap = onMoodTap)
-                        Spacer(Modifier.height(14.dp))
+                        Spacer(Modifier.height(AppSpacing.SectionGap))
                     }
 
                     // ── 2. Global Top Charts (1 per column) ──────────────────
@@ -199,7 +201,7 @@ fun ExploreScreen(
                                 onAlbumTap = onAlbumTap,
                                 onPlaylistTap = onPlaylistTap
                             )
-                            Spacer(Modifier.height(14.dp))
+                            Spacer(Modifier.height(AppSpacing.SectionGap))
                         }
                     }
 
@@ -220,7 +222,7 @@ fun ExploreScreen(
                                 onArtistTap = onArtistTap,
                                 onPlaylistTap = onPlaylistTap
                             )
-                            Spacer(Modifier.height(14.dp))
+                            Spacer(Modifier.height(AppSpacing.SectionGap))
                         }
                     }
 
@@ -238,7 +240,7 @@ fun ExploreScreen(
                                 onAlbumTap = onAlbumTap,
                                 onPlaylistTap = onPlaylistTap
                             )
-                            Spacer(Modifier.height(14.dp))
+                            Spacer(Modifier.height(AppSpacing.SectionGap))
                         }
                     }
 
@@ -262,7 +264,7 @@ fun ExploreScreen(
                                     onAlbumTap = onAlbumTap,
                                     onPlaylistTap = onPlaylistTap
                                 )
-                                Spacer(Modifier.height(14.dp))
+                                Spacer(Modifier.height(AppSpacing.SectionGap))
                             }
                         }
 
@@ -277,7 +279,7 @@ fun ExploreScreen(
                                     onArtistTap = onArtistTap,
                                     onPlaylistTap = onPlaylistTap
                                 )
-                                Spacer(Modifier.height(14.dp))
+                                Spacer(Modifier.height(AppSpacing.SectionGap))
                             }
                         }
                     }
@@ -295,7 +297,7 @@ fun ExploreScreen(
                                 onAlbumTap = onAlbumTap,
                                 onPlaylistTap = onPlaylistTap
                             )
-                            Spacer(Modifier.height(14.dp))
+                            Spacer(Modifier.height(AppSpacing.SectionGap))
                         }
                     }
                 }
@@ -354,16 +356,7 @@ private fun GenreCard(mood: MoodCategoryParser.Mood, onClick: () -> Unit) {
     val radiusPreset = LocalCornerRadius.current
     val interactionSource = remember { MutableInteractionSource() }
     val shape = RoundedCornerShape(14.dp.scaled(radiusPreset))
-    // Strong scrim covering bottom ~50% of card
-    val scrim = remember {
-        Brush.verticalGradient(
-            colorStops = arrayOf(
-                0.0f to Color.Transparent,
-                0.35f to Color(0x99000000),
-                1.0f to Color(0xF2000000)
-            )
-        )
-    }
+    val scrim = rememberScrimGradient()
 
     Box(
         modifier = Modifier
@@ -385,7 +378,7 @@ private fun GenreCard(mood: MoodCategoryParser.Mood, onClick: () -> Unit) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color(0x28000000))
+                .background(AppColors.ScrimLight)
         )
         // Strong gradient scrim — bottom 50%
         Box(

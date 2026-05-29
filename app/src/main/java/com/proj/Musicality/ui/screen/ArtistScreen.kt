@@ -118,6 +118,9 @@ import com.proj.Musicality.ui.components.hapticClickable
 import com.proj.Musicality.ui.components.SectionHeader
 import com.proj.Musicality.ui.components.SongListItem
 import com.proj.Musicality.ui.components.Thumbnail
+import com.proj.Musicality.ui.theme.AppColors
+import com.proj.Musicality.ui.theme.AppShapes
+import com.proj.Musicality.ui.theme.AppTypography
 import com.proj.Musicality.ui.theme.ForceGradientStatusBar
 import com.proj.Musicality.ui.theme.GradientTheme
 import com.proj.Musicality.ui.theme.LocalSharedTransitionScope
@@ -206,7 +209,7 @@ fun ArtistScreen(
     }
     val gradientPrimary = sortedPaletteByLightness[0]
     val gradientSecondary = sortedPaletteByLightness[1]
-    val gradientDarkBase = Color(0xFF0D0D0D)
+    val gradientDarkBase = AppColors.ArtistGradientBase
     val seamOverlapPx = with(density) { 6.dp.toPx() }
     val contentGradientStartPx = with(density) { (ArtistHeaderBaseHeight + statusBarTop - 10.dp).toPx() }
     LaunchedEffect(thumbUrl) {
@@ -642,7 +645,7 @@ private fun ArtistTopSongActionsSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
+        shape = AppShapes.bottomSheet(),
         containerColor = MaterialTheme.colorScheme.surface
     ) {
         Column(modifier = Modifier.padding(bottom = 16.dp)) {
@@ -791,7 +794,7 @@ private fun ArtistTopSongSheetHeader(model: ArtistTopSongMenuModel) {
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
                     .size(56.dp)
-                    .clip(RoundedCornerShape(12.dp))
+                    .clip(AppShapes.thumbnailLarge())
             )
             Spacer(Modifier.width(16.dp))
         }
@@ -835,8 +838,8 @@ private fun ArtistHeroHeader(
     onAdd: () -> Unit,
     heroModifier: Modifier = Modifier
 ) {
-    val ctaContainerColor = Color(0xFF07080B)
-    val ctaContentColor = Color(0xFFF6F7FB)
+    val ctaContainerColor = AppColors.ArtistCtaContainer
+    val ctaContentColor = AppColors.ArtistCtaContent
     val context = LocalContext.current
     val heroRequest = remember(context, thumbnailUrl, allowNetworkFetch) {
         ImageRequest.Builder(context).apply {
@@ -902,8 +905,7 @@ private fun ArtistHeroHeader(
             ) {
                 Text(
                     text = name,
-                    style = MaterialTheme.typography.headlineLarge,
-                    fontWeight = FontWeight.Bold,
+                    style = AppTypography.PageTitle,
                     color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
@@ -940,10 +942,10 @@ private fun ArtistActionButtons(
     onPlay: () -> Unit,
     onShuffle: () -> Unit
 ) {
-    val primaryContainerColor = Color(0xFF07080B)
-    val secondaryContainerColor = Color(0xCC090A0D)
-    val ctaContentColor = Color(0xFFF6F7FB)
-    val ctaBorderColor = Color.White.copy(alpha = 0.14f)
+    val primaryContainerColor = AppColors.ArtistCtaContainer
+    val secondaryContainerColor = AppColors.ArtistCtaContainerVariant
+    val ctaContentColor = AppColors.ArtistCtaContent
+    val ctaBorderColor = AppColors.ArtistCtaBorder
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1095,8 +1097,7 @@ private fun SectionHeaderWithArrow(
     ) {
         Text(
             text = title,
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.ExtraBold
+            style = AppTypography.SectionTitle
         )
         if (showArrow) {
             Row(
@@ -1105,8 +1106,7 @@ private fun SectionHeaderWithArrow(
             ) {
                 Text(
                     text = "More",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.ExtraBold,
+                    style = AppTypography.SectionTitle,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(Modifier.width(4.dp))

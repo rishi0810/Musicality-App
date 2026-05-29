@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Check
@@ -37,7 +36,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -51,6 +49,8 @@ import com.proj.Musicality.data.local.MediaLibraryState
 import com.proj.Musicality.data.model.*
 import com.proj.Musicality.navigation.Route
 import com.proj.Musicality.ui.components.*
+import com.proj.Musicality.ui.theme.AppShapes
+import com.proj.Musicality.ui.theme.AppTypography
 import com.proj.Musicality.ui.theme.ForceGradientStatusBar
 import com.proj.Musicality.ui.theme.GradientTheme
 import com.proj.Musicality.ui.theme.LocalSharedTransitionScope
@@ -196,8 +196,7 @@ fun AlbumScreen(
                 }
                 Text(
                     text = title,
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold,
+                    style = AppTypography.DetailTitle,
                     textAlign = TextAlign.Center,
                     color = mediaPalette.title
                 )
@@ -549,7 +548,7 @@ private fun AlbumTrackActionsSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
+        shape = AppShapes.bottomSheet(),
         containerColor = MaterialTheme.colorScheme.surface
     ) {
         Column(modifier = Modifier.padding(bottom = 16.dp)) {
@@ -566,7 +565,7 @@ private fun AlbumTrackActionsSheet(
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
                         .size(60.dp)
-                        .clip(RoundedCornerShape(12.dp))
+                        .clip(AppShapes.thumbnailLarge())
                         .background(MaterialTheme.colorScheme.surfaceContainerHighest)
                 )
                 Spacer(Modifier.width(16.dp))

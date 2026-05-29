@@ -7,8 +7,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.proj.Musicality.ui.theme.AppTypography
 
 private val PERSONALIZATION_PREFIXES = listOf(
     "Similar to ",
@@ -46,15 +46,13 @@ fun SectionHeader(title: String, modifier: Modifier = Modifier) {
             )
             Text(
                 text = split.second,
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold
+                style = AppTypography.PersonalizedSectionName
             )
         }
     } else {
         Text(
             text = title,
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.ExtraBold,
+            style = AppTypography.SectionTitle,
             modifier = modifier.padding(horizontal = 16.dp, vertical = 12.dp)
         )
     }

@@ -208,6 +208,9 @@ import com.proj.Musicality.lyrics.LyricsHelper
 import com.proj.Musicality.ui.components.pressScale
 import com.proj.Musicality.ui.components.HapticIconButton
 import com.proj.Musicality.ui.components.hapticClickable
+import com.proj.Musicality.ui.theme.AppTypography
+import com.proj.Musicality.ui.theme.AppShapes
+import com.proj.Musicality.ui.theme.AppColors
 import com.proj.Musicality.ui.theme.LocalPlaybackBackdropPalette
 import com.proj.Musicality.ui.theme.LocalPlaybackUiPalette
 import com.proj.Musicality.ui.theme.defaultMediaBackdropPalette
@@ -677,8 +680,7 @@ fun PlayerSheet(
                                 ) { animItem ->
                                     Text(
                                         text = animItem.title.toCleanSongTitle(),
-                                        style = MaterialTheme.typography.headlineSmall,
-                                        fontWeight = FontWeight.Bold,
+                                        style = AppTypography.DetailTitle,
                                         maxLines = 1,
                                         color = onSurface,
                                         textAlign = TextAlign.Center,
@@ -1004,7 +1006,7 @@ fun PlayerSheet(
                     showOptionsSheet = false
                 },
                 sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-                shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
+                shape = AppShapes.bottomSheet(),
                 containerColor = MaterialTheme.colorScheme.surface
             ) {
                 Column(modifier = Modifier.padding(bottom = 16.dp)) {
@@ -1025,13 +1027,13 @@ fun PlayerSheet(
                                 contentScale = ContentScale.Crop,
                                 modifier = Modifier
                                     .size(56.dp)
-                                    .clip(RoundedCornerShape(12.dp))
+                                    .clip(AppShapes.thumbnailLarge())
                             )
                         } else {
                             Box(
                                 modifier = Modifier
                                     .size(56.dp)
-                                    .clip(RoundedCornerShape(12.dp))
+                                    .clip(AppShapes.thumbnailLarge())
                                     .background(MaterialTheme.colorScheme.surfaceVariant),
                                 contentAlignment = Alignment.Center
                             ) {
@@ -1563,8 +1565,8 @@ private fun ExpandedPlaybackProgressSection(
         if (isLoading) {
             LoadingPlaybackBar(
                 modifier = Modifier.fillMaxWidth(),
-                color = Color.White.copy(alpha = 0.55f),
-                trackColor = Color(0xFF6A6A6A).copy(alpha = 0.55f),
+                color = AppColors.PlayerProgress.copy(alpha = 0.55f),
+                trackColor = AppColors.PlayerTrack.copy(alpha = 0.55f),
                 height = 12.dp
             )
         } else {
@@ -1574,8 +1576,8 @@ private fun ExpandedPlaybackProgressSection(
                 onSeek = onSeek,
                 onInteractingChange = onProgressBarInteractingChange,
                 modifier = Modifier.fillMaxWidth(),
-                color = Color.White,
-                trackColor = Color(0xFF6A6A6A),
+                color = AppColors.PlayerProgress,
+                trackColor = AppColors.PlayerTrack,
                 trackHeight = 6.dp,
                 expandedTrackHeight = 12.dp
             )
@@ -2203,7 +2205,7 @@ private fun CrossfadeCountdownCue(
         contentAlignment = Alignment.Center
     ) {
         if (cueAlpha > 0f) {
-            val labelColor = Color(0xFFB9BDC2).copy(alpha = (0.72f * cueAlpha).coerceIn(0f, 1f))
+            val labelColor = AppColors.PlayerLabelDim.copy(alpha = (0.72f * cueAlpha).coerceIn(0f, 1f))
             val shimmerTransition = rememberInfiniteTransition(label = "crossfadeShimmer")
             val shimmerProgress by shimmerTransition.animateFloat(
                 initialValue = 0f,

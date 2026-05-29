@@ -18,7 +18,6 @@ import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Arrangement
@@ -111,6 +110,8 @@ import com.proj.Musicality.data.parser.MoodCategoryParser
 import com.proj.Musicality.ui.components.HapticIconButton
 import com.proj.Musicality.ui.components.hapticClickable
 import com.proj.Musicality.ui.components.SongListItem
+import com.proj.Musicality.ui.theme.AppShapes
+import com.proj.Musicality.ui.theme.AppSpacing
 import com.proj.Musicality.ui.theme.LocalPlaybackBackdropPalette
 import com.proj.Musicality.ui.theme.readableContentColor
 import com.proj.Musicality.util.toCompactSongTitle
@@ -196,7 +197,7 @@ fun SearchScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(MaterialTheme.colorScheme.surface)
-                .padding(horizontal = 14.dp, vertical = 6.dp),
+                .padding(horizontal = AppSpacing.ScreenHorizontalPadding, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             AnimatedVisibility(
@@ -210,7 +211,7 @@ fun SearchScreen(
                             .size(50.dp)
                             .clip(CircleShape)
                             .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-                            .clickable {
+                            .hapticClickable {
                                 viewModel.onQueryChange("")
                                 dismissKeyboard()
                                 isSearchFieldFocused = false
@@ -598,7 +599,7 @@ fun SearchScreen(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable {
+                                .hapticClickable {
                                     viewModel.onQueryChange(suggestion.title)
                                     viewModel.onSubmit()
                                     dismissKeyboard()
@@ -970,7 +971,7 @@ private fun SearchResultActionsSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
+        shape = AppShapes.bottomSheet(),
         containerColor = MaterialTheme.colorScheme.surface
     ) {
         Column(modifier = Modifier.padding(bottom = 16.dp)) {
@@ -1044,7 +1045,7 @@ private fun SearchResultActionsSheet(
                             contentScale = ContentScale.Crop,
                             modifier = Modifier
                                 .size(40.dp)
-                                .clip(RoundedCornerShape(8.dp))
+                                .clip(AppShapes.thumbnailMedium())
                                 .background(MaterialTheme.colorScheme.surfaceContainerHighest)
                         )
                     } else {
@@ -1091,7 +1092,7 @@ private fun SearchResultActionsSheet(
                     )
                 },
                 colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                modifier = Modifier.clickable { showMoreInfo = !showMoreInfo }
+                modifier = Modifier.hapticClickable { showMoreInfo = !showMoreInfo }
             )
 
             if (showMoreInfo && model.metadata.isNotEmpty()) {
@@ -1173,7 +1174,7 @@ private fun SearchActionsSheetHeader(model: SearchResultMenuModel) {
         Box(
             modifier = Modifier
                 .size(60.dp)
-                .clip(RoundedCornerShape(12.dp))
+                .clip(AppShapes.thumbnailLarge())
                 .background(MaterialTheme.colorScheme.surfaceContainerHighest)
         ) {
             if (thumbUrl != null) {

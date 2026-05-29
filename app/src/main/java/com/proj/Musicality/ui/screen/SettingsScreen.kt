@@ -63,6 +63,9 @@ import com.proj.Musicality.config.ThemeMode
 import com.proj.Musicality.data.local.LibraryRepository
 import com.proj.Musicality.data.local.ListeningHistoryRepository
 import com.proj.Musicality.ui.components.HapticIconButton
+import com.proj.Musicality.ui.theme.AppShapes
+import com.proj.Musicality.ui.theme.AppSpacing
+import com.proj.Musicality.ui.theme.AppTypography
 import com.proj.Musicality.update.AppUpdateManager
 import kotlinx.coroutines.launch
 
@@ -93,7 +96,7 @@ fun SettingsScreen(
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(bottom = collapsedMiniPlayerHeight + 8.dp)
+        contentPadding = PaddingValues(bottom = collapsedMiniPlayerHeight + AppSpacing.MiniPlayerBottomExtra)
     ) {
         item(key = "settings-header") {
             Row(
@@ -111,8 +114,7 @@ fun SettingsScreen(
                 Spacer(Modifier.width(4.dp))
                 Text(
                     text = "Settings",
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Bold
+                    style = AppTypography.PageTitleSecondary
                 )
             }
         }
@@ -443,7 +445,7 @@ private fun SettingsSwitch(
 ) {
     Surface(
         onClick = { onCheckedChange(!checked) },
-        shape = RoundedCornerShape(12.dp),
+        shape = AppShapes.settingsRow(),
         color = MaterialTheme.colorScheme.surface,
         modifier = Modifier
             .fillMaxWidth()
@@ -476,7 +478,7 @@ private fun SettingsAction(
 ) {
     Surface(
         onClick = onClick,
-        shape = RoundedCornerShape(12.dp),
+        shape = AppShapes.settingsRow(),
         color = MaterialTheme.colorScheme.surface,
         modifier = Modifier
             .fillMaxWidth()

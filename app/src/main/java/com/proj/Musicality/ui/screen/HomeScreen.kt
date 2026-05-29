@@ -118,6 +118,11 @@ import com.proj.Musicality.ui.components.Thumbnail
 import com.proj.Musicality.ui.components.hapticClickable
 import com.proj.Musicality.ui.components.hapticCombinedClickable
 import com.proj.Musicality.ui.components.pressScale
+import com.proj.Musicality.ui.components.rememberScrimGradient
+import com.proj.Musicality.ui.theme.AppColors
+import com.proj.Musicality.ui.theme.AppShapes
+import com.proj.Musicality.ui.theme.AppSpacing
+import com.proj.Musicality.ui.theme.AppTypography
 import com.proj.Musicality.ui.theme.LocalPlaybackUiPalette
 import com.proj.Musicality.ui.theme.rememberMediaBackdropPalette
 import com.proj.Musicality.config.LocalCornerRadius
@@ -210,8 +215,7 @@ fun HomeScreen(
             ) {
                 Text(
                     text = "Home",
-                    style = MaterialTheme.typography.headlineLarge,
-                    fontWeight = FontWeight.Bold,
+                    style = AppTypography.PageTitle,
                     modifier = Modifier.weight(1f)
                 )
                 HapticIconButton(onClick = onSettingsTap) {
@@ -220,7 +224,7 @@ fun HomeScreen(
             }
             OfflinePanel(
                 onExplorePlayed = onExplorePlayed,
-                bottomPadding = collapsedMiniPlayerHeight + 8.dp,
+                bottomPadding = collapsedMiniPlayerHeight + AppSpacing.MiniPlayerBottomExtra,
                 modifier = Modifier.weight(1f)
             )
         }
@@ -251,7 +255,7 @@ fun HomeScreen(
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = collapsedMiniPlayerHeight + 8.dp)
+            contentPadding = PaddingValues(bottom = collapsedMiniPlayerHeight + AppSpacing.MiniPlayerBottomExtra)
         ) {
             item(key = "home-title") {
                 Row(
@@ -262,8 +266,7 @@ fun HomeScreen(
                 ) {
                     Text(
                         text = "Home",
-                        style = MaterialTheme.typography.headlineLarge,
-                        fontWeight = FontWeight.Bold,
+                        style = AppTypography.PageTitle,
                         modifier = Modifier.weight(1f)
                     )
                     HapticIconButton(onClick = onSettingsTap) {
@@ -477,7 +480,7 @@ private fun HomeSectionShelf(
                     section = section,
                     onSongTap = onSongTap
                 )
-                Spacer(Modifier.height(14.dp))
+                Spacer(Modifier.height(AppSpacing.SectionGap))
                 return@Column
             }
             SectionLayout.HERO_WITH_TOP_PICKS -> {
@@ -486,7 +489,7 @@ private fun HomeSectionShelf(
                     onSongTap = onSongTap,
                     onSongOverflowClick = onSongOverflowClick
                 )
-                Spacer(Modifier.height(14.dp))
+                Spacer(Modifier.height(AppSpacing.SectionGap))
                 return@Column
             }
             SectionLayout.ALBUM_CAROUSEL -> {
@@ -500,7 +503,7 @@ private fun HomeSectionShelf(
                     section = section,
                     onAlbumTap = onAlbumTap
                 )
-                Spacer(Modifier.height(14.dp))
+                Spacer(Modifier.height(AppSpacing.SectionGap))
                 return@Column
             }
             SectionLayout.SONG_CAROUSEL -> {
@@ -515,7 +518,7 @@ private fun HomeSectionShelf(
                     onSongTap = onSongTap,
                     onSongOverflowClick = onSongOverflowClick
                 )
-                Spacer(Modifier.height(14.dp))
+                Spacer(Modifier.height(AppSpacing.SectionGap))
                 return@Column
             }
             SectionLayout.SONG_FEATURED_MIX -> {
@@ -530,7 +533,7 @@ private fun HomeSectionShelf(
                     onSongTap = onSongTap,
                     onSongOverflowClick = onSongOverflowClick
                 )
-                Spacer(Modifier.height(14.dp))
+                Spacer(Modifier.height(AppSpacing.SectionGap))
                 return@Column
             }
             else -> { /* fall through to existing logic */ }
@@ -659,7 +662,7 @@ private fun HomeSectionShelf(
                     }
                 }
             }
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(AppSpacing.SectionGap))
             return@Column
         }
 
@@ -690,7 +693,7 @@ private fun HomeSectionShelf(
                     }
                 }
             }
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(AppSpacing.SectionGap))
             return@Column
         }
 
@@ -732,7 +735,7 @@ private fun HomeSectionShelf(
                     }
                 }
             }
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(AppSpacing.SectionGap))
             return@Column
         }
 
@@ -821,7 +824,7 @@ private fun HomeSectionShelf(
             }
         }
 
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(AppSpacing.SectionGap))
     }
 }
 
@@ -978,10 +981,10 @@ private fun SongFeaturedMix(
                 Spacer(Modifier.width(10.dp))
                 Box(
                     modifier = Modifier
-                        .size(38.dp)
+                        .size(48.dp)
                         .clip(CircleShape)
                         .background(overflowBg)
-                        .clickable { onSongOverflowClick(featured) },
+                        .hapticClickable(onClick = { onSongOverflowClick(featured) }),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
@@ -997,7 +1000,7 @@ private fun SongFeaturedMix(
                         .size(48.dp)
                         .clip(CircleShape)
                         .background(accent)
-                        .clickable { playTapped() },
+                        .hapticClickable(onClick = { playTapped() }),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
@@ -1076,7 +1079,7 @@ private fun HomeSongActionsSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
+        shape = AppShapes.bottomSheet(),
         containerColor = MaterialTheme.colorScheme.surface
     ) {
         Column(modifier = Modifier.padding(bottom = 16.dp)) {
@@ -1229,14 +1232,14 @@ private fun HomeSongMenuHeader(model: HomeSongMenuModel) {
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
                     .size(60.dp)
-                    .clip(RoundedCornerShape(12.dp))
+                    .clip(AppShapes.thumbnailLarge())
                     .background(MaterialTheme.colorScheme.surfaceContainerHighest)
             )
         } else {
             Box(
                 modifier = Modifier
                     .size(60.dp)
-                    .clip(RoundedCornerShape(12.dp))
+                    .clip(AppShapes.thumbnailLarge())
                     .background(MaterialTheme.colorScheme.surfaceContainerHighest)
             )
         }
@@ -1485,15 +1488,7 @@ private fun HeroContinuePlaying(
     val radiusPreset = LocalCornerRadius.current
     val song = section.items.firstOrNull() as? HomeItem.Song ?: return
     val mediaItem = remember(song) { song.toMediaItem() }
-    val bottomScrim = remember {
-        Brush.verticalGradient(
-            colorStops = arrayOf(
-                0.0f to Color.Transparent,
-                0.35f to Color(0x99000000),
-                1.0f to Color(0xF2000000)
-            )
-        )
-    }
+    val bottomScrim = rememberScrimGradient()
     val queueItems = remember(section.items) {
         section.items.filterIsInstance<HomeItem.Song>().map { it.toMediaItem() }
     }
@@ -1504,7 +1499,7 @@ private fun HeroContinuePlaying(
             .padding(horizontal = 16.dp)
             .height(200.dp)
             .clip(RoundedCornerShape(16.dp.scaled(radiusPreset)))
-            .clickable {
+            .hapticClickable(onClick = {
                 onSongTap(
                     mediaItem,
                     buildHomeSectionQueue(
@@ -1514,7 +1509,7 @@ private fun HeroContinuePlaying(
                         currentIndex = queueItems.indexOfFirst { it.videoId == mediaItem.videoId }
                     )
                 )
-            }
+            })
     ) {
         AsyncImage(
             model = upscaleThumbnail(song.thumbnailUrl, 1080),
@@ -1526,7 +1521,7 @@ private fun HeroContinuePlaying(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color(0x28000000))
+                .background(AppColors.ScrimLight)
         )
         // Strong gradient scrim — bottom area
         Box(

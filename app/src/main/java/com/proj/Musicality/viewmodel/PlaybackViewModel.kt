@@ -74,6 +74,8 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         private const val REWIND_PREVIOUS_WINDOW_MS = 2_000L
         private const val LIBRARY_EXTENSION_SEED_COUNT = 5
         private const val LONG_FORM_THRESHOLD_SECONDS = 900L
+        private const val PLAYED_CACHE_MIN_PLAY_MS = 20_000L
+        private const val MAX_CONSECUTIVE_FAILURES = 3
     }
 
     private val _state = MutableStateFlow(PlaybackState())
@@ -124,6 +126,9 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
     private var lastCrossfadeArrivalTrackId: String? = null
     private var lastCrossfadeArrivalRealtimeMs: Long = 0L
     private var lastRewindRealtimeMs: Long = 0L
+    private var playedCacheTimerJob: Job? = null
+    private var pendingPlayedCacheVideoId: String? = null
+    private var consecutivePlaybackFailures = 0
     private val listeningHistoryRepository =
         ListeningHistoryRepository.getInstance(application.applicationContext)
     private val libraryRepository =
@@ -250,6 +255,8 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
 
             override fun onPlayerError(error: PlaybackException) {
                 Log.e(TAG, "onPlayerError: code=${error.errorCode} msg=${error.localizedMessage}", error.cause)
+                val failedId = _state.value.currentItem?.videoId ?: return
+                handlePlaybackFailure(failedId, "ExoPlayer error: code=${error.errorCode}")
             }
 
             override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
@@ -713,10 +720,10 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
             }
         }
 
-        // Unpin previous track, pin current
-        AudioFileCache.unpinAll()
+        AudioFileCache.unpinAll(except = pendingPlayedCacheVideoId)
         AudioFileCache.pin(item.videoId)
 
+        playedCacheTimerJob?.cancel()
         fetchAndPlayJob?.cancel()
         fetchAndPlayJob = viewModelScope.launch(Dispatchers.Default) {
             var waited = 0
@@ -726,7 +733,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
             }
             if (activePlayer() == null) {
                 Log.e(TAG, "fetchAndPlay: Service player not available after 5s")
-                clearLoadingIfMatches(item.videoId)
+                withContext(Dispatchers.Main) { handlePlaybackFailure(item.videoId, "player not available") }
                 return@launch
             }
 
@@ -761,7 +768,6 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                 Log.d(TAG, "fetchAndPlay: reusing local file for '${item.videoId}' (${localFile.length() / 1024}KB)")
                 val fileUri = localFile.toURI().toString()
                 startExoPlayback(fileUri, item)
-                cacheToPlayedCollection(item, localFile)
                 return@launch
             }
 
@@ -771,7 +777,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
             // a doomed stream request.
             if (isLocalOnlyQueue(_state.value.queue.source)) {
                 Log.w(TAG, "fetchAndPlay: PLAYED entry '${item.videoId}' has no local file; skipping network fallback")
-                clearLoadingIfMatches(item.videoId)
+                withContext(Dispatchers.Main) { handlePlaybackFailure(item.videoId, "PLAYED entry missing local file") }
                 return@launch
             }
 
@@ -797,7 +803,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                     startLongFormPlayback(playableUrl, item)
                 } else {
                     Log.e(TAG, "fetchAndPlay: stream URL unavailable for long-form '${item.videoId}'")
-                    clearLoadingIfMatches(item.videoId)
+                    withContext(Dispatchers.Main) { handlePlaybackFailure(item.videoId, "long-form stream URL unavailable") }
                 }
                 return@launch
             }
@@ -807,10 +813,10 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                 val fileUri = file.toURI().toString()
                 Log.d(TAG, "fetchAndPlay: playing '${item.videoId}' (${file.length() / 1024}KB)")
                 startExoPlayback(fileUri, item)
-                cacheToPlayedCollection(item, file)
+                startPlayedCacheTimer(item, file)
             } else {
                 Log.e(TAG, "fetchAndPlay: Failed to download audio for '${item.videoId}'")
-                clearLoadingIfMatches(item.videoId)
+                withContext(Dispatchers.Main) { handlePlaybackFailure(item.videoId, "audio download failed") }
             }
         }
     }
@@ -833,6 +839,44 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
 
     private fun clearLoadingIfMatches(videoId: String) {
         _loadingTrackId.update { current -> if (current == videoId) null else current }
+    }
+
+    private fun handlePlaybackFailure(videoId: String, reason: String) {
+        Log.w(TAG, "handlePlaybackFailure: '$videoId' — $reason (consecutive=$consecutivePlaybackFailures)")
+        clearLoadingIfMatches(videoId)
+        consecutivePlaybackFailures++
+        if (consecutivePlaybackFailures >= MAX_CONSECUTIVE_FAILURES) {
+            Log.w(TAG, "handlePlaybackFailure: $MAX_CONSECUTIVE_FAILURES consecutive failures, stopping")
+            _state.update { it.copy(isPlaying = false) }
+            consecutivePlaybackFailures = 0
+            return
+        }
+        if (_state.value.currentItem?.videoId != videoId) return
+        autoAdvance()
+    }
+
+    private fun startPlayedCacheTimer(item: MediaItem, sourceFile: File) {
+        playedCacheTimerJob?.cancel()
+        pendingPlayedCacheVideoId = item.videoId
+        AudioFileCache.pin(item.videoId)
+        playedCacheTimerJob = viewModelScope.launch {
+            try {
+                while (_positionMs.value < PLAYED_CACHE_MIN_PLAY_MS) {
+                    delay(1_000L)
+                    if (_state.value.currentItem?.videoId != item.videoId) return@launch
+                }
+                withContext(Dispatchers.IO) {
+                    runCatching { libraryRepository.cachePlayedSong(item, sourceFile) }
+                        .onSuccess { Log.d(TAG, "PlayedCache: saved '${item.videoId}' after 30s") }
+                        .onFailure { Log.e(TAG, "PlayedCache: FAILED for '${item.videoId}'", it) }
+                }
+            } finally {
+                if (pendingPlayedCacheVideoId == item.videoId) {
+                    AudioFileCache.unpin(item.videoId)
+                    pendingPlayedCacheVideoId = null
+                }
+            }
+        }
     }
 
     private suspend fun startExoPlayback(url: String, item: MediaItem) {
@@ -862,6 +906,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
             exo.setMediaItem(media3Item)
             exo.prepare()
             exo.play()
+            consecutivePlaybackFailures = 0
             clearLoadingIfMatches(item.videoId)
         }
     }
@@ -919,6 +964,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
             exo.setMediaSource(mediaSource)
             exo.prepare()
             exo.play()
+            consecutivePlaybackFailures = 0
             clearLoadingIfMatches(item.videoId)
         }
     }
@@ -942,7 +988,6 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         } else {
             AudioFileCache.getOrDownload(nextItem.videoId) ?: return null
         }
-        cacheToPlayedCollection(nextItem, file)
         val uri = file.toURI().toString()
         val media3 = androidx.media3.common.MediaItem.Builder()
             .setMediaId(nextItem.videoId)
@@ -982,12 +1027,13 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                     }
                 }
                 maybeExtendLibraryQueueFromCurrentPosition()
+                if (localFile == null) {
+                    startPlayedCacheTimer(nextItem, file)
+                }
             },
             onCrossfadeComplete = {
-                // Crossfade is done. The new active player is already playing.
-                // Re-setup listener on the new active player via the delegating player.
                 withContext(Dispatchers.Main) { setupPlayerListener() }
-                AudioFileCache.unpinAll()
+                AudioFileCache.unpinAll(except = pendingPlayedCacheVideoId)
                 AudioFileCache.pin(nextItem.videoId)
                 prefetchNext(_state.value.queue)
             }
@@ -1082,19 +1128,6 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                     Log.d(TAG, "prefetchNext: downloaded '$nextId' (${it.length() / 1024}KB)")
                 }
             }.onFailure { Log.e(TAG, "prefetchNext: FAILED for '$nextId'", it) }
-        }
-    }
-
-    private fun cacheToPlayedCollection(item: MediaItem, file: File) {
-        viewModelScope.launch(Dispatchers.IO) {
-            Log.d(TAG, "PlayedCache: starting cache for '${item.videoId}' (${item.title}), source=${file.absolutePath}, exists=${file.exists()}, size=${file.length() / 1024}KB")
-            runCatching {
-                libraryRepository.cachePlayedSong(item, file)
-            }.onSuccess {
-                Log.d(TAG, "PlayedCache: cached '${item.videoId}' successfully")
-            }.onFailure {
-                Log.e(TAG, "PlayedCache: FAILED for '${item.videoId}'", it)
-            }
         }
     }
 

@@ -105,6 +105,7 @@ import com.proj.Musicality.R
 import com.proj.Musicality.ui.components.HapticFilledTonalButton
 import com.proj.Musicality.ui.components.HapticIconButton
 import com.proj.Musicality.ui.components.hapticClickable
+import com.proj.Musicality.ui.theme.AppTypography
 import com.proj.Musicality.ui.theme.LocalSharedTransitionScope
 import kotlinx.coroutines.launch
 
@@ -149,8 +150,7 @@ fun LibraryScreen(
             ) {
                 Text(
                     text = "Library",
-                    style = MaterialTheme.typography.headlineLarge,
-                    fontWeight = FontWeight.Bold,
+                    style = AppTypography.PageTitle,
                     modifier = Modifier.align(Alignment.TopStart)
                 )
                 HapticFilledTonalButton(
@@ -589,24 +589,29 @@ private fun MasonryCard(
             }
 
             if (isEditMode) {
-                HapticIconButton(
-                    onClick = { onRequestRemove(entry) },
+                Box(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
-                        .padding(8.dp)
-                        .size(28.dp)
-                        .background(
-                            color = Color.Black.copy(alpha = 0.35f),
-                            shape = RoundedCornerShape(16.dp.scaled(radiusPreset))
-                        )
-                        .clip(RoundedCornerShape(16.dp.scaled(radiusPreset)))
+                        .size(48.dp),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        imageVector = Icons.Rounded.DeleteForever,
-                        contentDescription = "Delete saved item",
-                        tint = Color.White,
-                        modifier = Modifier.size(18.dp)
-                    )
+                    HapticIconButton(
+                        onClick = { onRequestRemove(entry) },
+                        modifier = Modifier
+                            .size(28.dp)
+                            .background(
+                                color = Color.Black.copy(alpha = 0.35f),
+                                shape = RoundedCornerShape(16.dp.scaled(radiusPreset))
+                            )
+                            .clip(RoundedCornerShape(16.dp.scaled(radiusPreset)))
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.DeleteForever,
+                            contentDescription = "Delete saved item",
+                            tint = Color.White,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                 }
             }
 

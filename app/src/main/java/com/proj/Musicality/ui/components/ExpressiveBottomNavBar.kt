@@ -34,6 +34,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import com.proj.Musicality.ui.theme.AppShapes
 import com.proj.Musicality.ui.theme.LocalPlaybackUiPalette
 
 @Immutable
@@ -108,7 +109,7 @@ fun ExpressiveBottomNavBar(
                             .offset { IntOffset(indicatorX.roundToPx(), 0) }
                             .height(indicatorHeight)
                             .width(indicatorWidth)
-                            .clip(RoundedCornerShape(26.dp))
+                            .clip(AppShapes.navIndicator())
                             .background(activeIndicatorColor)
                     )
 
@@ -131,7 +132,7 @@ fun ExpressiveBottomNavBar(
                                 modifier = Modifier
                                     .weight(1f)
                                     .fillMaxSize()
-                                    .clip(RoundedCornerShape(24.dp))
+                                    .clip(AppShapes.navIndicator())
                                     .pressScale(interactionSource)
                                     .hapticClickable(
                                         interactionSource = interactionSource,

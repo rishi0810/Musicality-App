@@ -23,9 +23,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -42,7 +42,11 @@ import com.proj.Musicality.ui.components.hapticClickable
 import com.proj.Musicality.ui.theme.LocalSharedTransitionScope
 import com.proj.Musicality.ui.theme.MediaBoundsSpring
 import com.proj.Musicality.viewmodel.ArtistMoreViewModel
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import com.proj.Musicality.ui.components.pressScale
 import com.proj.Musicality.viewmodel.ArtistMoreViewModelFactory
+import com.proj.Musicality.ui.theme.AppSpacing
+import com.proj.Musicality.ui.theme.AppTypography
 
 @OptIn(ExperimentalSharedTransitionApi::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -68,8 +72,7 @@ fun ArtistMoreScreen(
     ) {
         Text(
             text = seed.sectionTitle,
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.ExtraBold,
+            style = AppTypography.DetailTitle,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
         )
         Text(
@@ -98,7 +101,7 @@ fun ArtistMoreScreen(
                     contentPadding = PaddingValues(
                         start = 16.dp,
                         end = 16.dp,
-                        bottom = collapsedMiniPlayerHeight + 16.dp
+                        bottom = collapsedMiniPlayerHeight + AppSpacing.MiniPlayerBottomExtra
                     )
                 ) {
                     items(s.items, key = { it.browseId }) { item ->
@@ -127,7 +130,7 @@ fun ArtistMoreScreen(
                     contentPadding = PaddingValues(
                         start = 16.dp,
                         end = 16.dp,
-                        bottom = collapsedMiniPlayerHeight + 16.dp
+                        bottom = collapsedMiniPlayerHeight + AppSpacing.MiniPlayerBottomExtra
                     )
                 ) {
                     items(s.items, key = { it.videoId }) { video ->
@@ -171,11 +174,13 @@ private fun VideoGridCard(
     onTap: () -> Unit
 ) {
     val sharedTransitionScope = LocalSharedTransitionScope.current
+    val interactionSource = remember { MutableInteractionSource() }
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .hapticClickable(onClick = onTap)
+            .pressScale(interactionSource)
+            .hapticClickable(interactionSource = interactionSource, indication = null, onClick = onTap)
     ) {
         val thumbModifier = with(sharedTransitionScope) {
             Modifier.sharedElement(

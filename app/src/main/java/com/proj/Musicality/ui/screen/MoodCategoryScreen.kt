@@ -26,7 +26,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -38,6 +37,8 @@ import com.proj.Musicality.ui.components.ContentCard
 import com.proj.Musicality.ui.components.ErrorMessage
 import com.proj.Musicality.ui.components.SectionHeader
 import com.proj.Musicality.ui.components.PageLoader
+import com.proj.Musicality.ui.theme.AppSpacing
+import com.proj.Musicality.ui.theme.AppTypography
 import com.proj.Musicality.viewmodel.MoodCategoryViewModel
 import kotlinx.coroutines.launch
 
@@ -81,13 +82,12 @@ fun MoodCategoryScreen(
     ) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = collapsedMiniPlayerHeight + 8.dp)
+            contentPadding = PaddingValues(bottom = collapsedMiniPlayerHeight + AppSpacing.MiniPlayerBottomExtra)
         ) {
             item(key = "mood-title") {
                 Text(
                     text = mood.label(),
-                    style = MaterialTheme.typography.headlineLarge,
-                    fontWeight = FontWeight.Bold,
+                    style = AppTypography.PageTitle,
                     modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 58.dp, bottom = 10.dp)
                 )
             }
@@ -119,7 +119,7 @@ fun MoodCategoryScreen(
                                     onAlbumTap = onAlbumTap,
                                     onPlaylistTap = onPlaylistTap
                                 )
-                                Spacer(Modifier.height(14.dp))
+                                Spacer(Modifier.height(AppSpacing.SectionGap))
                             }
                         }
                     }

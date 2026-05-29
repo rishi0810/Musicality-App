@@ -62,7 +62,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -84,6 +83,8 @@ import com.proj.Musicality.ui.components.HapticOutlinedButton
 import com.proj.Musicality.ui.components.SongListItem
 import com.proj.Musicality.ui.components.Thumbnail
 import com.proj.Musicality.ui.components.hapticClickable
+import com.proj.Musicality.ui.theme.AppShapes
+import com.proj.Musicality.ui.theme.AppTypography
 import com.proj.Musicality.ui.theme.rememberAlbumColors
 import kotlinx.coroutines.launch
 
@@ -230,8 +231,7 @@ fun LibraryCollectionScreen(
                     Spacer(Modifier.height(20.dp))
                     Text(
                         text = title,
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold,
+                        style = AppTypography.DetailTitle,
                         textAlign = TextAlign.Center
                     )
                     Spacer(Modifier.height(4.dp))
@@ -439,7 +439,7 @@ private fun LibraryTrackActionsSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
+        shape = AppShapes.bottomSheet(),
         containerColor = MaterialTheme.colorScheme.surface
     ) {
         Column(modifier = Modifier.padding(bottom = 16.dp)) {
@@ -555,7 +555,7 @@ private fun LibraryTrackSheetHeader(model: LibraryTrackMenuModel) {
     ) {
         val thumbModifier = Modifier
             .size(56.dp)
-            .clip(RoundedCornerShape(12.dp))
+            .clip(AppShapes.thumbnailLarge())
             .background(MaterialTheme.colorScheme.surfaceContainerHighest)
         if (!thumbUrl.isNullOrBlank()) {
             AsyncImage(
