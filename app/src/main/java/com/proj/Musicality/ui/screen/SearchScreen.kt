@@ -365,7 +365,7 @@ fun SearchScreen(
                                                 },
                                                 onClick = {
                                                     handleAllResultTap(
-                                                        result, onSongTap, onVideoTap, onArtistTap, onAlbumTap, onPlaylistTap
+                                                        result, query, onSongTap, onVideoTap, onArtistTap, onAlbumTap, onPlaylistTap
                                                     )
                                                 }
                                             )
@@ -392,7 +392,7 @@ fun SearchScreen(
                                                 },
                                                 onClick = {
                                                     handleAllResultTap(
-                                                        result, onSongTap, onVideoTap, onArtistTap, onAlbumTap, onPlaylistTap
+                                                        result, query, onSongTap, onVideoTap, onArtistTap, onAlbumTap, onPlaylistTap
                                                     )
                                                 }
                                             )
@@ -434,7 +434,8 @@ fun SearchScreen(
                                                 val queue = PlaybackQueue(
                                                     items = songList.map { it.toMediaItem() },
                                                     currentIndex = index,
-                                                    source = QueueSource.SEARCH
+                                                    source = QueueSource.SEARCH,
+                                                    searchQuery = query
                                                 )
                                                 onSongTap(song.toMediaItem(), queue)
                                             }
@@ -472,7 +473,11 @@ fun SearchScreen(
                                                     )
                                                 )
                                             },
-                                            onClick = { onVideoTap(video.toMediaItem()) }
+                                            onClick = {
+                                                val item = video.toMediaItem()
+                                                val queue = PlaybackQueue(listOf(item), 0, QueueSource.SEARCH, searchQuery = query)
+                                                onSongTap(item, queue)
+                                            }
                                         )
                                     }
                                 }
@@ -718,7 +723,8 @@ fun SearchScreen(
                                             durationText = null,
                                             musicVideoType = "MUSIC_VIDEO_TYPE_OMV"
                                         )
-                                        onVideoTap(item)
+                                        val queue = PlaybackQueue(listOf(item), 0, QueueSource.SEARCH, searchQuery = query)
+                                        onSongTap(item, queue)
                                     }
                                 )
                             }
@@ -917,6 +923,7 @@ private fun buildAllResultMenuModel(result: AllResult): SearchResultMenuModel {
 
 private fun handleAllResultTap(
     result: AllResult,
+    searchQuery: String,
     onSongTap: (MediaItem, PlaybackQueue) -> Unit,
     onVideoTap: (MediaItem) -> Unit,
     onArtistTap: (String, String, String?, String?) -> Unit,
@@ -934,16 +941,16 @@ private fun handleAllResultTap(
                 artistName = "", artistId = null, albumName = null, albumId = null,
                 thumbnailUrl = result.thumb, durationText = null, musicVideoType = "MUSIC_VIDEO_TYPE_OMV"
             )
-            onVideoTap(item)
+            val queue = PlaybackQueue(listOf(item), 0, QueueSource.SEARCH, searchQuery = searchQuery)
+            onSongTap(item, queue)
         }
         else -> {
-            // Default: treat as song
             val item = MediaItem(
                 videoId = result.id, title = result.title,
                 artistName = "", artistId = null, albumName = null, albumId = null,
                 thumbnailUrl = result.thumb, durationText = null, musicVideoType = "MUSIC_VIDEO_TYPE_ATV"
             )
-            val queue = PlaybackQueue(listOf(item), 0, QueueSource.SEARCH)
+            val queue = PlaybackQueue(listOf(item), 0, QueueSource.SEARCH, searchQuery = searchQuery)
             onSongTap(item, queue)
         }
     }

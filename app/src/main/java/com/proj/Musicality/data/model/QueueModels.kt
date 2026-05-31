@@ -6,7 +6,8 @@ import androidx.compose.runtime.Immutable
 data class PlaybackQueue(
     val items: List<MediaItem>,
     val currentIndex: Int,
-    val source: QueueSource
+    val source: QueueSource,
+    val searchQuery: String? = null
 )
 
 enum class QueueSource { HOME, SEARCH, ALBUM, PLAYLIST, ARTIST_TOP_SONGS, LIBRARY, SINGLE, UP_NEXT, PLAYED }

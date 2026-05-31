@@ -383,9 +383,10 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    fun playSingle(item: MediaItem) {
+    fun playSingle(item: MediaItem, searchQuery: String? = null) {
         Log.d(TAG, "playSingle: videoId='${item.videoId}', title='${item.title}'")
-        val queue = PlaybackQueue(listOf(item), 0, QueueSource.SINGLE)
+        val source = if (searchQuery != null) QueueSource.SEARCH else QueueSource.SINGLE
+        val queue = PlaybackQueue(listOf(item), 0, source, searchQuery = searchQuery)
         playQueue(queue)
     }
 

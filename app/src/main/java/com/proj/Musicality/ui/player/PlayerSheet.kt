@@ -41,7 +41,6 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -106,8 +105,6 @@ import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.FilledIconButton
-import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.CircularWavyProgressIndicator
 import androidx.compose.material3.LinearWavyProgressIndicator
@@ -159,7 +156,6 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
@@ -172,7 +168,6 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -217,7 +212,7 @@ import com.proj.Musicality.ui.theme.defaultMediaBackdropPalette
 import com.proj.Musicality.config.AppConfig
 import com.proj.Musicality.util.formatMs
 import com.proj.Musicality.util.toCleanSongTitle
-import com.proj.Musicality.util.toCompactSongTitle
+import com.proj.Musicality.util.toSearchAwareTitle
 import com.proj.Musicality.util.upscaleThumbnail
 import com.proj.Musicality.viewmodel.PlaybackState
 import kotlinx.coroutines.CancellationException
@@ -372,9 +367,14 @@ fun PlayerSheet(
     // still sees a consistent value.
     val mediaPalette = LocalPlaybackBackdropPalette.current
         ?: remember(surface) { defaultMediaBackdropPalette(surface) }
+    val gradientEnabled by AppConfig.playerGradientEnabled.collectAsStateWithLifecycle()
+    val plainOnSurface = MaterialTheme.colorScheme.onSurface
     val primary = mediaPalette.accent
-    val onSurface = mediaPalette.title
-    val onSurfaceVariant = mediaPalette.body
+    val onSurface = if (gradientEnabled) mediaPalette.title else plainOnSurface
+    val onSurfaceVariant = if (gradientEnabled) mediaPalette.body else plainOnSurface.copy(alpha = 0.66f)
+    // Controls sit over the artwork gradient (white reads on any art) in gradient
+    // mode; over a plain themed surface they must track the theme instead.
+    val playerControlColor = if (gradientEnabled) Color.White else plainOnSurface
     val playbackAccent = mediaPalette.accent
     val onPlaybackAccent = mediaPalette.onAccent
     val sharedPlaybackUiPalette = LocalPlaybackUiPalette.current
@@ -453,73 +453,15 @@ fun PlayerSheet(
         handleBackCta()
     }
 
-    // Anchor the gradient brush to a fixed screen-sized reference rather than the
-    // sheet's current bounds. Without this, the gradient stops would squash into
-    // the 74dp mini bar when collapsed and then stretch out as the sheet expanded
-    // — which is exactly what made the mini bar and the expanded full player show
-    // different colors at the same on-screen Y position during the transition.
-    // With a fixed reference, the top of the gradient is always `mediaPalette.top`
-    // at the very top of the sheet regardless of how tall the sheet currently is,
-    // so the mini bar's `top`-tinted background lines up pixel-for-pixel with the
-    // expanded gradient at the same location.
-    val configuration = LocalConfiguration.current
-    val sheetDensity = LocalDensity.current
-    val gradientReferenceWidthPx = with(sheetDensity) { configuration.screenWidthDp.dp.toPx() }
-    val gradientReferenceHeightPx = with(sheetDensity) { configuration.screenHeightDp.dp.toPx() }
-
     Box(
         modifier = Modifier.fillMaxSize()
     ) {
-        // Memoize gradient colors to avoid allocations during animation frames
-        val meshGradientColors = remember(mediaPalette.top, mediaPalette.middle, mediaPalette.bottom) {
-            listOf(
-                mediaPalette.top,
-                mediaPalette.middle,
-                mediaPalette.bottom
-            )
-        }
-        val meshGlowColors = remember(mediaPalette.accent, mediaPalette.middle) {
-            listOf(
-                mediaPalette.accent.copy(alpha = 0.34f),
-                mediaPalette.middle.copy(alpha = 0.16f),
-                Color.Transparent
-            )
-        }
-        val meshTintColor = remember(mediaPalette.bottom) { mediaPalette.bottom.copy(alpha = 0.12f) }
+        val sheetBackground = if (gradientEnabled) mediaPalette.bottom else surface
 
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .drawBehind {
-                    // Opaque surface base in case the brush has any transparency
-                    drawRect(surface)
-                    drawRect(
-                        brush = Brush.linearGradient(
-                            colors = meshGradientColors,
-                            start = Offset(0f, 0f),
-                            end = Offset(
-                                gradientReferenceWidthPx,
-                                gradientReferenceHeightPx
-                            )
-                        )
-                    )
-                    drawCircle(
-                        brush = Brush.radialGradient(
-                            colors = meshGlowColors,
-                            center = Offset(
-                                gradientReferenceWidthPx,
-                                gradientReferenceHeightPx
-                            ),
-                            radius = gradientReferenceHeightPx * 0.7f
-                        ),
-                        center = Offset(
-                            gradientReferenceWidthPx,
-                            gradientReferenceHeightPx
-                        ),
-                        radius = gradientReferenceHeightPx * 0.7f
-                    )
-                    drawRect(meshTintColor)
-                }
+                .background(sheetBackground)
         )
 
         val effectiveFullContentAlpha = fullContentAlpha
@@ -533,6 +475,7 @@ fun PlayerSheet(
                 val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
                 val heroHeight = (maxHeight * PlayerHeroHeightFraction)
                     .coerceIn(PlayerHeroMinHeight, PlayerHeroMaxHeight)
+                val plainArtSide = (maxWidth * 0.78f).coerceAtMost(heroHeight)
                 val gradientSwatchesByLightness = remember(mediaPalette.top, mediaPalette.middle, mediaPalette.bottom) {
                     listOf(mediaPalette.top, mediaPalette.middle, mediaPalette.bottom)
                         .sortedByDescending { it.luminance() }
@@ -555,54 +498,88 @@ fun PlayerSheet(
                         modifier = Modifier
                             .fillMaxSize()
                             .drawBehind {
-                                drawRect(heroBlendColor)
+                                drawRect(if (gradientEnabled) heroBlendColor else surface)
                             }
                     ) {
                     Box(Modifier.fillMaxSize()) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(heroHeight)
-                        ) {
-                            if (queue.items.size > 1 && clampedExpandProgress > 0.95f) {
-                                AlbumArtPager(
-                                    queue = queue,
-                                    onSkipToIndex = onSkipToIndex,
-                                    onDisplayIndexChanged = { displayIndex = it },
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(heroHeight),
-                                    cornerRadius = 0.dp
-                                )
-                            } else {
-                                AsyncImage(
-                                    model = ImageRequest.Builder(context)
-                                        .data(artworkUrl)
-                                        .size(coil3.size.Size.ORIGINAL)
-                                        .crossfade(false)
-                                        .memoryCachePolicy(CachePolicy.ENABLED)
-                                        .build(),
-                                    contentDescription = item.title,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(heroHeight)
-                                )
-                            }
-
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .align(Alignment.BottomCenter)
-                                    .background(Brush.verticalGradient(colorStops = heroGradientStops))
-                            )
+                        if (gradientEnabled) {
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(8.dp)
-                                    .align(Alignment.BottomCenter)
-                                    .background(heroBlendColor)
-                            )
+                                    .height(heroHeight)
+                            ) {
+                                if (queue.items.size > 1 && clampedExpandProgress > 0.95f) {
+                                    AlbumArtPager(
+                                        queue = queue,
+                                        onSkipToIndex = onSkipToIndex,
+                                        onDisplayIndexChanged = { displayIndex = it },
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(heroHeight),
+                                        cornerRadius = 0.dp
+                                    )
+                                } else {
+                                    AsyncImage(
+                                        model = ImageRequest.Builder(context)
+                                            .data(artworkUrl)
+                                            .size(coil3.size.Size.ORIGINAL)
+                                            .crossfade(false)
+                                            .memoryCachePolicy(CachePolicy.ENABLED)
+                                            .build(),
+                                        contentDescription = item.title,
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(heroHeight)
+                                    )
+                                }
+
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .align(Alignment.BottomCenter)
+                                        .background(Brush.verticalGradient(colorStops = heroGradientStops))
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(8.dp)
+                                        .align(Alignment.BottomCenter)
+                                        .background(heroBlendColor)
+                                )
+                            }
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(PlayerControlsTopDistanceFromScreenTop),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                val plainArtShape = RoundedCornerShape(18.dp)
+                                if (queue.items.size > 1 && clampedExpandProgress > 0.95f) {
+                                    AlbumArtPager(
+                                        queue = queue,
+                                        onSkipToIndex = onSkipToIndex,
+                                        onDisplayIndexChanged = { displayIndex = it },
+                                        modifier = Modifier.size(plainArtSide),
+                                        cornerRadius = 18.dp
+                                    )
+                                } else {
+                                    AsyncImage(
+                                        model = ImageRequest.Builder(context)
+                                            .data(artworkUrl)
+                                            .size(coil3.size.Size.ORIGINAL)
+                                            .crossfade(false)
+                                            .memoryCachePolicy(CachePolicy.ENABLED)
+                                            .build(),
+                                        contentDescription = item.title,
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier
+                                            .size(plainArtSide)
+                                            .clip(plainArtShape)
+                                    )
+                                }
+                            }
                         }
 
                         HapticIconButton(
@@ -638,31 +615,12 @@ fun PlayerSheet(
                                 .fillMaxSize()
                                 .padding(top = PlayerControlsTopDistanceFromScreenTop)
                         ) {
-                            // ── Row 1: Like (left) | Song Title (center) | Options (right) ──
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(horizontal = 16.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                HapticIconButton(
-                                    onClick = {
-                                        coroutineScope.launch { libraryRepository.toggleLike(item) }
-                                    },
-                                    modifier = Modifier
-                                        .size(40.dp)
-                                        .background(
-                                            color = onSurface.copy(alpha = 0.08f),
-                                            shape = CircleShape
-                                        )
-                                ) {
-                                    Icon(
-                                        if (mediaLibraryState.isLiked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
-                                        contentDescription = if (mediaLibraryState.isLiked) "Unlike" else "Like",
-                                        tint = if (mediaLibraryState.isLiked) playbackAccent else onSurfaceVariant,
-                                        modifier = Modifier.size(24.dp)
-                                    )
-                                }
                                 AnimatedContent(
                                     targetState = displayItem,
                                     transitionSpec = {
@@ -674,40 +632,48 @@ fun PlayerSheet(
                                     },
                                     contentKey = { it.videoId },
                                     label = "song-title",
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .padding(horizontal = 20.dp)
+                                    modifier = Modifier.weight(1f)
                                 ) { animItem ->
                                     Text(
-                                        text = animItem.title.toCleanSongTitle(),
+                                        text = animItem.title.toSearchAwareTitle(queue.searchQuery),
                                         style = AppTypography.DetailTitle,
                                         maxLines = 1,
                                         color = onSurface,
-                                        textAlign = TextAlign.Center,
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .basicMarquee()
+                                        modifier = Modifier.basicMarquee()
                                     )
                                 }
+
+                                Spacer(modifier = Modifier.width(12.dp))
+
+                                HapticIconButton(
+                                    onClick = {
+                                        coroutineScope.launch { libraryRepository.toggleLike(item) }
+                                    },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(
+                                        if (mediaLibraryState.isLiked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                                        contentDescription = if (mediaLibraryState.isLiked) "Unlike" else "Like",
+                                        tint = if (mediaLibraryState.isLiked) playbackAccent else onSurfaceVariant,
+                                        modifier = Modifier.size(28.dp)
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.width(8.dp))
+
                                 HapticIconButton(
                                     onClick = { showOptionsSheet = true },
-                                    modifier = Modifier
-                                        .size(40.dp)
-                                        .background(
-                                            color = onSurface.copy(alpha = 0.08f),
-                                            shape = CircleShape
-                                        )
+                                    modifier = Modifier.size(32.dp)
                                 ) {
                                     Icon(
                                         Icons.Rounded.MoreVert,
                                         contentDescription = "More options",
                                         tint = onSurface,
-                                        modifier = Modifier.size(24.dp)
+                                        modifier = Modifier.size(28.dp)
                                     )
                                 }
                             }
 
-                            // ── Artist name centered beneath the title ──
                             AnimatedContent(
                                 targetState = displayItem,
                                 transitionSpec = {
@@ -719,36 +685,23 @@ fun PlayerSheet(
                                 },
                                 contentKey = { it.videoId },
                                 label = "song-artist",
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(26.dp)
-                                    .padding(horizontal = 24.dp)
+                                modifier = Modifier.padding(horizontal = 16.dp)
                             ) { animItem ->
-                                val artistClickModifier = if (animItem.artistId != null) {
-                                    Modifier.clickable {
-                                        animItem.artistId?.let {
-                                            onArtistTap(it, animItem.artistName, null)
+                                Text(
+                                    text = animItem.artistName,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = onSurface.copy(alpha = 0.72f),
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = if (animItem.artistId != null) {
+                                        Modifier.clickable {
+                                            onArtistTap(animItem.artistId, animItem.artistName, null)
                                         }
+                                    } else {
+                                        Modifier
                                     }
-                                } else {
-                                    Modifier
-                                }
-
-                                Box(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = animItem.artistName,
-                                        style = MaterialTheme.typography.titleMedium,
-                                        color = onSurface.copy(alpha = 0.92f),
-                                        fontWeight = FontWeight.Medium,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        textAlign = TextAlign.Center,
-                                        modifier = Modifier.then(artistClickModifier)
-                                    )
-                                }
+                                )
                             }
 
                             Spacer(Modifier.height(40.dp))
@@ -780,111 +733,43 @@ fun PlayerSheet(
                                 horizontalArrangement = Arrangement.Center,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                val backInteractionSource = remember { MutableInteractionSource() }
-                                val nextInteractionSource = remember { MutableInteractionSource() }
-                                val playPauseInteractionSource = remember { MutableInteractionSource() }
-
-                                val isPlayPausePressed by playPauseInteractionSource.collectIsPressedAsState()
-                                val isBackPressed by backInteractionSource.collectIsPressedAsState()
-                                val isNextPressed by nextInteractionSource.collectIsPressedAsState()
-
-                                val springSpec = spring<Float>(dampingRatio = 0.6f, stiffness = 500f)
-
-                                val playPauseWeight by animateFloatAsState(
-                                    targetValue = when {
-                                        isPlayPausePressed -> 1.5f
-                                        isBackPressed || isNextPressed -> 1.05f
-                                        else -> 1.2f
-                                    },
-                                    animationSpec = springSpec,
-                                    label = "playPauseWeight"
-                                )
-                                val backButtonWeight by animateFloatAsState(
-                                    targetValue = when {
-                                        isBackPressed -> 1.25f
-                                        isPlayPausePressed -> 0.8f
-                                        else -> 1f
-                                    },
-                                    animationSpec = springSpec,
-                                    label = "backButtonWeight"
-                                )
-                                val nextButtonWeight by animateFloatAsState(
-                                    targetValue = when {
-                                        isNextPressed -> 1.25f
-                                        isPlayPausePressed -> 0.8f
-                                        else -> 1f
-                                    },
-                                    animationSpec = springSpec,
-                                    label = "nextButtonWeight"
-                                )
-
-                                val darkSwatch = mediaPalette.accent
-                                val lightSwatch = darkSwatch.copy(alpha = 0.22f)
-                                val controlShape = RoundedCornerShape(24.dp)
-                                val sideButtonContentColor =
-                                    if (lightSwatch.compositeOver(mediaPalette.bottom).luminance() > 0.5f) Color.Black
-                                    else Color.White
-                                val playButtonContentColor =
-                                    if (darkSwatch.luminance() > 0.5f) Color.Black else Color.White
-
-                                FilledIconButton(
+                                HapticIconButton(
                                     onClick = onSkipPrev,
-                                    shape = controlShape,
-                                    interactionSource = backInteractionSource,
-                                    colors = IconButtonDefaults.filledIconButtonColors(
-                                        containerColor = lightSwatch,
-                                        contentColor = sideButtonContentColor
-                                    ),
-                                    modifier = Modifier
-                                        .height(68.dp)
-                                        .weight(backButtonWeight)
+                                    modifier = Modifier.size(72.dp)
                                 ) {
                                     Icon(
                                         Icons.Rounded.SkipPrevious,
                                         contentDescription = "Previous",
-                                        modifier = Modifier.size(40.dp)
+                                        tint = playerControlColor,
+                                        modifier = Modifier.size(52.dp)
                                     )
                                 }
 
-                                Spacer(modifier = Modifier.width(6.dp))
+                                Spacer(modifier = Modifier.width(24.dp))
 
-                                FilledIconButton(
+                                HapticIconButton(
                                     onClick = onPlayPause,
-                                    shape = controlShape,
-                                    interactionSource = playPauseInteractionSource,
-                                    colors = IconButtonDefaults.filledIconButtonColors(
-                                        containerColor = darkSwatch,
-                                        contentColor = playButtonContentColor
-                                    ),
-                                    modifier = Modifier
-                                        .height(68.dp)
-                                        .weight(playPauseWeight)
+                                    modifier = Modifier.size(88.dp)
                                 ) {
                                     Icon(
                                         if (state.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                                         contentDescription = "Play/Pause",
-                                        modifier = Modifier.size(40.dp)
+                                        tint = playerControlColor,
+                                        modifier = Modifier.size(68.dp)
                                     )
                                 }
 
-                                Spacer(modifier = Modifier.width(6.dp))
+                                Spacer(modifier = Modifier.width(24.dp))
 
-                                FilledIconButton(
+                                HapticIconButton(
                                     onClick = onSkipNext,
-                                    shape = controlShape,
-                                    interactionSource = nextInteractionSource,
-                                    colors = IconButtonDefaults.filledIconButtonColors(
-                                        containerColor = lightSwatch,
-                                        contentColor = sideButtonContentColor
-                                    ),
-                                    modifier = Modifier
-                                        .height(68.dp)
-                                        .weight(nextButtonWeight)
+                                    modifier = Modifier.size(72.dp)
                                 ) {
                                     Icon(
                                         Icons.Rounded.SkipNext,
                                         contentDescription = "Next",
-                                        modifier = Modifier.size(32.dp)
+                                        tint = playerControlColor,
+                                        modifier = Modifier.size(52.dp)
                                     )
                                 }
                             }
@@ -911,13 +796,13 @@ fun PlayerSheet(
                                     Icon(
                                         painter = painterResource(id = R.drawable.lyrics_24px),
                                         contentDescription = null,
-                                        tint = Color.White,
+                                        tint = playerControlColor,
                                         modifier = Modifier.size(22.dp)
                                     )
                                     Spacer(Modifier.width(8.dp))
                                     Text(
                                         text = "Lyrics",
-                                        color = Color.White,
+                                        color = playerControlColor,
                                         style = MaterialTheme.typography.titleSmall,
                                         fontWeight = FontWeight.SemiBold
                                     )
@@ -927,7 +812,7 @@ fun PlayerSheet(
                                     modifier = Modifier
                                         .width(1.dp)
                                         .fillMaxHeight(0.55f)
-                                        .background(Color.White.copy(alpha = 0.24f))
+                                        .background(playerControlColor.copy(alpha = 0.24f))
                                 )
 
                                 Row(
@@ -942,13 +827,13 @@ fun PlayerSheet(
                                     Icon(
                                         painter = painterResource(id = R.drawable.queue_music_24px),
                                         contentDescription = null,
-                                        tint = Color.White,
+                                        tint = playerControlColor,
                                         modifier = Modifier.size(22.dp)
                                     )
                                     Spacer(Modifier.width(8.dp))
                                     Text(
                                         text = "Queue",
-                                        color = Color.White,
+                                        color = playerControlColor,
                                         style = MaterialTheme.typography.titleSmall,
                                         fontWeight = FontWeight.SemiBold
                                     )
@@ -1842,7 +1727,7 @@ private fun BoxScope.MiniPlayerBar(
                     ) { animItem ->
                         Column {
                             Text(
-                                text = animItem.title.toCompactSongTitle(),
+                                text = animItem.title.toCleanSongTitle(),
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = FontWeight.Medium,
                                 color = miniTitleColor,
@@ -2767,6 +2652,7 @@ private fun LyricsPanel(
                                 Text(
                                     text = annotated,
                                     fontSize = 28.sp,
+                                    lineHeight = 36.sp,
                                     fontWeight = FontWeight.Bold,
                                     modifier = lineModifier
                                 )
@@ -2774,6 +2660,7 @@ private fun LyricsPanel(
                                 Text(
                                     text = line.text,
                                     fontSize = 28.sp,
+                                    lineHeight = 36.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Color.White.copy(alpha = lineAlpha),
                                     modifier = lineModifier
@@ -2941,7 +2828,7 @@ private fun LyricsPanel(
                                         Icons.Rounded.SkipPrevious,
                                         contentDescription = "Previous",
                                         tint = Color.White,
-                                        modifier = Modifier.size(50.dp)
+                                        modifier = Modifier.size(68.dp)
                                     )
                                 }
                                 val playInteraction = remember { MutableInteractionSource() }
@@ -2959,7 +2846,7 @@ private fun LyricsPanel(
                                         if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                                         contentDescription = "Play/Pause",
                                         tint = Color.White,
-                                        modifier = Modifier.size(64.dp)
+                                        modifier = Modifier.size(72.dp)
                                     )
                                 }
                                 HapticIconButton(onClick = onSkipNext, modifier = Modifier.size(64.dp)) {
@@ -2967,7 +2854,7 @@ private fun LyricsPanel(
                                         Icons.Rounded.SkipNext,
                                         contentDescription = "Next",
                                         tint = Color.White,
-                                        modifier = Modifier.size(50.dp)
+                                        modifier = Modifier.size(68.dp)
                                     )
                                 }
                             }

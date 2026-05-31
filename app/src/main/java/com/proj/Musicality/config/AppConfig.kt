@@ -28,6 +28,7 @@ object AppConfig {
     private const val KEY_THEME_MODE = "theme_mode"
     private const val KEY_CROSSFADE_ENABLED = "crossfade_enabled"
     private const val KEY_CORNER_RADIUS = "corner_radius"
+    private const val KEY_PLAYER_GRADIENT_ENABLED = "player_gradient_enabled"
     private const val KEY_WORD_SYNC_LYRICS = "word_sync_lyrics"
     private const val KEY_LISTENING_HISTORY_PAUSED = "listening_history_paused"
     private const val KEY_SEARCH_HISTORY_PAUSED = "search_history_paused"
@@ -47,6 +48,9 @@ object AppConfig {
 
     private val _cornerRadius = MutableStateFlow(CornerRadiusPreset.DEFAULT)
     val cornerRadius: StateFlow<CornerRadiusPreset> = _cornerRadius.asStateFlow()
+
+    private val _playerGradientEnabled = MutableStateFlow(true)
+    val playerGradientEnabled: StateFlow<Boolean> = _playerGradientEnabled.asStateFlow()
 
     private val _wordSyncLyrics = MutableStateFlow(true)
     val wordSyncLyrics: StateFlow<Boolean> = _wordSyncLyrics.asStateFlow()
@@ -72,6 +76,7 @@ object AppConfig {
         _cornerRadius.value = runCatching {
             CornerRadiusPreset.valueOf(prefs.getString(KEY_CORNER_RADIUS, CornerRadiusPreset.DEFAULT.name)!!)
         }.getOrDefault(CornerRadiusPreset.DEFAULT)
+        _playerGradientEnabled.value = prefs.getBoolean(KEY_PLAYER_GRADIENT_ENABLED, true)
         _wordSyncLyrics.value = prefs.getBoolean(KEY_WORD_SYNC_LYRICS, true)
         _listeningHistoryPaused.value = prefs.getBoolean(KEY_LISTENING_HISTORY_PAUSED, false)
         _searchHistoryPaused.value = prefs.getBoolean(KEY_SEARCH_HISTORY_PAUSED, false)
@@ -93,6 +98,11 @@ object AppConfig {
     fun setCornerRadius(preset: CornerRadiusPreset) {
         _cornerRadius.value = preset
         prefs.edit().putString(KEY_CORNER_RADIUS, preset.name).apply()
+    }
+
+    fun setPlayerGradientEnabled(enabled: Boolean) {
+        _playerGradientEnabled.value = enabled
+        prefs.edit().putBoolean(KEY_PLAYER_GRADIENT_ENABLED, enabled).apply()
     }
 
     fun setWordSyncLyrics(enabled: Boolean) {

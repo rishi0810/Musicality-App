@@ -81,6 +81,7 @@ fun SettingsScreen(
     val themeMode by AppConfig.themeMode.collectAsStateWithLifecycle()
     val crossfadeEnabled by AppConfig.crossfadeEnabled.collectAsStateWithLifecycle()
     val cornerRadius by AppConfig.cornerRadius.collectAsStateWithLifecycle()
+    val playerGradientEnabled by AppConfig.playerGradientEnabled.collectAsStateWithLifecycle()
     val wordSyncLyrics by AppConfig.wordSyncLyrics.collectAsStateWithLifecycle()
     val listeningHistoryPaused by AppConfig.listeningHistoryPaused.collectAsStateWithLifecycle()
     val searchHistoryPaused by AppConfig.searchHistoryPaused.collectAsStateWithLifecycle()
@@ -196,6 +197,14 @@ fun SettingsScreen(
                     }
                 }
             }
+        }
+        item(key = "player-gradient") {
+            SettingsSwitch(
+                title = "Color gradient",
+                subtitle = "Tint the player with album-art colors; off uses a solid background",
+                checked = playerGradientEnabled,
+                onCheckedChange = { AppConfig.setPlayerGradientEnabled(it) }
+            )
         }
         item(key = "divider-appearance") { SettingsDivider() }
 

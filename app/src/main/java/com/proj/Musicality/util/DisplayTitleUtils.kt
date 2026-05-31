@@ -3,12 +3,12 @@ package com.proj.Musicality.util
 private const val DEFAULT_COMPACT_TITLE_MAX_CHARS = 58
 
 private val trailingNoiseRegex = Regex(
-    """\s*(\(|\[)?(official(\s+music)?\s+video|official\s+audio|lyrics?|lyric\s+video|visualizer|hd|hq|4k|remaster(ed)?|audio)(\)|\])?\s*$""",
+    """\s*(\(|\[)?(official(\s+music)?\s+video|official\s+audio|official\s+version|official\s+mv|m/?v|full\s+(song|video)|lyrics?\s+video|lyrics?|lyric\s+video|visualizer|hd|hq|4k|uhd|remaster(ed)?|audio)(\)|\])?\s*$""",
     RegexOption.IGNORE_CASE
 )
 
 private val separatorNoiseRegex = Regex(
-    """\s*[-|:]\s*(official|lyrics?|audio|video).*$""",
+    """\s*[-–—|:]\s*(official|lyrics?|audio|video|m/?v|full\s+song|full\s+video).*$""",
     RegexOption.IGNORE_CASE
 )
 
@@ -23,12 +23,12 @@ private val inlineFeatRegex = Regex(
 )
 
 private val parenthesizedTagRegex = Regex(
-    """\s*[\(\[]\s*(remix|edit|mix|version|ver\.?|deluxe|bonus\s+track|acoustic|live|demo|instrumental|extended|radio\s+edit|clean|explicit|sped\s+up|slowed(\s*\+?\s*reverb)?|reverb|lofi|lo-fi)\s*[\)\]]""",
+    """\s*[\(\[]\s*(remix|edit|mix|version|ver\.?|deluxe|bonus\s+track|acoustic|live|demo|instrumental|extended|radio\s+edit|clean|explicit|sped\s+up|slowed(\s*\+?\s*reverb)?|reverb|lofi|lo-fi|from\s+"[^"]*"|from\s+[^)\]]*)\s*[\)\]]""",
     RegexOption.IGNORE_CASE
 )
 
 private val trailingDashTagRegex = Regex(
-    """\s+[-–—]\s+(remix|acoustic|live|demo|instrumental|radio\s+edit|remaster(ed)?).*$""",
+    """\s+[-–—]\s+(remix|acoustic|live|demo|instrumental|radio\s+edit|remaster(ed)?|from\s+.*)$""",
     RegexOption.IGNORE_CASE
 )
 
@@ -38,6 +38,10 @@ private val hashtagRegex = Regex(
 
 private val pipeSeparatedCreditsRegex = Regex(
     """\s*[-–—]\s+[^|]+(\|[^|]+)+\s*$""",
+)
+
+private val pipeShowNameRegex = Regex(
+    """\s*\|\s+.+$"""
 )
 
 fun String.toCleanSongTitle(): String {
@@ -53,29 +57,28 @@ fun String.toCleanSongTitle(): String {
         .replace(inlineFeatRegex, "")
         .replace(hashtagRegex, "")
         .replace(pipeSeparatedCreditsRegex, "")
+        .replace(pipeShowNameRegex, "")
         .replace(Regex("""\s{2,}"""), " ")
         .trim()
     if (clean.isBlank()) clean = fallback
     return clean
 }
 
-/**
- * Compact UI-friendly title for list rows/cards/mini-player.
- * Keeps song screen untouched by applying this only where explicitly called.
- */
-fun String.toCompactSongTitle(maxChars: Int = DEFAULT_COMPACT_TITLE_MAX_CHARS): String {
-    val fallback = ifBlank { "Unknown song" }
-    var compact = fallback
-        .replace(Regex("""\s+"""), " ")
-        .trim()
-        .replace(trailingNoiseRegex, "")
-        .replace(separatorNoiseRegex, "")
-        .trim()
-
-    if (compact.isBlank()) compact = fallback
-    if (compact.length <= maxChars) return compact
-
-    val cutAt = compact.lastIndexOf(' ', maxChars).takeIf { it > 0 } ?: maxChars
-    return compact.substring(0, cutAt).trimEnd() + "…"
+fun String.toSearchAwareTitle(searchQuery: String?): String {
+    if (searchQuery.isNullOrBlank()) return toCleanSongTitle()
+    val cleaned = toCleanSongTitle()
+    val queryTrimmed = searchQuery.trim()
+    val matchStart = cleaned.indexOf(queryTrimmed, ignoreCase = true)
+    if (matchStart >= 0) {
+        return cleaned.substring(matchStart, matchStart + queryTrimmed.length)
+    }
+    return cleaned
 }
 
+fun String.toCompactSongTitle(maxChars: Int = DEFAULT_COMPACT_TITLE_MAX_CHARS): String {
+    val clean = toCleanSongTitle()
+    if (clean.length <= maxChars) return clean
+
+    val cutAt = clean.lastIndexOf(' ', maxChars).takeIf { it > 0 } ?: maxChars
+    return clean.substring(0, cutAt).trimEnd() + "…"
+}
