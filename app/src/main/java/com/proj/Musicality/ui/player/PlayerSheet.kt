@@ -6,10 +6,7 @@ import android.os.SystemClock
 import android.util.Log
 import android.widget.Toast
 import android.app.Activity
-import androidx.activity.ComponentActivity
-import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
-import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Animatable
@@ -39,7 +36,6 @@ import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.scrollBy
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -130,7 +126,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.media3.common.Player
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.produceState
@@ -320,41 +315,6 @@ fun PlayerSheet(
     val fullContentAlpha = clampedExpandProgress
     val surface = MaterialTheme.colorScheme.surface
 
-    val darkTheme = isSystemInDarkTheme()
-    val activity = LocalContext.current as? ComponentActivity
-    val playerCoversStatusBar = clampedExpandProgress > 0.5f
-    DisposableEffect(playerCoversStatusBar, darkTheme, activity) {
-        if (activity == null) return@DisposableEffect onDispose {}
-        if (playerCoversStatusBar) {
-            activity.enableEdgeToEdge(
-                statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
-                navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
-            )
-        } else {
-            activity.enableEdgeToEdge(
-                statusBarStyle = SystemBarStyle.auto(
-                    android.graphics.Color.TRANSPARENT,
-                    android.graphics.Color.TRANSPARENT
-                ),
-                navigationBarStyle = SystemBarStyle.auto(
-                    android.graphics.Color.TRANSPARENT,
-                    android.graphics.Color.TRANSPARENT
-                )
-            )
-        }
-        onDispose {
-            activity.enableEdgeToEdge(
-                statusBarStyle = SystemBarStyle.auto(
-                    android.graphics.Color.TRANSPARENT,
-                    android.graphics.Color.TRANSPARENT
-                ),
-                navigationBarStyle = SystemBarStyle.auto(
-                    android.graphics.Color.TRANSPARENT,
-                    android.graphics.Color.TRANSPARENT
-                )
-            )
-        }
-    }
     val artworkUrl = upscaleThumbnail(item.thumbnailUrl)
     LaunchedEffect(item.videoId, artworkUrl) {
         Log.d(TAG, "PlayerSheet hero artwork url=$artworkUrl for videoId=${item.videoId}")

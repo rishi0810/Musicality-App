@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
@@ -34,6 +35,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.proj.Musicality.data.model.ArtistContent
 import com.proj.Musicality.data.model.ArtistVideo
 import com.proj.Musicality.data.model.MediaItem
+import com.proj.Musicality.data.model.PlaybackQueue
+import com.proj.Musicality.data.model.QueueSource
 import com.proj.Musicality.navigation.Route
 import com.proj.Musicality.ui.components.ContentCard
 import com.proj.Musicality.ui.components.ErrorMessage
@@ -54,7 +57,7 @@ fun ArtistMoreScreen(
     seed: Route.ArtistMore,
     animatedVisibilityScope: AnimatedVisibilityScope,
     onAlbumTap: (String, String, String?, String?, String?) -> Unit,
-    onVideoTap: (MediaItem) -> Unit,
+    onPlayQueue: (PlaybackQueue) -> Unit,
     collapsedMiniPlayerHeight: Dp = 0.dp,
     modifier: Modifier = Modifier
 ) {
@@ -122,6 +125,23 @@ fun ArtistMoreScreen(
             }
 
             is ArtistMoreViewModel.UiState.LoadedVideos -> {
+                // The whole "more videos" list is the queue; tapping one plays it at that
+                // index so the rest show up as up-next in the player, like any track list.
+                val videoQueueItems = remember(s.items, seed.artistName) {
+                    s.items.map { video ->
+                        MediaItem(
+                            videoId = video.videoId,
+                            title = video.title,
+                            artistName = seed.artistName,
+                            artistId = null,
+                            albumName = null,
+                            albumId = null,
+                            thumbnailUrl = video.image,
+                            durationText = null,
+                            musicVideoType = "MUSIC_VIDEO_TYPE_OMV"
+                        )
+                    }
+                }
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(2),
                     modifier = Modifier.fillMaxSize(),
@@ -133,23 +153,17 @@ fun ArtistMoreScreen(
                         bottom = collapsedMiniPlayerHeight + AppSpacing.MiniPlayerBottomExtra
                     )
                 ) {
-                    items(s.items, key = { it.videoId }) { video ->
+                    itemsIndexed(s.items, key = { _, video -> video.videoId }) { index, video ->
                         VideoGridCard(
                             video = video,
                             artistName = seed.artistName,
                             animatedVisibilityScope = animatedVisibilityScope,
                             onTap = {
-                                onVideoTap(
-                                    MediaItem(
-                                        videoId = video.videoId,
-                                        title = video.title,
-                                        artistName = seed.artistName,
-                                        artistId = null,
-                                        albumName = null,
-                                        albumId = null,
-                                        thumbnailUrl = video.image,
-                                        durationText = null,
-                                        musicVideoType = "MUSIC_VIDEO_TYPE_OMV"
+                                onPlayQueue(
+                                    PlaybackQueue(
+                                        items = videoQueueItems,
+                                        currentIndex = index,
+                                        source = QueueSource.PLAYLIST
                                     )
                                 )
                             }

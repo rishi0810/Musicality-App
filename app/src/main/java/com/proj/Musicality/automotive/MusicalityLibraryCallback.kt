@@ -383,7 +383,18 @@ class MusicalityLibraryCallback(
                 val folderId = folderIdFromKey(folderKey)
                 folderId?.let { lookupAppItem(it, videoId) } ?: return null
             }
-            else -> findAppItemAcrossFolders(videoId) ?: return null
+            // No folder prefix → this is the in-app player setting a raw videoId (a fresh
+            // search / artist / "more videos" track), not an Auto browse selection. Such a
+            // track usually isn't in any browse folder, so don't abandon it: the audio is
+            // already cached by the player's fetch flow, so keep the caller's own item
+            // (its metadata is intact) and just attach the local file URI. Dropping it here
+            // leaves the player with an empty list, which ends instantly and triggers
+            // onPlaybackResumption to restore the previous track.
+            else -> findAppItemAcrossFolders(videoId) ?: run {
+                val file = AudioFileCache.getOrDownload(videoId) ?: return null
+                AudioFileCache.pin(videoId)
+                return input.buildUpon().setUri(file.toURI().toString()).build()
+            }
         }
 
         return resolveByVideoId(videoId, folderKey ?: "recent", appItem)

@@ -75,6 +75,7 @@ import com.proj.Musicality.ui.screen.*
 import com.proj.Musicality.ui.theme.LocalPlaybackBackdropPalette
 import com.proj.Musicality.ui.theme.LocalPlaybackUiPalette
 import com.proj.Musicality.ui.theme.LocalSharedTransitionScope
+import com.proj.Musicality.ui.theme.prewarmMediaBackdropPalette
 import com.proj.Musicality.ui.theme.rememberPlaybackBackdropPalette
 import com.proj.Musicality.ui.theme.rememberPlaybackUiPalette
 import com.proj.Musicality.update.AppUpdateManager
@@ -194,8 +195,23 @@ fun MusicApp() {
     val onAddToQueue = remember<(MediaItem) -> Unit> {
         { item -> playbackViewModel.addToQueue(item.copy(thumbnailUrl = upscaleThumbnail(item.thumbnailUrl))) }
     }
-    val navToArtist = remember<(String, String, String?) -> Unit> {
-        { name, id, thumb -> navController.navigate(Route.Artist(name, id, thumb)) }
+    // Precompute the destination artist's gradient palette the moment they're tapped from
+    // a surface that already shows the art (search, "Fans might also like", etc.), so the
+    // artist page paints in color on its first frame instead of fading up from black.
+    val prewarmArtistArt = remember<(String?) -> Unit>(scope, context) {
+        { thumb -> prewarmMediaBackdropPalette(scope, context, thumb) }
+    }
+    val navToArtist = remember<(String, String, String?) -> Unit>(prewarmArtistArt, navController) {
+        { name, id, thumb ->
+            prewarmArtistArt(thumb)
+            navController.navigate(Route.Artist(name, id, thumb))
+        }
+    }
+    val navToArtistWithAudience = remember<(String, String, String?, String?) -> Unit>(prewarmArtistArt, navController) {
+        { name, id, thumb, audience ->
+            prewarmArtistArt(thumb)
+            navController.navigate(Route.Artist(name, id, thumb, audience))
+        }
     }
     val navToArtistNoThumb = remember<(String, String, String?) -> Unit> {
         { name, id, _ -> navController.navigate(Route.Artist(name, id, null)) }
@@ -213,8 +229,9 @@ fun MusicApp() {
         { title, id, author, thumb -> navController.navigate(Route.Playlist(title, id, author, upscaleThumbnail(thumb))) }
     }
     // Player-specific callbacks — remembered so PlayerSheet never sees new lambda instances
-    val onArtistTapPlayer = remember(scope, bottomSheetState, navController) {
+    val onArtistTapPlayer = remember(scope, bottomSheetState, navController, prewarmArtistArt) {
         { artistId: String, name: String, thumb: String? ->
+            prewarmArtistArt(thumb)
             scope.launch { bottomSheetState.partialExpand() }
             navController.navigate(Route.Artist(name, artistId, thumb))
         }
@@ -556,16 +573,7 @@ fun MusicApp() {
                             modifier = Modifier.statusBarsPadding(),
                             animatedVisibilityScope = this@composable,
                             collapsedMiniPlayerHeight = floatingControlsHeight + 3.dp,
-                            onArtistTap = { name, id, thumb, audience ->
-                                navController.navigate(
-                                    Route.Artist(
-                                        name = name,
-                                        browseId = id,
-                                        thumbnailUrl = thumb,
-                                        audienceText = audience
-                                    )
-                                )
-                            },
+                            onArtistTap = navToArtistWithAudience,
                             onAlbumTap = navToAlbum,
                             onPlaylistTap = navToPlaylist,
                             onMoodTap = { mood ->
@@ -606,16 +614,7 @@ fun MusicApp() {
                         onPlayNext = onPlayNext,
                         onAddToQueue = onAddToQueue,
                         onVideoTap = onVideoTap,
-                        onArtistTap = { name, id, thumb, audience ->
-                            navController.navigate(
-                                Route.Artist(
-                                    name = name,
-                                    browseId = id,
-                                    thumbnailUrl = thumb,
-                                    audienceText = audience
-                                )
-                            )
-                        },
+                        onArtistTap = navToArtistWithAudience,
                         onArtistMenuTap = navToArtistNoThumb,
                         onAlbumTap = navToAlbum,
                         onAlbumMenuTap = navToAlbumNoThumb,
@@ -697,7 +696,7 @@ fun MusicApp() {
                             seed = route,
                             animatedVisibilityScope = this@composable,
                             onAlbumTap = navToAlbum5,
-                            onVideoTap = onVideoTap,
+                            onPlayQueue = onPlayQueue,
                             collapsedMiniPlayerHeight = floatingControlsHeight + 3.dp
                         )
                     }

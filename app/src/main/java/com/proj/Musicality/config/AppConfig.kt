@@ -9,8 +9,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-enum class ThemeMode { SYSTEM, DARK, LIGHT }
-
 enum class CornerRadiusPreset(val label: String, val scale: Float) {
     NONE("Sharp", 0f),
     SMALL("Small", 0.5f),
@@ -25,7 +23,6 @@ fun Dp.scaled(preset: CornerRadiusPreset): Dp = this * preset.scale
 object AppConfig {
 
     private const val PREFS = "app_config"
-    private const val KEY_THEME_MODE = "theme_mode"
     private const val KEY_CROSSFADE_ENABLED = "crossfade_enabled"
     private const val KEY_CORNER_RADIUS = "corner_radius"
     private const val KEY_PLAYER_GRADIENT_ENABLED = "player_gradient_enabled"
@@ -39,9 +36,6 @@ object AppConfig {
     const val PLAYED_CACHE_MAX_MB = 2048
 
     private lateinit var prefs: SharedPreferences
-
-    private val _themeMode = MutableStateFlow(ThemeMode.SYSTEM)
-    val themeMode: StateFlow<ThemeMode> = _themeMode.asStateFlow()
 
     private val _crossfadeEnabled = MutableStateFlow(false)
     val crossfadeEnabled: StateFlow<Boolean> = _crossfadeEnabled.asStateFlow()
@@ -69,9 +63,6 @@ object AppConfig {
 
     fun init(context: Context) {
         prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        _themeMode.value = runCatching {
-            ThemeMode.valueOf(prefs.getString(KEY_THEME_MODE, ThemeMode.SYSTEM.name)!!)
-        }.getOrDefault(ThemeMode.SYSTEM)
         _crossfadeEnabled.value = prefs.getBoolean(KEY_CROSSFADE_ENABLED, false)
         _cornerRadius.value = runCatching {
             CornerRadiusPreset.valueOf(prefs.getString(KEY_CORNER_RADIUS, CornerRadiusPreset.DEFAULT.name)!!)
@@ -83,11 +74,6 @@ object AppConfig {
         _playedCacheEnabled.value = prefs.getBoolean(KEY_PLAYED_CACHE_ENABLED, true)
         _playedCacheLimitMb.value = prefs.getInt(KEY_PLAYED_CACHE_LIMIT_MB, PLAYED_CACHE_MIN_MB)
             .coerceIn(PLAYED_CACHE_MIN_MB, PLAYED_CACHE_MAX_MB)
-    }
-
-    fun setThemeMode(mode: ThemeMode) {
-        _themeMode.value = mode
-        prefs.edit().putString(KEY_THEME_MODE, mode.name).apply()
     }
 
     fun setCrossfadeEnabled(enabled: Boolean) {

@@ -28,7 +28,6 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -884,25 +883,12 @@ private fun SongFeaturedMix(
         animateTransitions = false
     )
 
-    val darkTheme = isSystemInDarkTheme()
-    val cardBase = if (darkTheme) {
-        lerp(Color(0xFF1A1A1A), featuredPalette.middle, 0.18f)
-    } else {
-        lerp(Color(0xFFF2F2F2), featuredPalette.middle, 0.10f)
-    }
+    val cardBase = lerp(Color(0xFF1A1A1A), featuredPalette.middle, 0.18f)
     val accent = featuredPalette.accent
-    val titleColor = if (darkTheme) Color.White else Color(0xFF111315)
-    val bodyColor = if (darkTheme) Color.White.copy(alpha = 0.62f) else Color(0xFF111315).copy(alpha = 0.62f)
-    val borderColor = if (darkTheme) {
-        Color.White.copy(alpha = 0.08f)
-    } else {
-        Color(0xFF111315).copy(alpha = 0.06f)
-    }
-    val overflowBg = if (darkTheme) {
-        Color.White.copy(alpha = 0.08f)
-    } else {
-        Color(0xFF111315).copy(alpha = 0.05f)
-    }
+    val titleColor = Color.White
+    val bodyColor = Color.White.copy(alpha = 0.62f)
+    val borderColor = Color.White.copy(alpha = 0.08f)
+    val overflowBg = Color.White.copy(alpha = 0.08f)
     val haptics = LocalHapticFeedback.current
     val cardInteraction = remember { MutableInteractionSource() }
 

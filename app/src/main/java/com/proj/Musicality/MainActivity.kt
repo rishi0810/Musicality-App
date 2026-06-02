@@ -26,14 +26,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         handleNotificationOpenIntent(intent)
         enableEdgeToEdge(
-            statusBarStyle = SystemBarStyle.auto(
-                lightScrim = Color.TRANSPARENT,
-                darkScrim = Color.TRANSPARENT
-            ),
-            navigationBarStyle = SystemBarStyle.auto(
-                lightScrim = Color.TRANSPARENT,
-                darkScrim = Color.TRANSPARENT
-            )
+            statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT)
         )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             // Prevent system-added nav-bar contrast scrim so transparent

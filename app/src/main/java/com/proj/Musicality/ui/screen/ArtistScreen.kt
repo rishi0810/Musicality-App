@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.statusBars
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -72,13 +71,18 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -121,10 +125,10 @@ import com.proj.Musicality.ui.components.Thumbnail
 import com.proj.Musicality.ui.theme.AppColors
 import com.proj.Musicality.ui.theme.AppShapes
 import com.proj.Musicality.ui.theme.AppTypography
-import com.proj.Musicality.ui.theme.ForceGradientStatusBar
 import com.proj.Musicality.ui.theme.GradientTheme
 import com.proj.Musicality.ui.theme.LocalSharedTransitionScope
 import com.proj.Musicality.ui.theme.MediaBoundsSpring
+import com.proj.Musicality.ui.theme.defaultMediaBackdropPalette
 import com.proj.Musicality.ui.theme.rememberMediaBackdropPalette
 import com.proj.Musicality.util.upscaleThumbnail
 import com.proj.Musicality.viewmodel.ArtistViewModel
@@ -133,6 +137,11 @@ import kotlinx.coroutines.launch
 
 private const val TAG = "ArtistScreen"
 private val ArtistHeaderBaseHeight = 350.dp
+
+private data class ArtistBackdropGeometry(
+    val scrollY: Float,
+    val contentHeight: Float
+)
 
 private data class ArtistDerivedCollections(
     val playableItems: List<MediaItem>,
@@ -177,8 +186,6 @@ fun ArtistScreen(
         factory = ArtistViewModelFactory(seed.browseId)
     )
 
-    ForceGradientStatusBar()
-
     LaunchedEffect(seed.browseId) {
         viewModel.initialize(seed)
     }
@@ -200,18 +207,68 @@ fun ArtistScreen(
     val mediaPalette = rememberMediaBackdropPalette(
         imageUrl = thumbUrl,
         fallbackSurface = surfaceColor,
-        allowNetworkFetch = !hasReusableSeedThumb,
+        // Always allow network for the (tiny 256px) palette image so the color reliably
+        // resolves even when the seed thumb wasn't cached yet (e.g. a fast tap on a
+        // search suggestion). It still hits memory/disk first, so a cached image costs
+        // no network — the hero image keeps its own cache-first policy below.
+        allowNetworkFetch = true,
         animateTransitions = false
     )
-    val sortedPaletteByLightness = remember(mediaPalette) {
-        listOf(mediaPalette.top, mediaPalette.middle, mediaPalette.bottom)
-            .sortedByDescending { it.luminance() }
+    // The backdrop gradient + image masking render IMMEDIATELY against a black
+    // placeholder, so the page never waits on data. These detail screens render white
+    // foreground text over the gradient, so a black base keeps the fade legible. The
+    // most-present artwork color — available only once the image loads, or once the
+    // artist API returns a thumbnail on no-thumbnail entry paths — then crossfades in
+    // on top via the tween. Until the palette genuinely resolves we hold the placeholder
+    // rather than its near-black default, so the pop-in is a deliberate transition, not
+    // an incidental one.
+    val themeBaseColor = Color(0xFF000000)
+    val pageEndColor = themeBaseColor
+    val unresolvedDominant = remember(surfaceColor) { defaultMediaBackdropPalette(surfaceColor).top }
+    val dominantColor by animateColorAsState(
+        targetValue = if (mediaPalette.top == unresolvedDominant) themeBaseColor else mediaPalette.top,
+        animationSpec = tween(500),
+        label = "artistDominantColor"
+    )
+    val imageHeightPx = with(density) { (ArtistHeaderBaseHeight + statusBarTop).toPx() }
+
+    // Anchor the backdrop gradient in content space (not the viewport) so it spans
+    // the whole page: dominant at the image seam, fully black at the bottom of the
+    // last section. Below-fold item heights are estimated from the running average
+    // and refined to exact values as they scroll into view.
+    val itemHeights = remember { mutableStateMapOf<Int, Int>() }
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.layoutInfo.visibleItemsInfo.map { it.index to it.size } }
+            .collect { entries -> entries.forEach { (index, size) -> itemHeights[index] = size } }
     }
-    val gradientPrimary = sortedPaletteByLightness[0]
-    val gradientSecondary = sortedPaletteByLightness[1]
-    val gradientDarkBase = AppColors.ArtistGradientBase
-    val seamOverlapPx = with(density) { 6.dp.toPx() }
-    val contentGradientStartPx = with(density) { (ArtistHeaderBaseHeight + statusBarTop - 10.dp).toPx() }
+    val backdropGeometry by remember {
+        derivedStateOf {
+            val info = listState.layoutInfo
+            val visible = info.visibleItemsInfo
+            val totalItems = info.totalItemsCount
+            if (visible.isEmpty() || totalItems == 0) {
+                ArtistBackdropGeometry(scrollY = 0f, contentHeight = imageHeightPx + 1f)
+            } else {
+                val avg = if (itemHeights.isNotEmpty()) {
+                    itemHeights.values.sum().toFloat() / itemHeights.size
+                } else 0f
+                fun heightOf(index: Int): Float = itemHeights[index]?.toFloat() ?: avg
+                val first = visible.first()
+                val before = (0 until first.index).fold(0f) { acc, i -> acc + heightOf(i) }
+                ArtistBackdropGeometry(
+                    scrollY = (before - first.offset).coerceAtLeast(0f),
+                    contentHeight = (0 until totalItems)
+                        .fold(0f) { acc, i -> acc + heightOf(i) }
+                        .coerceAtLeast(imageHeightPx + 1f)
+                )
+            }
+        }
+    }
+    val animatedContentHeight by animateFloatAsState(
+        targetValue = backdropGeometry.contentHeight,
+        animationSpec = tween(450),
+        label = "artistBackdropContentHeight"
+    )
     LaunchedEffect(thumbUrl) {
         Log.d(TAG, "Artist hero artwork url=$thumbUrl")
     }
@@ -253,26 +310,33 @@ fun ArtistScreen(
         modifier = modifier
             .fillMaxSize()
             .drawBehind {
-                drawRect(surfaceColor)
-                drawRect(
-                    color = gradientPrimary,
-                    topLeft = Offset(
-                        x = 0f,
-                        y = (contentGradientStartPx - seamOverlapPx).coerceAtLeast(0f)
-                    ),
-                    size = androidx.compose.ui.geometry.Size(
-                        width = size.width,
-                        height = seamOverlapPx * 2f
-                    )
-                )
+                // Virtual gradient in content space: dominant at the image seam
+                // (contentY = imageHeightPx) → black at the content bottom. Sampled with
+                // a smoothstep ramp so it barely moves off dominant right under the seam
+                // (no bright line where the masked image meets the page) yet still settles
+                // fully into black by the last section. Multiple stops since smoothstep
+                // isn't linear across the viewport.
+                val gradientTop = imageHeightPx
+                // Floor the span at the on-screen area below the image so the gradient
+                // never collapses into a thin strip while content is still loading (when
+                // contentHeight is just the hero + spinner). It fills the viewport and
+                // fades to black immediately, then expands to the true content length once
+                // the sections arrive — so the colored gradient shows during the load, not
+                // only after it.
+                val minSpan = (size.height - gradientTop).coerceAtLeast(1f)
+                val span = (animatedContentHeight - gradientTop).coerceAtLeast(minSpan)
+                val scrollY = backdropGeometry.scrollY
+                val stopCount = 8
+                val colorStops = Array(stopCount + 1) { i ->
+                    val frac = i.toFloat() / stopCount
+                    val t = (((scrollY + frac * size.height) - gradientTop) / span).coerceIn(0f, 1f)
+                    val eased = t * t * (3f - 2f * t)
+                    frac to lerp(dominantColor, pageEndColor, eased)
+                }
                 drawRect(
                     brush = Brush.verticalGradient(
-                        colors = listOf(
-                            gradientPrimary,
-                            gradientSecondary.copy(alpha = 0.6f),
-                            gradientDarkBase
-                        ),
-                        startY = contentGradientStartPx,
+                        colorStops = colorStops,
+                        startY = 0f,
                         endY = size.height
                     )
                 )
@@ -295,7 +359,7 @@ fun ArtistScreen(
                 thumbnailUrl = thumbUrl,
                 allowNetworkFetch = !hasReusableSeedThumb,
                 surfaceColor = surfaceColor,
-                blendPrimaryColor = gradientPrimary,
+                blendPrimaryColor = dominantColor,
                 statusBarTop = statusBarTop,
                 isSaved = isArtistSaved,
                 onAdd = {
@@ -869,27 +933,32 @@ private fun ArtistHeroHeader(
                 .height(imageHeight)
         )
 
+        // Same masking logic as the player (song) screen: a long opacity ramp that
+        // dissolves the artwork into the dominant color. Reaches fully solid by 0.9 so
+        // the bottom strip is clean dominant (no darker image bleed lingering into the
+        // seam), which is what made the hero/page boundary read as a hard line.
         val artistGradientStops = remember(blendPrimaryColor) {
             arrayOf(
                 0f to Color.Transparent,
-                0.4f to Color.Transparent,
-                0.6f to blendPrimaryColor.copy(alpha = 0.3f),
-                0.8f to blendPrimaryColor.copy(alpha = 0.7f),
+                0.3f to Color.Transparent,
+                0.5f to blendPrimaryColor.copy(alpha = 0.25f),
+                0.66f to blendPrimaryColor.copy(alpha = 0.6f),
+                0.8f to blendPrimaryColor.copy(alpha = 0.9f),
+                0.9f to blendPrimaryColor,
                 1f to blendPrimaryColor
             )
         }
         Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .fillMaxHeight()
+                .fillMaxSize()
                 .align(Alignment.BottomCenter)
                 .background(Brush.verticalGradient(colorStops = artistGradientStops))
         )
-        // Transition seam guard: masks sub-pixel gap flashes at the hero/content boundary.
+        // Solid seam guard: masks sub-pixel gap flashes at the hero/content boundary.
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(4.dp)
+                .height(8.dp)
                 .align(Alignment.BottomCenter)
                 .background(blendPrimaryColor)
         )

@@ -51,7 +51,6 @@ import com.proj.Musicality.navigation.Route
 import com.proj.Musicality.ui.components.*
 import com.proj.Musicality.ui.theme.AppShapes
 import com.proj.Musicality.ui.theme.AppTypography
-import com.proj.Musicality.ui.theme.ForceGradientStatusBar
 import com.proj.Musicality.ui.theme.GradientTheme
 import com.proj.Musicality.ui.theme.LocalSharedTransitionScope
 import com.proj.Musicality.ui.theme.MediaBoundsSpring
@@ -94,8 +93,6 @@ fun AlbumScreen(
         key = seed.browseId,
         factory = AlbumViewModelFactory(seed.browseId)
     )
-
-    ForceGradientStatusBar()
 
     LaunchedEffect(seed.browseId) {
         viewModel.initialize(seed)

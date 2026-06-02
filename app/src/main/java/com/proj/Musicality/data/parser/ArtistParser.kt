@@ -162,7 +162,11 @@ object ArtistParser {
     private fun parseVideoListItem(item: MusicResponsiveListItemRenderer): ArtistVideo? {
         val columns = item.flexColumns
         val title = columns?.getOrNull(0)?.musicResponsiveListItemFlexColumnRenderer?.text?.runs?.firstOrNull()?.text ?: return null
-        val videoId = item.playlistItemData?.videoId ?: return null
+        // YT Music dropped playlistItemData from these video shelf items; videoId now only on the play-button overlay.
+        val videoId = item.playlistItemData?.videoId
+            ?: item.overlay?.musicItemThumbnailOverlayRenderer?.content?.musicPlayButtonRenderer
+                ?.playNavigationEndpoint?.watchEndpoint?.videoId
+            ?: return null
         val thumb = bestThumbUrl(item.thumbnail?.musicThumbnailRenderer?.thumbnail?.thumbnails)
         val views = columns.getOrNull(1)?.musicResponsiveListItemFlexColumnRenderer?.text?.runs?.firstOrNull()?.text
         return ArtistVideo(title, videoId, thumb, views)

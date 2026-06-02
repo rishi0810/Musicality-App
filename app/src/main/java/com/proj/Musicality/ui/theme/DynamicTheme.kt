@@ -23,7 +23,10 @@ import coil3.request.allowHardware
 import coil3.size.Size
 import coil3.toBitmap
 import com.proj.Musicality.cache.AppCache
+import android.content.Context
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
 
@@ -74,6 +77,95 @@ fun rememberAlbumColors(
     }
 }
 
+private const val MEDIA_PALETTE_CACHE_VERSION = "v4"
+
+private fun mediaPaletteCacheKey(imageUrl: String): String =
+    "media-palette:$MEDIA_PALETTE_CACHE_VERSION:$imageUrl"
+
+private fun cachedMediaBackdropPalette(imageUrl: String?): MediaBackdropPalette? {
+    if (imageUrl.isNullOrBlank()) return null
+    return AppCache.paletteColors.get(mediaPaletteCacheKey(imageUrl)) as? MediaBackdropPalette
+}
+
+/**
+ * Loads + caches the backdrop palette for [imageUrl], returning a cached value instantly
+ * when present. Safe to call off the composition (e.g. to prewarm on navigation). Returns
+ * null if the image can't be decoded.
+ */
+suspend fun loadMediaBackdropPalette(
+    context: Context,
+    imageUrl: String,
+    fallbackSurface: Color = Color(0xFF121212),
+    allowNetworkFetch: Boolean = true
+): MediaBackdropPalette? {
+    cachedMediaBackdropPalette(imageUrl)?.let { return it }
+
+    val loader = coil3.SingletonImageLoader.get(context)
+    val request = ImageRequest.Builder(context).apply {
+        if (!allowNetworkFetch) {
+            networkCachePolicy(CachePolicy.DISABLED)
+        }
+    }
+        .data(imageUrl)
+        .size(Size(256, 256))
+        .allowHardware(false)
+        .build()
+
+    val result = withContext(Dispatchers.IO) { loader.execute(request) }
+    val bitmap = (result as? SuccessResult)?.image?.toBitmap() ?: return null
+
+    val extracted = withContext(Dispatchers.Default) {
+        // 5% inset trims most logo/border crud while preserving corner color
+        // detail that the previous 8% inset was discarding.
+        val insetX = (bitmap.width * 0.05f).toInt().coerceAtLeast(0)
+        val insetY = (bitmap.height * 0.05f).toInt().coerceAtLeast(0)
+        val left = insetX.coerceAtMost((bitmap.width - 1).coerceAtLeast(0))
+        val top = insetY.coerceAtMost((bitmap.height - 1).coerceAtLeast(0))
+        val right = (bitmap.width - insetX).coerceAtLeast(left + 1)
+        val bottom = (bitmap.height - insetY).coerceAtLeast(top + 1)
+        val generatedPalette = Palette.from(bitmap)
+            .setRegion(left, top, right, bottom)
+            .maximumColorCount(24)
+            // Default resize is 112×112 which destroys small accent regions;
+            // keep the full inset area so Palette quantizes against real pixel
+            // counts instead of an over-smoothed thumbnail.
+            .resizeBitmapArea(65_536)
+            // Drop Palette's built-in skin-tone exclusion (it rejects useful
+            // colors on portrait covers); keep only the lightness-extreme
+            // filter so the swatch scoring sees real artwork colors.
+            .clearFilters()
+            .addFilter { _, hsl -> hsl[2] in 0.04f..0.96f }
+            .generate()
+        buildMediaBackdropPalette(
+            palette = generatedPalette,
+            fallbackSurface = fallbackSurface
+        )
+    }
+    AppCache.paletteColors.put(mediaPaletteCacheKey(imageUrl), extracted)
+    return extracted
+}
+
+/**
+ * Fire-and-forget palette precomputation. Call when navigating from a surface that already
+ * shows [imageUrl] (search results, "Fans might also like", album/playlist art) so the
+ * destination's gradient is ready the instant it composes. No-ops when already cached or
+ * when there's no image (e.g. opening an artist from the player by name). Cache-only by
+ * default since the source already loaded the image.
+ */
+fun prewarmMediaBackdropPalette(
+    scope: CoroutineScope,
+    context: Context,
+    imageUrl: String?,
+    allowNetworkFetch: Boolean = false
+) {
+    if (imageUrl.isNullOrBlank()) return
+    if (cachedMediaBackdropPalette(imageUrl) != null) return
+    val appContext = context.applicationContext
+    scope.launch {
+        loadMediaBackdropPalette(appContext, imageUrl, allowNetworkFetch = allowNetworkFetch)
+    }
+}
+
 @Composable
 fun rememberMediaBackdropPalette(
     imageUrl: String?,
@@ -82,8 +174,11 @@ fun rememberMediaBackdropPalette(
     animateTransitions: Boolean = true
 ): MediaBackdropPalette {
     val context = LocalContext.current
+    // Synchronous cache read so a palette already computed by a prewarm (navigating from
+    // a surface that showed this art) or a previous visit paints with the real color on
+    // the very first frame — no black-then-fade. Defaults until the async load resolves.
     var palette by remember {
-        mutableStateOf(defaultMediaBackdropPalette(fallbackSurface))
+        mutableStateOf(cachedMediaBackdropPalette(imageUrl) ?: defaultMediaBackdropPalette(fallbackSurface))
     }
 
     LaunchedEffect(imageUrl, allowNetworkFetch) {
@@ -91,60 +186,9 @@ fun rememberMediaBackdropPalette(
             palette = defaultMediaBackdropPalette(fallbackSurface)
             return@LaunchedEffect
         }
-
-        val cacheKey = "media-palette:v4:$imageUrl"
-        (AppCache.paletteColors.get(cacheKey) as? MediaBackdropPalette)?.let {
+        loadMediaBackdropPalette(context, imageUrl, fallbackSurface, allowNetworkFetch)?.let {
             palette = it
-            return@LaunchedEffect
         }
-
-        val loader = coil3.SingletonImageLoader.get(context)
-        val request = ImageRequest.Builder(context).apply {
-            if (!allowNetworkFetch) {
-                networkCachePolicy(CachePolicy.DISABLED)
-            }
-        }
-            .data(imageUrl)
-            .size(Size(256, 256))
-            .allowHardware(false)
-            .build()
-
-        val result = withContext(Dispatchers.IO) { loader.execute(request) }
-        val bitmap = (result as? SuccessResult)?.image?.toBitmap()
-        if (bitmap == null) {
-            palette = defaultMediaBackdropPalette(fallbackSurface)
-            return@LaunchedEffect
-        }
-
-        val extracted = withContext(Dispatchers.Default) {
-            // 5% inset trims most logo/border crud while preserving corner color
-            // detail that the previous 8% inset was discarding.
-            val insetX = (bitmap.width * 0.05f).toInt().coerceAtLeast(0)
-            val insetY = (bitmap.height * 0.05f).toInt().coerceAtLeast(0)
-            val left = insetX.coerceAtMost((bitmap.width - 1).coerceAtLeast(0))
-            val top = insetY.coerceAtMost((bitmap.height - 1).coerceAtLeast(0))
-            val right = (bitmap.width - insetX).coerceAtLeast(left + 1)
-            val bottom = (bitmap.height - insetY).coerceAtLeast(top + 1)
-            val generatedPalette = Palette.from(bitmap)
-                .setRegion(left, top, right, bottom)
-                .maximumColorCount(24)
-                // Default resize is 112×112 which destroys small accent regions;
-                // keep the full inset area so Palette quantizes against real pixel
-                // counts instead of an over-smoothed thumbnail.
-                .resizeBitmapArea(65_536)
-                // Drop Palette's built-in skin-tone exclusion (it rejects useful
-                // colors on portrait covers); keep only the lightness-extreme
-                // filter so the swatch scoring sees real artwork colors.
-                .clearFilters()
-                .addFilter { _, hsl -> hsl[2] in 0.04f..0.96f }
-                .generate()
-            buildMediaBackdropPalette(
-                palette = generatedPalette,
-                fallbackSurface = fallbackSurface
-            )
-        }
-        AppCache.paletteColors.put(cacheKey, extracted)
-        palette = extracted
     }
 
     if (!animateTransitions) {

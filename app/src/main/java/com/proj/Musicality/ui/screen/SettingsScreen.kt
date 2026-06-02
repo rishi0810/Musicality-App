@@ -16,12 +16,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Slider
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.rounded.Contrast
-import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Info
-import androidx.compose.material.icons.rounded.LightMode
 import androidx.compose.material.icons.rounded.Lyrics
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Palette
@@ -59,7 +56,6 @@ import com.proj.Musicality.cache.ExploreDiskCache
 import com.proj.Musicality.cache.HomeDiskCache
 import com.proj.Musicality.config.AppConfig
 import com.proj.Musicality.config.CornerRadiusPreset
-import com.proj.Musicality.config.ThemeMode
 import com.proj.Musicality.data.local.LibraryRepository
 import com.proj.Musicality.data.local.ListeningHistoryRepository
 import com.proj.Musicality.ui.components.HapticIconButton
@@ -78,7 +74,6 @@ fun SettingsScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val themeMode by AppConfig.themeMode.collectAsStateWithLifecycle()
     val crossfadeEnabled by AppConfig.crossfadeEnabled.collectAsStateWithLifecycle()
     val cornerRadius by AppConfig.cornerRadius.collectAsStateWithLifecycle()
     val playerGradientEnabled by AppConfig.playerGradientEnabled.collectAsStateWithLifecycle()
@@ -123,48 +118,6 @@ fun SettingsScreen(
         // ── Appearance ──
         item(key = "section-appearance") {
             SectionLabel("Appearance", Icons.Rounded.Palette)
-        }
-        item(key = "theme-mode") {
-            Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-                Text(
-                    text = "Theme",
-                    style = MaterialTheme.typography.bodyLarge
-                )
-                Spacer(Modifier.height(8.dp))
-                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                    ThemeMode.entries.forEachIndexed { index, mode ->
-                        SegmentedButton(
-                            selected = themeMode == mode,
-                            onClick = { AppConfig.setThemeMode(mode) },
-                            shape = SegmentedButtonDefaults.itemShape(
-                                index = index,
-                                count = ThemeMode.entries.size
-                            ),
-                            icon = {
-                                SegmentedButtonDefaults.Icon(themeMode == mode) {
-                                    Icon(
-                                        imageVector = when (mode) {
-                                            ThemeMode.SYSTEM -> Icons.Rounded.Contrast
-                                            ThemeMode.DARK -> Icons.Rounded.DarkMode
-                                            ThemeMode.LIGHT -> Icons.Rounded.LightMode
-                                        },
-                                        contentDescription = null,
-                                        modifier = Modifier.size(SegmentedButtonDefaults.IconSize)
-                                    )
-                                }
-                            }
-                        ) {
-                            Text(
-                                when (mode) {
-                                    ThemeMode.SYSTEM -> "System"
-                                    ThemeMode.DARK -> "Dark"
-                                    ThemeMode.LIGHT -> "Light"
-                                }
-                            )
-                        }
-                    }
-                }
-            }
         }
         item(key = "corner-radius") {
             Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
