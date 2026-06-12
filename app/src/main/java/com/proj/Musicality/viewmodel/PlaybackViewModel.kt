@@ -70,6 +70,7 @@ data class PlaybackState(
 class PlaybackViewModel(application: Application) : AndroidViewModel(application) {
     companion object {
         private const val TAG = "PlaybackViewModel"
+        private const val PLAYBACK_FLOW_TAG = "PlaybackFlow"
         private const val CROSSFADE_PREVIOUS_GRACE_MS = 10_000L
         private const val REWIND_PREVIOUS_WINDOW_MS = 2_000L
         private const val LIBRARY_EXTENSION_SEED_COUNT = 5
@@ -766,7 +767,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
             // is irrelevant once we have a file on disk.
             val localFile = withContext(Dispatchers.IO) { libraryRepository.findLocalAudioFile(item.videoId) }
             if (localFile != null) {
-                Log.d(TAG, "fetchAndPlay: reusing local file for '${item.videoId}' (${localFile.length() / 1024}KB)")
+                Log.d(PLAYBACK_FLOW_TAG, "source=local videoId=${item.videoId} sizeKb=${localFile.length() / 1024}")
                 val fileUri = localFile.toURI().toString()
                 startExoPlayback(fileUri, item)
                 return@launch
@@ -805,6 +806,33 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                 } else {
                     Log.e(TAG, "fetchAndPlay: stream URL unavailable for long-form '${item.videoId}'")
                     withContext(Dispatchers.Main) { handlePlaybackFailure(item.videoId, "long-form stream URL unavailable") }
+                }
+                return@launch
+            }
+
+            if (!_crossfadeEnabled.value) {
+                val streamUrl = withContext(Dispatchers.IO) { resolveStreamUrl(item.videoId) }
+                if (streamUrl == null) {
+                    Log.e(TAG, "fetchAndPlay: stream URL unavailable for '${item.videoId}'")
+                    withContext(Dispatchers.Main) { handlePlaybackFailure(item.videoId, "stream URL unavailable") }
+                    return@launch
+                }
+
+                Log.d(PLAYBACK_FLOW_TAG, "source=stream videoId=${item.videoId} parallelDownload=true")
+                startLongFormPlayback(streamUrl.withFullRange(), item)
+
+                val file = AudioFileCache.getOrDownload(item.videoId)
+                if (file != null) {
+                    Log.d(PLAYBACK_FLOW_TAG, "download=complete videoId=${item.videoId} sizeKb=${file.length() / 1024}")
+                    if (_state.value.currentItem?.videoId == item.videoId) {
+                        Log.d(PLAYBACK_FLOW_TAG, "source=stream retained videoId=${item.videoId}")
+                        startPlayedCacheTimer(item, file)
+                    } else {
+                        Log.d(PLAYBACK_FLOW_TAG, "playedCache=skipped videoId=${item.videoId} reason=mediaChanged")
+                    }
+                } else {
+                    // Streaming can continue even if the background Played-cache download fails.
+                    Log.w(PLAYBACK_FLOW_TAG, "download=failed videoId=${item.videoId} streamContinues=true")
                 }
                 return@launch
             }
@@ -860,6 +888,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         playedCacheTimerJob?.cancel()
         pendingPlayedCacheVideoId = item.videoId
         AudioFileCache.pin(item.videoId)
+        Log.d(PLAYBACK_FLOW_TAG, "playedCache=scheduled videoId=${item.videoId} thresholdMs=$PLAYED_CACHE_MIN_PLAY_MS")
         playedCacheTimerJob = viewModelScope.launch {
             try {
                 while (_positionMs.value < PLAYED_CACHE_MIN_PLAY_MS) {
@@ -868,8 +897,8 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                 }
                 withContext(Dispatchers.IO) {
                     runCatching { libraryRepository.cachePlayedSong(item, sourceFile) }
-                        .onSuccess { Log.d(TAG, "PlayedCache: saved '${item.videoId}' after 30s") }
-                        .onFailure { Log.e(TAG, "PlayedCache: FAILED for '${item.videoId}'", it) }
+                        .onSuccess { Log.d(PLAYBACK_FLOW_TAG, "playedCache=saved videoId=${item.videoId}") }
+                        .onFailure { Log.e(PLAYBACK_FLOW_TAG, "playedCache=failed videoId=${item.videoId}", it) }
                 }
             } finally {
                 if (pendingPlayedCacheVideoId == item.videoId) {
@@ -1101,6 +1130,10 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
     }
 
     private fun prefetchNext(queue: PlaybackQueue) {
+        if (!_crossfadeEnabled.value) {
+            Log.d(TAG, "prefetchNext: skipping full-file prefetch because crossfade is disabled")
+            return
+        }
         val currentItem = _state.value.currentItem
         if (currentItem != null && isLongFormContent(currentItem)) {
             Log.d(TAG, "prefetchNext: skipping — current track is long-form")

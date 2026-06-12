@@ -23,15 +23,18 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 
 @UnstableApi
 class PlaybackService : MediaLibraryService() {
 
     companion object {
         private const val TAG = "PlaybackService"
+        private const val PLAYED_CACHE_MIN_PLAY_MS = 20_000L
         const val ACTION_OPEN_PLAYER_FROM_NOTIFICATION =
             "com.proj.Musicality.action.OPEN_PLAYER_FROM_NOTIFICATION"
         var delegatingPlayer: CrossfadeDelegatingPlayer? = null
@@ -42,6 +45,7 @@ class PlaybackService : MediaLibraryService() {
     private var mediaSession: MediaLibrarySession? = null
     private lateinit var serviceScope: CoroutineScope
     private var autoAdvanceJob: Job? = null
+    private var autoPlayedCacheJob: Job? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -122,6 +126,10 @@ class PlaybackService : MediaLibraryService() {
                     advanceAutoQueue(1)
                 }
             }
+
+            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                scheduleAutoPlayedCache(mediaItem)
+            }
         })
 
         val activityIntent = Intent(this, MainActivity::class.java).apply {
@@ -163,6 +171,7 @@ class PlaybackService : MediaLibraryService() {
         Log.d(TAG, "onDestroy")
         mediaSession?.release()
         delegatingPlayer?.release()
+        autoPlayedCacheJob?.cancel()
         serviceScope.cancel()
         delegatingPlayer = null
         mediaSession = null
@@ -202,7 +211,10 @@ class PlaybackService : MediaLibraryService() {
             }
 
             val nextItem = items[targetIdx]
-            val file = AudioFileCache.getOrDownload(nextItem.videoId) ?: run {
+            val libraryRepo = LibraryRepository.getInstance(applicationContext)
+            val file = libraryRepo.findLocalAudioFile(nextItem.videoId)
+                ?: AudioFileCache.getOrDownload(nextItem.videoId)
+                ?: run {
                 Log.e(TAG, "advanceAutoQueue: failed to download ${nextItem.videoId}")
                 return@launch
             }
@@ -233,6 +245,33 @@ class PlaybackService : MediaLibraryService() {
         }
     }
 
+    private fun scheduleAutoPlayedCache(mediaItem: MediaItem?) {
+        autoPlayedCacheJob?.cancel()
+        val mediaId = mediaItem?.mediaId.orEmpty()
+        val videoId = MusicalityLibraryCallback.extractVideoId(mediaId) ?: return
+        val uri = mediaItem?.localConfiguration?.uri ?: return
+        if (uri.scheme != "file") return
+        val sourceFile = uri.path?.let(::File)?.takeIf { it.exists() && it.length() > 0 } ?: return
+        val libraryRepo = LibraryRepository.getInstance(applicationContext)
+
+        autoPlayedCacheJob = serviceScope.launch {
+            if (libraryRepo.findLocalAudioFile(videoId) != null) return@launch
+
+            while (true) {
+                delay(1_000L)
+                val player = delegatingPlayer ?: return@launch
+                if (player.currentMediaItem?.mediaId != mediaId) return@launch
+                if (player.currentPosition >= PLAYED_CACHE_MIN_PLAY_MS) break
+            }
+
+            val folderKey = MusicalityLibraryCallback.extractFolderKey(mediaId).orEmpty()
+            val appItem = folderItemsByKey(folderKey).firstOrNull { it.videoId == videoId }
+                ?: mediaItem.toAppMediaItem(videoId)
+            runCatching { libraryRepo.cachePlayedSong(appItem, sourceFile) }
+                .onFailure { Log.e(TAG, "Auto PlayedCache: failed for '$videoId'", it) }
+        }
+    }
+
     private suspend fun folderItemsByKey(key: String): List<AppMediaItem> =
         withContext(Dispatchers.IO) {
             val libraryRepo = LibraryRepository.getInstance(applicationContext)
@@ -255,6 +294,21 @@ class PlaybackService : MediaLibraryService() {
                 else -> emptyList()
             }
         }
+}
+
+private fun MediaItem.toAppMediaItem(videoId: String): AppMediaItem {
+    val metadata = mediaMetadata
+    return AppMediaItem(
+        videoId = videoId,
+        title = metadata.title?.toString().orEmpty(),
+        artistName = metadata.artist?.toString().orEmpty(),
+        artistId = null,
+        albumName = metadata.albumTitle?.toString(),
+        albumId = null,
+        thumbnailUrl = metadata.artworkUri?.toString(),
+        durationText = null,
+        musicVideoType = "MUSIC_VIDEO_TYPE_ATV"
+    )
 }
 
 private const val TRACK_PREFIX = "tr|"

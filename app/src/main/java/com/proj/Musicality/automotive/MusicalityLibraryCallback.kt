@@ -391,7 +391,9 @@ class MusicalityLibraryCallback(
             // leaves the player with an empty list, which ends instantly and triggers
             // onPlaybackResumption to restore the previous track.
             else -> findAppItemAcrossFolders(videoId) ?: run {
-                val file = AudioFileCache.getOrDownload(videoId) ?: return null
+                val file = libraryRepository.findLocalAudioFile(videoId)
+                    ?: AudioFileCache.getOrDownload(videoId)
+                    ?: return null
                 AudioFileCache.pin(videoId)
                 return input.buildUpon().setUri(file.toURI().toString()).build()
             }
@@ -409,7 +411,9 @@ class MusicalityLibraryCallback(
         appItem: AppMediaItem
     ): MediaItem? {
         Log.d(TAG, "resolveByVideoId: videoId='$videoId' title='${appItem.title}'")
-        val file = AudioFileCache.getOrDownload(videoId) ?: run {
+        val file = libraryRepository.findLocalAudioFile(videoId)
+            ?: AudioFileCache.getOrDownload(videoId)
+            ?: run {
             Log.e(TAG, "resolveByVideoId: no audio file for '$videoId'")
             return null
         }
