@@ -41,7 +41,7 @@ android {
 
     defaultConfig {
         applicationId = "com.proj.Musicality"
-        minSdk = 33
+        minSdk = 30
         targetSdk = 36
         versionCode = appVersionCode
         versionName = appVersionName

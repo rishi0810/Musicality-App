@@ -9,7 +9,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import com.proj.Musicality.R
@@ -45,10 +44,8 @@ private fun typographyWithFontFamily(base: Typography, fontFamily: FontFamily): 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalSharedTransitionApi::class)
 @Composable
 fun MusicAppTheme(content: @Composable () -> Unit) {
-    val context = LocalContext.current
-
     val appBackground = Color(0xFF000000)
-    val colorScheme = dynamicDarkColorScheme(context)
+    val colorScheme = darkColorScheme()
         .copy(background = appBackground, surface = appBackground)
 
     val cornerRadiusPreset by com.proj.Musicality.config.AppConfig.cornerRadius.collectAsState()
