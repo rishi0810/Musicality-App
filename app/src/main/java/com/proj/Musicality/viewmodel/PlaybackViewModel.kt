@@ -860,7 +860,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                     .setTitle(item.title)
                     .setArtist(item.artistName)
                     .setAlbumTitle(item.albumName)
-                    .setArtworkUri(item.thumbnailUrl?.let { Uri.parse(it) })
+                    .setArtworkUri(item.mediaSessionArtworkUri())
                     .build()
             )
             .build()
@@ -928,7 +928,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                         .setTitle(item.title)
                         .setArtist(item.artistName)
                         .setAlbumTitle(item.albumName)
-                        .setArtworkUri(item.thumbnailUrl?.let { Uri.parse(it) })
+                        .setArtworkUri(item.mediaSessionArtworkUri())
                         .build()
                 )
                 .build()
@@ -983,7 +983,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                         .setTitle(item.title)
                         .setArtist(item.artistName)
                         .setAlbumTitle(item.albumName)
-                        .setArtworkUri(item.thumbnailUrl?.let { Uri.parse(it) })
+                        .setArtworkUri(item.mediaSessionArtworkUri())
                         .build()
                 )
                 .build()
@@ -1027,7 +1027,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                     .setTitle(nextItem.title)
                     .setArtist(nextItem.artistName)
                     .setAlbumTitle(nextItem.albumName)
-                    .setArtworkUri(nextItem.thumbnailUrl?.let { Uri.parse(it) })
+                    .setArtworkUri(nextItem.mediaSessionArtworkUri())
                     .build()
             )
             .build()
@@ -1256,8 +1256,10 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         }
 
         // If extension finished after the original list already ended, continue playback immediately.
-        val player = activePlayer()
-        if (player?.playbackState == Player.STATE_ENDED) {
+        val playbackEnded = withContext(Dispatchers.Main) {
+            activePlayer()?.playbackState == Player.STATE_ENDED
+        }
+        if (playbackEnded) {
             val snapshot = _state.value
             if (snapshot.queue.currentIndex + 1 < snapshot.queue.items.size) {
                 withContext(Dispatchers.Main) { advanceToNextInternal() }
@@ -1412,5 +1414,11 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         if (lastRewindRealtimeMs == 0L) return false
         val elapsed = SystemClock.elapsedRealtime() - lastRewindRealtimeMs
         return elapsed in 0..REWIND_PREVIOUS_WINDOW_MS
+    }
+
+    private fun MediaItem.mediaSessionArtworkUri(): Uri? {
+        val raw = thumbnailUrl?.takeIf { it.isNotBlank() } ?: return null
+        val uri = runCatching { Uri.parse(raw) }.getOrNull() ?: return null
+        return if (uri.scheme.equals("file", ignoreCase = true)) null else uri
     }
 }

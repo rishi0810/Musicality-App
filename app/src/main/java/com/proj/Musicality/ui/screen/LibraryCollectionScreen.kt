@@ -128,7 +128,8 @@ fun LibraryCollectionScreen(
         LibraryCollectionType.PLAYED -> "Played"
     }
     val queueSource = when (collectionType) {
-        LibraryCollectionType.LIKED, LibraryCollectionType.TOP_SONGS -> QueueSource.LIBRARY
+        LibraryCollectionType.LIKED -> QueueSource.LIKED_SONGS
+        LibraryCollectionType.TOP_SONGS -> QueueSource.TOP_SONGS
         LibraryCollectionType.DOWNLOADED -> QueueSource.SEARCH
         LibraryCollectionType.PLAYED -> QueueSource.PLAYED
     }
