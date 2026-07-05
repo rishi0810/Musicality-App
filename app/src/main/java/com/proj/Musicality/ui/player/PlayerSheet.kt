@@ -1156,10 +1156,10 @@ fun PlayerSheet(
             onPlayPause = onPlayPause,
             onSkipNext = onSkipNext,
             onSkipPrev = onSkipPrev,
-            // PLAYED queues wrap at both ends — mini-player swipe must mirror that.
-            canSkipNext = queue.source == QueueSource.PLAYED && queue.items.size > 1 ||
+            // Local-only queues wrap at both ends — mini-player swipe must mirror that.
+            canSkipNext = (queue.source == QueueSource.PLAYED || queue.source == QueueSource.DOWNLOADED) && queue.items.size > 1 ||
                 queue.currentIndex < queue.items.lastIndex,
-            canSkipPrevious = queue.source == QueueSource.PLAYED && queue.items.size > 1 ||
+            canSkipPrevious = (queue.source == QueueSource.PLAYED || queue.source == QueueSource.DOWNLOADED) && queue.items.size > 1 ||
                 queue.currentIndex > 0,
             queue = queue
         )
@@ -1840,7 +1840,7 @@ private fun AlbumArtPager(
     val context = LocalContext.current
     val updatedCurrentIndex by rememberUpdatedState(currentQueueIndex)
     val updatedQueueItems by rememberUpdatedState(queueItems)
-    val isCircular = queue.source == QueueSource.PLAYED && queueItems.size > 1
+    val isCircular = (queue.source == QueueSource.PLAYED || queue.source == QueueSource.DOWNLOADED) && queueItems.size > 1
     val updatedIsCircular by rememberUpdatedState(isCircular)
     val pagerItemCount = if (isCircular) queueItems.size + 2 else queueItems.size
 

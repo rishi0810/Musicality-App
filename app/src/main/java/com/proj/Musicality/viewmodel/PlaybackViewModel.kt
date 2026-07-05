@@ -357,31 +357,52 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
     fun playQueue(queue: PlaybackQueue) {
         cancelUserDrivenCrossfade(reason = "playQueue")
         viewModelScope.launch {
-            val item = queue.items[queue.currentIndex]
-            resetLibraryTailExtensionContext(queue)
-            Log.d(TAG, "playQueue: index=${queue.currentIndex}, videoId='${item.videoId}', title='${item.title}'")
+            val playbackQueue = normalizeDownloadedQueue(queue)
+            val item = playbackQueue.items[playbackQueue.currentIndex]
+            resetLibraryTailExtensionContext(playbackQueue)
+            Log.d(TAG, "playQueue: index=${playbackQueue.currentIndex}, videoId='${item.videoId}', title='${item.title}'")
             Log.d(
                 "TapTrace",
                 "playQueue initial-currentItem: videoId='${item.videoId}' title='${item.title}' " +
-                    "artistName='${item.artistName}' durationText=${item.durationText} source=${queue.source}"
+                    "artistName='${item.artistName}' durationText=${item.durationText} source=${playbackQueue.source}"
             )
             _state.update {
                 it.copy(
                     currentItem = item,
-                    queue = queue,
+                    queue = playbackQueue,
                     isPlaying = false,
                     durationMs = 0L
                 )
             }
             _positionMs.value = 0L
             fetchAndPlay(item)
-            if (queue.source == QueueSource.SINGLE || queue.source == QueueSource.SEARCH) {
+            upNextJob?.cancel()
+            if (playbackQueue.source == QueueSource.SINGLE || playbackQueue.source == QueueSource.SEARCH) {
                 loadUpNextQueue(item.videoId)
             } else {
-                prefetchNext(queue)
+                prefetchNext(playbackQueue)
             }
             maybeExtendLibraryQueueFromCurrentPosition()
         }
+    }
+
+    private suspend fun normalizeDownloadedQueue(queue: PlaybackQueue): PlaybackQueue {
+        if (queue.items.isEmpty() || queue.currentIndex !in queue.items.indices) return queue
+        val currentId = queue.items[queue.currentIndex].videoId
+        if (currentId.isBlank()) return queue
+
+        val downloads = withContext(Dispatchers.IO) {
+            libraryRepository.refresh()
+            libraryRepository.snapshot.value.downloadedMedia
+        }
+        if (downloads.none { it.videoId == currentId }) return queue
+
+        val currentIndex = downloads.indexOfFirst { it.videoId == currentId }.coerceAtLeast(0)
+        return PlaybackQueue(
+            items = downloads,
+            currentIndex = currentIndex,
+            source = QueueSource.DOWNLOADED
+        )
     }
 
     fun playSingle(item: MediaItem, searchQuery: String? = null) {
@@ -773,13 +794,11 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                 return@launch
             }
 
-            // Played-section queues are a local-only contract: every entry must already be on
-            // disk (played cache or downloads). If the file is gone we abort instead of falling
-            // through to the network path — otherwise an offline swipe through Played stalls on
-            // a doomed stream request.
+            // Local-only queues must not fall through to the network path; missing files are
+            // treated as broken local entries instead of streamed replacements.
             if (isLocalOnlyQueue(_state.value.queue.source)) {
-                Log.w(TAG, "fetchAndPlay: PLAYED entry '${item.videoId}' has no local file; skipping network fallback")
-                withContext(Dispatchers.Main) { handlePlaybackFailure(item.videoId, "PLAYED entry missing local file") }
+                Log.w(TAG, "fetchAndPlay: local-only entry '${item.videoId}' has no local file; skipping network fallback")
+                withContext(Dispatchers.Main) { handlePlaybackFailure(item.videoId, "local-only entry missing local file") }
                 return@launch
             }
 
@@ -1154,7 +1173,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                 return@launch
             }
             if (localOnly) {
-                Log.d(TAG, "prefetchNext: PLAYED next '$nextId' missing locally; skipping network prefetch")
+                Log.d(TAG, "prefetchNext: local-only next '$nextId' missing locally; skipping network prefetch")
                 return@launch
             }
             runCatching {
@@ -1314,7 +1333,9 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
     }
 
     private fun applyUpNextQueue(seedVideoId: String, upNextQueue: PlaybackQueue) {
-        val currentVideoId = _state.value.currentItem?.videoId
+        val state = _state.value
+        if (state.queue.source != QueueSource.SINGLE && state.queue.source != QueueSource.SEARCH) return
+        val currentVideoId = state.currentItem?.videoId
         if (currentVideoId != seedVideoId) return
 
         val idx = upNextQueue.items.indexOfFirst { it.videoId == seedVideoId }.takeIf { it >= 0 }
@@ -1358,10 +1379,10 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         observedPlayer = null
     }
 
-    // PLAYED is a local-only circular queue: every entry must already be on disk and the queue
-    // loops at both ends. Other sources stop at the end; LIBRARY may extend itself via the
-    // up-next mash, but that's handled separately in [maybeExtendLibraryQueueFromCurrentPosition].
-    private fun isLocalOnlyQueue(source: QueueSource): Boolean = source == QueueSource.PLAYED
+    // Local-only queues must already be on disk and loop at both ends. Other sources stop at the
+    // end; LIBRARY may extend itself via the up-next mash in [maybeExtendLibraryQueueFromCurrentPosition].
+    private fun isLocalOnlyQueue(source: QueueSource): Boolean =
+        source == QueueSource.PLAYED || source == QueueSource.DOWNLOADED
 
     private fun nextIndexForQueue(queue: PlaybackQueue): Int? {
         val size = queue.items.size

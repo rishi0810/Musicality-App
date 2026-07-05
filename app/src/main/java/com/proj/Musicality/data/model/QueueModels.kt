@@ -19,6 +19,7 @@ enum class QueueSource {
     LIKED_SONGS,
     TOP_SONGS,
     LIBRARY,
+    DOWNLOADED,
     SINGLE,
     UP_NEXT,
     PLAYED
