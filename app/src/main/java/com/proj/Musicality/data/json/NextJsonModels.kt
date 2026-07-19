@@ -36,7 +36,8 @@ data class WatchNextTab(
 @Serializable
 data class WatchNextTabRenderer(
     val title: String? = null,
-    val content: WatchNextTabContent? = null
+    val content: WatchNextTabContent? = null,
+    val endpoint: NavigationEndpoint? = null
 )
 
 @Serializable

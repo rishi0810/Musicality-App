@@ -55,6 +55,8 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -94,11 +96,15 @@ import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Size
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.CircularProgressIndicator
@@ -145,8 +151,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -193,6 +199,7 @@ import com.proj.Musicality.data.model.LyricsState
 import com.proj.Musicality.data.model.MediaItem
 import com.proj.Musicality.data.model.PlaybackQueue
 import com.proj.Musicality.data.model.ProviderLoadState
+import com.proj.Musicality.data.model.RelatedState
 import com.proj.Musicality.data.model.QueueSource
 import com.proj.Musicality.lyrics.LyricsHelper
 import com.proj.Musicality.ui.components.pressScale
@@ -235,7 +242,7 @@ private val PlayerHeroMaxHeight = 440.dp
 // Direct distance from the absolute top of the screen to the Lyrics/Queue stack.
 // Increase this to move Lyrics/Queue, song details, and controls further down.
 // Decrease this to move the stack up.
-private val PlayerControlsTopDistanceFromScreenTop = 525.dp
+private val PlayerControlsTopDistanceFromScreenTop = 465.dp
 private const val PlayerOverlayDismissFraction = 0.2f
 private const val PlayerOverlayDismissVelocityPx = 1200f
 @Immutable
@@ -291,8 +298,12 @@ fun PlayerSheet(
     onSkipToIndex: (Int) -> Unit,
     onArtistTap: (String, String, String?) -> Unit,
     onAlbumTap: (String, String, String?) -> Unit,
+    onPlaylistTap: (String, String, String?, String?) -> Unit,
     onRemoveFromQueue: (Int) -> Unit,
     onMoveInQueue: (Int, Int) -> Unit,
+    relatedStateFlow: StateFlow<RelatedState>,
+    onRelatedLoad: (String) -> Unit,
+    onRelatedSongTap: (MediaItem) -> Unit,
     onLyricsLoadAllProviders: (MediaItem) -> Unit,
     onLyricsSwitchProvider: (String) -> Unit,
     crossfadeEnabled: Boolean = false,
@@ -327,6 +338,15 @@ fun PlayerSheet(
     // still sees a consistent value.
     val mediaPalette = LocalPlaybackBackdropPalette.current
         ?: remember(surface) { defaultMediaBackdropPalette(surface) }
+    val playerScrollState = rememberScrollState()
+    val density = LocalDensity.current
+    val miniPositionMs by positionMsFlow.collectAsStateWithLifecycle()
+    val miniPlayerRevealOffsetPx = with(density) { 520.dp.toPx() }
+    val miniPlayerAlpha by animateFloatAsState(
+        targetValue = if (playerScrollState.value > miniPlayerRevealOffsetPx) 1f else 0f,
+        animationSpec = tween(180),
+        label = "scroll-mini-player-alpha"
+    )
     val gradientEnabled by AppConfig.playerGradientEnabled.collectAsStateWithLifecycle()
     val plainOnSurface = MaterialTheme.colorScheme.onSurface
     val primary = mediaPalette.accent
@@ -349,6 +369,8 @@ fun PlayerSheet(
         .observeMediaState(item.videoId)
         .collectAsStateWithLifecycle(initialValue = MediaLibraryState())
     val lyricsState by lyricsStateFlow.collectAsStateWithLifecycle()
+    val relatedState by relatedStateFlow.collectAsStateWithLifecycle()
+    LaunchedEffect(item.videoId) { onRelatedLoad(item.videoId) }
 
     // ── Lyrics panel state: 0 = closed, 1 = full-screen ──
     val lyricsAnim = remember { Animatable(0f) }
@@ -358,6 +380,8 @@ fun PlayerSheet(
 
     val isLooping = state.repeatMode == Player.REPEAT_MODE_ONE
     var showQueueSheet by remember { mutableStateOf(false) }
+    var showSleepTimerSheet by remember { mutableStateOf(false) }
+    var sleepTimerMinutes by remember(item.videoId) { mutableStateOf<Int?>(null) }
     var showOptionsSheet by remember { mutableStateOf(false) }
     var lyricsShareMode by remember(item.videoId) { mutableStateOf(false) }
     var dismissOptionsAfterDownload by remember(item.videoId) { mutableStateOf(false) }
@@ -401,6 +425,13 @@ fun PlayerSheet(
         }
     }
 
+    LaunchedEffect(item.videoId, sleepTimerMinutes) {
+        val minutes = sleepTimerMinutes ?: return@LaunchedEffect
+        kotlinx.coroutines.delay(minutes * 60_000L)
+        if (state.isPlaying) onPlayPause()
+        sleepTimerMinutes = null
+    }
+
     PredictiveBackHandler(enabled = canHandleBack) { progress: Flow<androidx.activity.BackEventCompat> ->
         try {
             progress.collect { }
@@ -416,7 +447,16 @@ fun PlayerSheet(
     Box(
         modifier = Modifier.fillMaxSize()
     ) {
-        val sheetBackground = if (gradientEnabled) mediaPalette.bottom else surface
+        val scrollFade = if (gradientEnabled) {
+            (playerScrollState.value / with(density) { 520.dp.toPx() }).coerceIn(0f, 1f)
+        } else {
+            0f
+        }
+        val sheetBackground = if (gradientEnabled) {
+            lerp(mediaPalette.bottom, Color.Black, scrollFade)
+        } else {
+            surface
+        }
 
         Box(
             modifier = Modifier
@@ -467,6 +507,10 @@ fun PlayerSheet(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(heroHeight)
+                                    .graphicsLayer {
+                                        translationY = -playerScrollState.value * 0.72f
+                                    }
+                                    .zIndex(2f)
                             ) {
                                 if (queue.items.size > 1 && clampedExpandProgress > 0.95f) {
                                     AlbumArtPager(
@@ -512,7 +556,11 @@ fun PlayerSheet(
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(PlayerControlsTopDistanceFromScreenTop),
+                                    .height(PlayerControlsTopDistanceFromScreenTop)
+                                    .graphicsLayer {
+                                        translationY = -playerScrollState.value * 0.72f
+                                    }
+                                    .zIndex(2f),
                                 contentAlignment = Alignment.Center
                             ) {
                                 val plainArtShape = RoundedCornerShape(18.dp)
@@ -544,9 +592,10 @@ fun PlayerSheet(
 
                         HapticIconButton(
                             onClick = ::handleBackCta,
-                            modifier = Modifier
-                                .align(Alignment.TopStart)
-                                .padding(start = 12.dp, top = statusBarTop + 10.dp)
+                                modifier = Modifier
+                                    .align(Alignment.TopStart)
+                                    .zIndex(3f)
+                                    .padding(start = 12.dp, top = statusBarTop + 10.dp)
                                 .size(46.dp)
                                 .shadow(
                                     elevation = 12.dp,
@@ -573,67 +622,35 @@ fun PlayerSheet(
                         Column(
                             modifier = Modifier
                                 .fillMaxSize()
+                                .verticalScroll(playerScrollState)
                                 .padding(top = PlayerControlsTopDistanceFromScreenTop)
                         ) {
-                            Row(
+                            // ── Row 1: Song title (full width, no trailing CTAs) ──
+                            AnimatedContent(
+                                targetState = displayItem,
+                                transitionSpec = {
+                                    val oldIdx = queue.items.indexOfFirst { it.videoId == initialState.videoId }
+                                    val newIdx = queue.items.indexOfFirst { it.videoId == targetState.videoId }
+                                    val dir = if (newIdx >= oldIdx) 1 else -1
+                                    (slideInHorizontally { fullWidth -> dir * fullWidth / 3 } + fadeIn(spring(stiffness = Spring.StiffnessMediumLow))
+                                        togetherWith slideOutHorizontally { fullWidth -> -dir * fullWidth / 3 } + fadeOut(spring(stiffness = Spring.StiffnessMedium)))
+                                },
+                                contentKey = { it.videoId },
+                                label = "song-title",
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 16.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                AnimatedContent(
-                                    targetState = displayItem,
-                                    transitionSpec = {
-                                        val oldIdx = queue.items.indexOfFirst { it.videoId == initialState.videoId }
-                                        val newIdx = queue.items.indexOfFirst { it.videoId == targetState.videoId }
-                                        val dir = if (newIdx >= oldIdx) 1 else -1
-                                        (slideInHorizontally { fullWidth -> dir * fullWidth / 3 } + fadeIn(spring(stiffness = Spring.StiffnessMediumLow))
-                                            togetherWith slideOutHorizontally { fullWidth -> -dir * fullWidth / 3 } + fadeOut(spring(stiffness = Spring.StiffnessMedium)))
-                                    },
-                                    contentKey = { it.videoId },
-                                    label = "song-title",
-                                    modifier = Modifier.weight(1f)
-                                ) { animItem ->
-                                    Text(
-                                        text = animItem.title.toSearchAwareTitle(queue.searchQuery),
-                                        style = AppTypography.DetailTitle,
-                                        maxLines = 1,
-                                        color = onSurface,
-                                        modifier = Modifier.basicMarquee()
-                                    )
-                                }
-
-                                Spacer(modifier = Modifier.width(12.dp))
-
-                                HapticIconButton(
-                                    onClick = {
-                                        coroutineScope.launch { libraryRepository.toggleLike(item) }
-                                    },
-                                    modifier = Modifier.size(32.dp)
-                                ) {
-                                    Icon(
-                                        if (mediaLibraryState.isLiked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
-                                        contentDescription = if (mediaLibraryState.isLiked) "Unlike" else "Like",
-                                        tint = if (mediaLibraryState.isLiked) playbackAccent else onSurfaceVariant,
-                                        modifier = Modifier.size(28.dp)
-                                    )
-                                }
-
-                                Spacer(modifier = Modifier.width(8.dp))
-
-                                HapticIconButton(
-                                    onClick = { showOptionsSheet = true },
-                                    modifier = Modifier.size(32.dp)
-                                ) {
-                                    Icon(
-                                        Icons.Rounded.MoreVert,
-                                        contentDescription = "More options",
-                                        tint = onSurface,
-                                        modifier = Modifier.size(28.dp)
-                                    )
-                                }
+                                    .padding(horizontal = 16.dp)
+                            ) { animItem ->
+                                Text(
+                                    text = animItem.title.toSearchAwareTitle(queue.searchQuery),
+                                    style = AppTypography.DetailTitle,
+                                    maxLines = 1,
+                                    color = onSurface,
+                                    modifier = Modifier.basicMarquee()
+                                )
                             }
 
+                            // ── Row 1b: Artist name ──
                             AnimatedContent(
                                 targetState = displayItem,
                                 transitionSpec = {
@@ -664,7 +681,196 @@ fun PlayerSheet(
                                 )
                             }
 
-                            Spacer(Modifier.height(40.dp))
+                            Spacer(Modifier.height(28.dp))
+
+                            // ── Row 1c: Horizontal scrollable option pills ──
+                            val isCurrentLongFormPill = remember(item.durationText) {
+                                val parts = item.durationText?.split(":")?.mapNotNull { it.trim().toLongOrNull() } ?: emptyList()
+                                val seconds = when (parts.size) {
+                                    2 -> parts[0] * 60 + parts[1]
+                                    3 -> parts[0] * 3600 + parts[1] * 60 + parts[2]
+                                    else -> 0L
+                                }
+                                seconds > 900L
+                            }
+                            val crossfadeDisabledByLongFormPill = isCurrentLongFormPill
+                            val effectiveCrossfadePill = crossfadeEnabled && !crossfadeDisabledByLongFormPill
+                            val downloadStatesMapPill by libraryRepository.downloadStates.collectAsStateWithLifecycle()
+                            val downloadStatePill = downloadStatesMapPill[item.videoId]
+                            CompositionLocalProvider(LocalOverscrollFactory provides null) {
+                                LazyRow(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    // Like pill
+                                    item {
+                                        PlayerOptionPill(
+                                            icon = {
+                                                Icon(
+                                                    painter = painterResource(
+                                                        if (mediaLibraryState.isLiked)
+                                                            R.drawable.thumb_up_24dp_e3e3e3_fill1_wght400_grad0_opsz24
+                                                        else
+                                                            R.drawable.thumb_up_24dp_e3e3e3_fill0_wght400_grad0_opsz24
+                                                    ),
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            },
+                                            label = "Like",
+                                            isActive = mediaLibraryState.isLiked,
+                                            isSuccess = false,
+                                            activeColor = playbackAccent,
+                                            onActiveColor = mediaPalette.onAccent,
+                                            controlColor = playerControlColor,
+                                            onClick = {
+                                                coroutineScope.launch { libraryRepository.toggleLike(item) }
+                                            }
+                                        )
+                                    }
+
+                                    // Queue pill
+                                    item {
+                                        PlayerOptionPill(
+                                            icon = {
+                                                Icon(
+                                                    imageVector = Icons.Rounded.QueueMusic,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            },
+                                            label = "Queue",
+                                            isActive = false,
+                                            isSuccess = false,
+                                            activeColor = playbackAccent,
+                                            onActiveColor = mediaPalette.onAccent,
+                                            controlColor = playerControlColor,
+                                            onClick = {
+                                                showQueueSheet = true
+                                            }
+                                        )
+                                    }
+                                    // Lyrics pill
+                                    item {
+                                        PlayerOptionPill(
+                                            icon = {
+                                                Icon(
+                                                    painter = painterResource(R.drawable.lyrics_24px),
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            },
+                                            label = "Lyrics",
+                                            isActive = isLyricsOpen,
+                                            isSuccess = false,
+                                            activeColor = playbackAccent,
+                                            onActiveColor = mediaPalette.onAccent,
+                                            controlColor = playerControlColor,
+                                            onClick = {
+                                                if (isLyricsOpen) closeLyrics() else openLyrics()
+                                            }
+                                        )
+                                    }
+                                    // Share pill
+                                    item {
+                                        PlayerOptionPill(
+                                            icon = {
+                                                Icon(
+                                                    painter = painterResource(R.drawable.share_24px),
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            },
+                                            label = "Share",
+                                            isActive = false,
+                                            isSuccess = false,
+                                            activeColor = playbackAccent,
+                                            onActiveColor = mediaPalette.onAccent,
+                                            controlColor = playerControlColor,
+                                            onClick = {
+                                                val shareUrl = "https://music.youtube.com/watch?v=${item.videoId}"
+                                                runCatching {
+                                                    context.startActivity(
+                                                        Intent.createChooser(
+                                                            Intent(Intent.ACTION_SEND).apply {
+                                                                type = "text/plain"
+                                                                putExtra(Intent.EXTRA_SUBJECT, item.title)
+                                                                putExtra(Intent.EXTRA_TEXT, shareUrl)
+                                                            },
+                                                            "Share"
+                                                        )
+                                                    )
+                                                }
+                                            }
+                                        )
+                                    }
+                                    // Download pill
+                                    item {
+                                        PlayerOptionPill(
+                                            icon = {
+                                                if (mediaLibraryState.isDownloaded) {
+                                                    Icon(
+                                                        imageVector = Icons.Rounded.CheckCircle,
+                                                        contentDescription = null,
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                } else {
+                                                    Icon(
+                                                        painter = painterResource(R.drawable.download_24px),
+                                                        contentDescription = null,
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                }
+                                            },
+                                            label = if (downloadStatePill?.isDownloading == true)
+                                                "${(downloadStatePill.progress * 100).toInt()}%"
+                                            else if (mediaLibraryState.isDownloaded) "Downloaded"
+                                            else "Download",
+                                            isActive = false,
+                                            isSuccess = mediaLibraryState.isDownloaded,
+                                            activeColor = playbackAccent,
+                                            onActiveColor = mediaPalette.onAccent,
+                                            controlColor = playerControlColor,
+                                            onClick = {
+                                                if (!mediaLibraryState.isDownloaded) {
+                                                    coroutineScope.launch {
+                                                        val result = libraryRepository.download(item)
+                                                        if (result.isFailure) {
+                                                            android.widget.Toast
+                                                                .makeText(context, "Download failed", android.widget.Toast.LENGTH_SHORT)
+                                                                .show()
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        )
+                                    }
+                                    // Crossfade pill
+                                    item {
+                                        PlayerOptionPill(
+                                            icon = {
+                                                Icon(
+                                                    imageVector = Icons.Rounded.Tune,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            },
+                                            label = "Crossfade",
+                                            isActive = effectiveCrossfadePill,
+                                            isSuccess = false,
+                                            activeColor = playbackAccent,
+                                            onActiveColor = mediaPalette.onAccent,
+                                            controlColor = if (crossfadeDisabledByLongFormPill) playerControlColor.copy(alpha = 0.38f) else playerControlColor,
+                                            onClick = {
+                                                if (!crossfadeDisabledByLongFormPill) onToggleCrossfade()
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+
+                            Spacer(Modifier.height(32.dp))
 
                             // ── Row 2: Progress bar ──
                             ExpandedPlaybackProgressSection(
@@ -683,16 +889,44 @@ fun PlayerSheet(
                                     .padding(horizontal = 16.dp)
                             )
 
-                            Spacer(Modifier.height(20.dp))
+                            Spacer(Modifier.height(12.dp))
 
-                            // ── Row 3: Prev + Play/Pause + Next — filled pill buttons ──
+                            // ── Row 3: Sleep Timer + Prev + Play/Pause + Next + Loop ──
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 12.dp),
+                                    .padding(horizontal = 4.dp),
                                 horizontalArrangement = Arrangement.Center,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
+                                // Sleep timer with dot indicator
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    modifier = Modifier.width(56.dp)
+                                ) {
+                                    HapticIconButton(
+                                        onClick = { showSleepTimerSheet = true },
+                                        modifier = Modifier.size(44.dp)
+                                    ) {
+                                        Icon(
+                                            painter = painterResource(R.drawable.timer_24dp_e3e3e3_fill0_wght400_grad0_opsz24),
+                                            contentDescription = "Sleep timer",
+                                            tint = if (sleepTimerMinutes != null) playbackAccent else playerControlColor.copy(alpha = 0.6f),
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                    }
+                                    // Active dot
+                                    Box(
+                                        modifier = Modifier
+                                            .size(4.dp)
+                                            .clip(CircleShape)
+                                            .background(
+                                                if (sleepTimerMinutes != null) playbackAccent
+                                                else Color.Transparent
+                                            )
+                                    )
+                                }
+
                                 HapticIconButton(
                                     onClick = onSkipPrev,
                                     modifier = Modifier.size(72.dp)
@@ -705,7 +939,7 @@ fun PlayerSheet(
                                     )
                                 }
 
-                                Spacer(modifier = Modifier.width(24.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
 
                                 HapticIconButton(
                                     onClick = onPlayPause,
@@ -719,7 +953,7 @@ fun PlayerSheet(
                                     )
                                 }
 
-                                Spacer(modifier = Modifier.width(24.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
 
                                 HapticIconButton(
                                     onClick = onSkipNext,
@@ -732,75 +966,52 @@ fun PlayerSheet(
                                         modifier = Modifier.size(52.dp)
                                     )
                                 }
+
+                                // Loop with dot indicator
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    modifier = Modifier.width(56.dp)
+                                ) {
+                                    HapticIconButton(
+                                        onClick = onToggleRepeat,
+                                        modifier = Modifier.size(44.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Rounded.Repeat,
+                                            contentDescription = "Loop",
+                                            tint = if (isLooping) playbackAccent else playerControlColor.copy(alpha = 0.6f),
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                    }
+                                    // Active dot
+                                    Box(
+                                        modifier = Modifier
+                                            .size(4.dp)
+                                            .clip(CircleShape)
+                                            .background(
+                                                if (isLooping) playbackAccent
+                                                else Color.Transparent
+                                            )
+                                    )
+                                }
                             }
 
-                            Spacer(Modifier.height(36.dp))
+                            Spacer(Modifier.height(32.dp))
 
-                            Row(
+                            // Related remains part of the same page as the controls.
+                            RelatedContent(
+                                state = relatedState,
+                                onRetry = { onRelatedLoad(item.videoId) },
+                                onSongTap = onRelatedSongTap,
+                                onArtistTap = onArtistTap,
+                                onAlbumTap = onAlbumTap,
+                                onPlaylistTap = onPlaylistTap,
+                                onDismiss = {},
+                                nestedScrollConnection = null,
                                 modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(52.dp)
-                                    .padding(horizontal = 42.dp),
-                                horizontalArrangement = Arrangement.Center,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .fillMaxHeight()
-                                        .hapticClickable { if (isLyricsOpen) closeLyrics() else openLyrics() }
-                                        .padding(horizontal = 20.dp),
-                                    horizontalArrangement = Arrangement.Center,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(
-                                        painter = painterResource(id = R.drawable.lyrics_24px),
-                                        contentDescription = null,
-                                        tint = playerControlColor,
-                                        modifier = Modifier.size(22.dp)
-                                    )
-                                    Spacer(Modifier.width(8.dp))
-                                    Text(
-                                        text = "Lyrics",
-                                        color = playerControlColor,
-                                        style = MaterialTheme.typography.titleSmall,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
-                                }
-
-                                Box(
-                                    modifier = Modifier
-                                        .width(1.dp)
-                                        .fillMaxHeight(0.55f)
-                                        .background(playerControlColor.copy(alpha = 0.24f))
-                                )
-
-                                Row(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .fillMaxHeight()
-                                        .hapticClickable { showQueueSheet = true }
-                                        .padding(horizontal = 20.dp),
-                                    horizontalArrangement = Arrangement.Center,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(
-                                        painter = painterResource(id = R.drawable.queue_music_24px),
-                                        contentDescription = null,
-                                        tint = playerControlColor,
-                                        modifier = Modifier.size(22.dp)
-                                    )
-                                    Spacer(Modifier.width(8.dp))
-                                    Text(
-                                        text = "Queue",
-                                        color = playerControlColor,
-                                        style = MaterialTheme.typography.titleSmall,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.weight(1f))
+                            )
+                            Spacer(Modifier.height(24.dp))
+                            Spacer(Modifier.height(48.dp))
                         }
                     }
                     }
@@ -820,8 +1031,147 @@ fun PlayerSheet(
                 onArtistTap = onArtistTap,
                 onAlbumTap = onAlbumTap,
                 crossfadeEnabled = crossfadeEnabled,
-                containerColor = mediaPalette.bottom,
+                containerColor = mediaPalette.bottom
             )
+        }
+
+        if (showSleepTimerSheet) {
+            val sleepTimerOptions = listOf(
+                null to "Off",
+                15 to "15 minutes",
+                30 to "30 minutes",
+                45 to "45 minutes",
+                60 to "60 minutes"
+            )
+            ModalBottomSheet(
+                onDismissRequest = { showSleepTimerSheet = false },
+                sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+                shape = AppShapes.bottomSheet(),
+                containerColor = MaterialTheme.colorScheme.surface
+            ) {
+                Column(modifier = Modifier.padding(bottom = 16.dp)) {
+                    Text(
+                        text = "Sleep timer",
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 20.dp)
+                    )
+                    Text(
+                        text = "Pause playback automatically after a set time.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 24.dp)
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    sleepTimerOptions.forEach { (minutes, label) ->
+                        ListItem(
+                            headlineContent = { Text(label) },
+                            leadingContent = {
+                                Icon(
+                                    painter = painterResource(R.drawable.timer_24dp_e3e3e3_fill0_wght400_grad0_opsz24),
+                                    contentDescription = null,
+                                    tint = if (sleepTimerMinutes == minutes) playbackAccent
+                                    else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            },
+                            trailingContent = if (sleepTimerMinutes == minutes) {
+                                {
+                                    Icon(
+                                        Icons.Rounded.Check,
+                                        contentDescription = "Selected",
+                                        tint = playbackAccent
+                                    )
+                                }
+                            } else {
+                                null
+                            },
+                            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                            modifier = Modifier.clickable {
+                                sleepTimerMinutes = minutes
+                                showSleepTimerSheet = false
+                            }
+                        )
+                    }
+                }
+            }
+        }
+
+        if (miniPlayerAlpha > 0.001f) {
+            val miniProgress = playbackProgress(miniPositionMs, state.durationMs)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.TopCenter)
+                    .graphicsLayer { alpha = miniPlayerAlpha }
+                    .zIndex(4f)
+                    .background(lerp(mediaPalette.bottom, Color.Black, 0.18f))
+                    .statusBarsPadding()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(66.dp)
+                        .padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        AsyncImage(
+                            model = artworkUrl,
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = item.title,
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color.White,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = item.artistName,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color.White.copy(alpha = 0.72f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        HapticIconButton(
+                            onClick = onPlayPause,
+                            modifier = Modifier.size(48.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (state.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                                contentDescription = if (state.isPlaying) "Pause" else "Play",
+                                tint = Color.White,
+                                modifier = Modifier.size(28.dp)
+                            )
+                        }
+                    }
+                }
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .fillMaxWidth()
+                        .height(3.dp)
+                        .background(Color.White.copy(alpha = 0.18f))
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(miniProgress)
+                            .fillMaxHeight()
+                            .background(playbackAccent)
+                    )
+                }
+            }
         }
 
         // ── Options bottom sheet ──
@@ -1389,6 +1739,336 @@ private fun PlayerOverlayBottomSheet(
     }
 }
 
+// ── Option pill with three visual states: active, success, normal ──
+@Composable
+private fun PlayerOptionPill(
+    icon: @Composable () -> Unit,
+    label: String,
+    isActive: Boolean,
+    isSuccess: Boolean,
+    activeColor: Color,
+    onActiveColor: Color,
+    controlColor: Color,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val haptic = LocalHapticFeedback.current
+    val bgColor by animateColorAsState(
+        targetValue = when {
+            isActive -> activeColor
+            isSuccess -> activeColor.copy(alpha = 0.18f)
+            else -> controlColor.copy(alpha = 0.10f)
+        },
+        animationSpec = tween(220),
+        label = "pill-bg"
+    )
+    val contentColor by animateColorAsState(
+        targetValue = when {
+            isActive -> onActiveColor
+            isSuccess -> activeColor
+            else -> controlColor
+        },
+        animationSpec = tween(220),
+        label = "pill-content"
+    )
+    val borderColor by animateColorAsState(
+        targetValue = when {
+            isActive -> Color.Transparent
+            isSuccess -> activeColor.copy(alpha = 0.45f)
+            else -> controlColor.copy(alpha = 0.28f)
+        },
+        animationSpec = tween(220),
+        label = "pill-border"
+    )
+
+    Row(
+        modifier = modifier
+            .height(32.dp)
+            .clip(RoundedCornerShape(50))
+            .background(bgColor)
+            .border(width = 1.dp, color = borderColor, shape = RoundedCornerShape(50))
+            .pressScale(remember { MutableInteractionSource() })
+            .clickable(
+                indication = null,
+                interactionSource = remember { MutableInteractionSource() }
+            ) {
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                onClick()
+            }
+            .padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        androidx.compose.runtime.CompositionLocalProvider(
+            androidx.compose.material3.LocalContentColor provides contentColor
+        ) {
+            icon()
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = contentColor,
+                maxLines = 1
+            )
+        }
+    }
+}
+
+
+// ── Peeking queue overlay: starts at peek height, slides up to reveal full queue ──
+// This lives in the outer player Box (zIndex 3) so it is a true overlay,
+// not constrained inside the content Column.
+@Composable
+private fun BoxScope.PeekingQueueOverlay(
+    queue: PlaybackQueue,
+    positionMsFlow: StateFlow<Long>,
+    durationMs: Long,
+    relatedStateFlow: StateFlow<RelatedState>,
+    onRelatedLoad: (String) -> Unit,
+    onRelatedSongTap: (MediaItem) -> Unit,
+    onSkipToIndex: (Int) -> Unit,
+    onRemoveFromQueue: (Int) -> Unit,
+    onMoveInQueue: (Int, Int) -> Unit,
+    onArtistTap: (String, String, String?) -> Unit,
+    onAlbumTap: (String, String, String?) -> Unit,
+    onPlaylistTap: (String, String, String?, String?) -> Unit,
+    crossfadeEnabled: Boolean,
+    containerColor: Color,
+    controlColor: Color,
+    globalAlpha: Float
+) {
+    val positionMs by positionMsFlow.collectAsStateWithLifecycle()
+    val coroutineScope = rememberCoroutineScope()
+    val haptic = LocalHapticFeedback.current
+    val density = LocalDensity.current
+
+    // How tall just the handle strip is (handle bar + "Up Next" label)
+    val peekHeightDp = 64.dp
+
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxSize()
+            .align(Alignment.BottomCenter)
+            .zIndex(3f)
+            .graphicsLayer { alpha = globalAlpha }
+    ) {
+        val fullHeightPx = with(density) { maxHeight.toPx() }.coerceAtLeast(1f)
+        val peekHeightPx = with(density) { peekHeightDp.toPx() }
+        // sheetOffsetY == 0 → fully open (sheet fills whole parent)
+        // sheetOffsetY == fullHeightPx - peekHeightPx → only peek strip visible
+        val peekOffsetY = remember(fullHeightPx, peekHeightPx) {
+            Animatable(fullHeightPx - peekHeightPx)
+        }
+        var isSettling by remember { mutableStateOf(false) }
+        // Whether the sheet is fully open (past ¼ of full height)
+        val isOpen by remember { derivedStateOf { peekOffsetY.value < fullHeightPx * 0.75f } }
+
+        fun dragSheetBy(deltaY: Float): Float {
+            val previous = peekOffsetY.value
+            val next = (peekOffsetY.value + deltaY).coerceIn(0f, fullHeightPx - peekHeightPx)
+            coroutineScope.launch { peekOffsetY.snapTo(next) }
+            return next - previous
+        }
+
+        suspend fun settleSheet(velocityY: Float = 0f) {
+            isSettling = true
+            val expandThreshold = fullHeightPx * 0.55f
+            // Positive velocityY = swipe down → close; negative = swipe up → open
+            val shouldOpen = velocityY < -600f || (velocityY > -600f && velocityY < 600f && peekOffsetY.value < expandThreshold)
+            val target = if (shouldOpen) 0f else fullHeightPx - peekHeightPx
+            peekOffsetY.animateTo(
+                targetValue = target,
+                animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)
+            )
+            isSettling = false
+        }
+
+        BackHandler(enabled = isOpen && !isSettling) {
+            coroutineScope.launch { settleSheet(800f) }
+        }
+
+        // Nested scroll so the queue LazyColumn can hand off overscroll back to the sheet
+        val nestedScrollConnection = remember(fullHeightPx, peekHeightPx) {
+            object : NestedScrollConnection {
+                private var topReached = false
+
+                override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                    if (source != NestedScrollSource.UserInput || isSettling) return Offset.Zero
+                    if (available.y < 0f) topReached = false
+                    // Scrolling up while sheet is not fully open → move sheet up
+                    if (available.y < 0f && peekOffsetY.value > 0f) {
+                        val consumed = dragSheetBy(available.y)
+                        return Offset(0f, consumed)
+                    }
+                    return Offset.Zero
+                }
+
+                override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+                    if (source != NestedScrollSource.UserInput || isSettling) return Offset.Zero
+                    if (!topReached) topReached = consumed.y == 0f && available.y > 0f
+                    return if (topReached && available.y > 0f) {
+                        val c = dragSheetBy(available.y)
+                        Offset(0f, c)
+                    } else Offset.Zero
+                }
+
+                override suspend fun onPreFling(available: Velocity): Velocity {
+                    return if (topReached && available.y > 0f) {
+                        settleSheet(available.y)
+                        available
+                    } else Velocity.Zero
+                }
+
+                override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
+                    if (topReached && peekOffsetY.value > 0f) settleSheet(available.y)
+                    topReached = false
+                    return Velocity.Zero
+                }
+            }
+        }
+
+        val sheetCorner by animateDpAsState(
+            targetValue = if (peekOffsetY.value <= 1f) 0.dp else 22.dp,
+            label = "sheet-corner"
+        )
+        val sheetShape = RoundedCornerShape(topStart = sheetCorner, topEnd = sheetCorner)
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer { translationY = peekOffsetY.value }
+                .clip(sheetShape)
+                .background(containerColor)
+                .pointerInput(fullHeightPx, peekHeightPx, isSettling) {
+                    if (isSettling) return@pointerInput
+                    val velocityTracker = VelocityTracker()
+                    detectDragGestures(
+                        onDragStart = { velocityTracker.resetTracking() },
+                        onDragCancel = {
+                            velocityTracker.resetTracking()
+                            coroutineScope.launch { settleSheet() }
+                        },
+                        onDragEnd = {
+                            val vy = velocityTracker.calculateVelocity().y
+                            velocityTracker.resetTracking()
+                            coroutineScope.launch { settleSheet(vy) }
+                        },
+                        onDrag = { change, dragAmount ->
+                            if (change.isConsumed) return@detectDragGestures
+                            velocityTracker.addPointerInputChange(change)
+                            val next = (peekOffsetY.value + dragAmount.y)
+                                .coerceIn(0f, fullHeightPx - peekHeightPx)
+                            coroutineScope.launch { peekOffsetY.snapTo(next) }
+                            change.consume()
+                        }
+                    )
+                }
+        ) {
+            // Content area: queue sheet (only meaningful when open)
+            val backdropPalette = LocalPlaybackBackdropPalette.current
+            val headerColor = backdropPalette?.title ?: Color.White
+            val relatedState by relatedStateFlow.collectAsStateWithLifecycle()
+            val currentVideoId = queue.items.getOrNull(queue.currentIndex)?.videoId
+            var selectedTab by remember { mutableIntStateOf(0) }
+            LaunchedEffect(currentVideoId) { currentVideoId?.let(onRelatedLoad) }
+
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(selectedTab) {
+                        var totalDragX = 0f
+                        detectHorizontalDragGestures(
+                            onDragStart = { totalDragX = 0f },
+                            onHorizontalDrag = { change, dx ->
+                                totalDragX += dx
+                                change.consume()
+                            },
+                            onDragEnd = {
+                                if (kotlin.math.abs(totalDragX) > 72f) {
+                                    selectedTab = if (totalDragX < 0f) 1 else 0
+                                }
+                            }
+                        )
+                    }
+            ) {
+                // Handle strip — always visible, tapping it toggles the sheet
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(peekHeightDp)
+                        .hapticClickable {
+                            coroutineScope.launch {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                settleSheet(if (isOpen) 800f else -800f)
+                            }
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        // Drag handle bar
+                        Box(
+                            modifier = Modifier
+                                .width(36.dp)
+                                .height(4.dp)
+                                .clip(RoundedCornerShape(50))
+                                .background(controlColor.copy(alpha = 0.35f))
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            text = "Up Next",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = controlColor.copy(alpha = 0.6f)
+                        )
+                    }
+                }
+
+                // Full queue content below the handle strip
+                val crossfadeLock = showCrossfadeCue(
+                    positionMs = positionMs,
+                    durationMs = durationMs,
+                    crossfadeEnabled = crossfadeEnabled,
+                    hasNextTrack = queue.currentIndex + 1 < queue.items.size
+                )
+                RelatedTabsHeader(
+                    selectedTab = selectedTab,
+                    onSelectedTab = { selectedTab = it },
+                    onDismiss = { coroutineScope.launch { settleSheet(800f) } },
+                    headerColor = headerColor,
+                    headerVariantColor = headerColor.copy(alpha = 0.74f),
+                    selectedColor = LocalPlaybackBackdropPalette.current?.accent ?: headerColor
+                )
+                when (selectedTab) {
+                    0 -> QueueContent(
+                        queue = queue,
+                        onSkipToIndex = onSkipToIndex,
+                        onRemoveFromQueue = onRemoveFromQueue,
+                        onMoveInQueue = onMoveInQueue,
+                        onArtistTap = onArtistTap,
+                        onAlbumTap = onAlbumTap,
+                        crossfadeEnabled = crossfadeEnabled,
+                        crossfadeLockActive = crossfadeLock,
+                        nestedScrollConnection = nestedScrollConnection,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                    1 -> RelatedContent(
+                        state = relatedState,
+                        onRetry = { currentVideoId?.let(onRelatedLoad) },
+                        onSongTap = onRelatedSongTap,
+                        onArtistTap = onArtistTap,
+                        onAlbumTap = onAlbumTap,
+                        onPlaylistTap = onPlaylistTap,
+                        onDismiss = { coroutineScope.launch { settleSheet(800f) } },
+                        nestedScrollConnection = nestedScrollConnection,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+            }
+        }
+    }
+}
+
+
 @Composable
 private fun ExpandedPlaybackProgressSection(
     positionMsFlow: StateFlow<Long>,
@@ -1764,47 +2444,133 @@ private fun QueueActionSheet(
         onDismiss = onDismiss,
         containerColor = containerColor
     ) { nestedScrollConnection ->
-        QueueContent(
-            queue = queue,
-            onSkipToIndex = onSkipToIndex,
-            onRemoveFromQueue = onRemoveFromQueue,
-            onMoveInQueue = onMoveInQueue,
-            onArtistTap = onArtistTap,
-            onAlbumTap = onAlbumTap,
-            onQueueActionConsumed = onDismiss,
-            crossfadeEnabled = crossfadeEnabled,
-            crossfadeLockActive = crossfadeLockActive,
-            nestedScrollConnection = nestedScrollConnection,
-            headerContent = {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .statusBarsPadding()
-                        .padding(horizontal = 8.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Upcoming",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = headerColor,
-                        modifier = Modifier.padding(start = 8.dp)
-                    )
-                    Spacer(modifier = Modifier.weight(1f))
-                    HapticIconButton(
-                        onClick = onDismiss,
-                        modifier = Modifier.size(32.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Close,
-                            contentDescription = "Close queue",
-                            tint = headerVariantColor
-                        )
-                    }
-                }
-            },
-            modifier = Modifier.fillMaxSize()
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+        ) {
+            QueueSheetHeader(
+                onDismiss = onDismiss,
+                headerColor = headerColor,
+                headerVariantColor = headerVariantColor
+            )
+            QueueContent(
+                queue = queue,
+                onSkipToIndex = onSkipToIndex,
+                onRemoveFromQueue = onRemoveFromQueue,
+                onMoveInQueue = onMoveInQueue,
+                onArtistTap = onArtistTap,
+                onAlbumTap = onAlbumTap,
+                onQueueActionConsumed = onDismiss,
+                crossfadeEnabled = crossfadeEnabled,
+                crossfadeLockActive = crossfadeLockActive,
+                nestedScrollConnection = nestedScrollConnection,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+    }
+}
+
+@Composable
+private fun QueueSheetHeader(
+    onDismiss: () -> Unit,
+    headerColor: Color,
+    headerVariantColor: Color
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .statusBarsPadding()
+            .padding(start = 20.dp, end = 8.dp, top = 16.dp, bottom = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = "Upcoming",
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = headerColor
         )
+        Spacer(Modifier.weight(1f))
+        HapticIconButton(
+            onClick = onDismiss,
+            modifier = Modifier.size(40.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.Close,
+                contentDescription = "Close Upcoming",
+                tint = headerVariantColor
+            )
+        }
+    }
+}
+
+@Composable
+private fun RelatedTabsHeader(
+    selectedTab: Int,
+    onSelectedTab: (Int) -> Unit,
+    onDismiss: () -> Unit,
+    headerColor: Color,
+    headerVariantColor: Color,
+    selectedColor: Color
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .statusBarsPadding()
+            .padding(top = 20.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Spacer(modifier = Modifier.weight(1f))
+            HapticIconButton(
+                onClick = onDismiss,
+                modifier = Modifier.size(32.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Close,
+                    contentDescription = "Close Up Next",
+                    tint = headerVariantColor
+                )
+            }
+        }
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+            shape = RoundedCornerShape(14.dp),
+            color = headerColor.copy(alpha = 0.10f),
+            tonalElevation = 1.dp
+        ) {
+            Row(modifier = Modifier.padding(4.dp)) {
+                listOf("Up Next", "Related").forEachIndexed { index, label ->
+                    val isSelected = selectedTab == index
+                    val textColor = if (isSelected) {
+                        if (selectedColor.luminance() > 0.5f) Color.Black else Color.White
+                    } else {
+                        headerVariantColor
+                    }
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+                        color = textColor,
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(
+                                if (isSelected) selectedColor.copy(alpha = 0.88f) else Color.Transparent
+                            )
+                            .hapticClickable(onClick = { onSelectedTab(index) })
+                            .padding(vertical = 13.dp),
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(20.dp))
     }
 }
 

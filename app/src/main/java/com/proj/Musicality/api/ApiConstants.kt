@@ -9,6 +9,8 @@ object ApiConstants {
     const val PLAYER_URL = "https://music.youtube.com/youtubei/v1/player?prettyPrint=false"
 
     const val WEB_REMIX_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0"
+    const val RELATED_USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
+    const val RELATED_CLIENT_VERSION = "1.20260707.12.00"
     const val ANDROID_VR_USER_AGENT = "com.google.android.apps.youtube.vr.oculus/1.43.32 (Linux; U; Android 12; en_US; Quest 3; Build/SQ3A.220605.009.A1; Cronet/107.0.5284.2)"
     const val KTOR_USER_AGENT = "ktor-client"
 

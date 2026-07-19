@@ -48,6 +48,34 @@ object RequestExecutor {
         }
     }
 
+    suspend fun executeRelatedBrowseRequest(browseId: String, visitorId: String): String =
+        withContext(Dispatchers.IO) {
+            val body = """
+                {"context":{"client":{"hl":"en","gl":"US","visitorData":"$visitorId","clientName":"${ApiConstants.WEB_REMIX_CLIENT_NAME}","clientVersion":"${ApiConstants.RELATED_CLIENT_VERSION}"}},"browseId":"$browseId"}
+            """.trimIndent().toRequestBody(jsonMediaType)
+
+            val request = Request.Builder()
+                .url(ApiConstants.BROWSE_URL)
+                .addHeader("Content-Type", "application/json")
+                .addHeader("User-Agent", ApiConstants.RELATED_USER_AGENT)
+                .addHeader("X-Youtube-Client-Name", "67")
+                .addHeader("X-Youtube-Client-Version", ApiConstants.RELATED_CLIENT_VERSION)
+                .addHeader("Origin", "https://music.youtube.com")
+                .addHeader("Referer", "https://music.youtube.com/")
+                .addHeader("X-Goog-Visitor-Id", visitorId)
+                .addHeader("accept", "application/json")
+                .addHeader("accept-language", "en-US,en;q=0.9")
+                .addHeader("cache-control", "no-cache")
+                .post(body)
+                .build()
+
+            client.newCall(request).execute().use { response ->
+                val responseBody = response.body?.string() ?: ""
+                Log.d(TAG, "executeRelatedBrowseRequest: HTTP ${response.code}, body length=${responseBody.length}")
+                responseBody
+            }
+        }
+
     /**
      * Fetch the next page of a browse feed (home, explore, etc.) using a
      * continuation token returned by the previous response.

@@ -54,7 +54,7 @@ object HomeParser {
                 header.moreContentButton?.buttonRenderer?.navigationEndpoint
             )
 
-            val items = shelf.contents?.mapNotNull(::parseItem) ?: emptyList()
+            val items = shelf.contents?.mapNotNull(::parseCarouselItem) ?: emptyList()
             if (items.isEmpty()) return@mapNotNull null
 
             HomeSection(title, items, moreEndpoint)
@@ -85,13 +85,13 @@ object HomeParser {
 
     // ── Item dispatch ──────────────────────────────────────────────────────────
 
-    private fun parseItem(item: HomeCarouselItem): HomeItem? =
+    internal fun parseCarouselItem(item: HomeCarouselItem): HomeItem? =
         item.musicResponsiveListItemRenderer?.let { parseSong(it) }
             ?: item.musicTwoRowItemRenderer?.let { parseCard(it) }
 
     // ── Song (musicResponsiveListItemRenderer) ────────────────────────────────
 
-    private fun parseSong(item: MusicResponsiveListItemRenderer): HomeItem.Song? {
+    internal fun parseSong(item: MusicResponsiveListItemRenderer): HomeItem.Song? {
         val cols = item.flexColumns ?: return null
 
         // Column 0: title + watch endpoint

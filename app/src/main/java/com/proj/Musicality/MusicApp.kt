@@ -242,6 +242,12 @@ fun MusicApp() {
             navController.navigate(Route.Album(title, albumId, thumbnailUrl = null))
         }
     }
+    val onPlaylistTapPlayer = remember(scope, bottomSheetState, navController) {
+        { title: String, playlistId: String, author: String?, thumbnailUrl: String? ->
+            scope.launch { bottomSheetState.partialExpand() }
+            navController.navigate(Route.Playlist(title, playlistId, author, upscaleThumbnail(thumbnailUrl)))
+        }
+    }
     // Track selected bottom nav tab
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
 
@@ -453,6 +459,7 @@ fun MusicApp() {
                     onExpand = { scope.launch { bottomSheetState.expand() } },
                     onArtistTap = onArtistTapPlayer,
                     onAlbumTap = onAlbumTapPlayer,
+                    onPlaylistTap = onPlaylistTapPlayer,
                     onSkipNext = playbackViewModel::skipNext,
                     onSkipPrev = playbackViewModel::skipPrev,
                     onPlayPause = playbackViewModel::togglePlayPause,
@@ -461,6 +468,9 @@ fun MusicApp() {
                     onSkipToIndex = playbackViewModel::skipToIndex,
                     onRemoveFromQueue = playbackViewModel::removeFromQueue,
                     onMoveInQueue = playbackViewModel::moveInQueue,
+                    relatedStateFlow = playbackViewModel.relatedState,
+                    onRelatedLoad = playbackViewModel::loadRelated,
+                    onRelatedSongTap = onVideoTap,
                     onLyricsLoadAllProviders = playbackViewModel::loadRemainingLyricsProviders,
                     onLyricsSwitchProvider = playbackViewModel::switchLyricsProvider,
                     crossfadeEnabled = crossfadeEnabled,

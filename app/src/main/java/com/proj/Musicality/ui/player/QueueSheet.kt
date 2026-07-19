@@ -94,7 +94,7 @@ import com.proj.Musicality.ui.theme.LocalPlaybackUiPalette
 import com.proj.Musicality.util.toCompactSongTitle
 import kotlinx.coroutines.launch
 
-private data class QueueItemMenuModel(
+internal data class QueueItemMenuModel(
     val title: String,
     val subtitle: String,
     val artistName: String,
@@ -545,7 +545,7 @@ fun QueueSheet(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun QueueItemActionsSheet(
+internal fun QueueItemActionsSheet(
     model: QueueItemMenuModel,
     onDismiss: () -> Unit,
     onViewArtist: () -> Unit,
@@ -689,7 +689,7 @@ private fun CrossfadeConnector() {
     }
 }
 
-private fun queueMenuModelFor(item: MediaItem, source: QueueSource): QueueItemMenuModel {
+internal fun queueMenuModelFor(item: MediaItem, source: QueueSource): QueueItemMenuModel {
     val subtitle = listOfNotNull(
         item.artistName.takeIf { it.isNotBlank() },
         item.albumName?.takeIf { it.isNotBlank() }

@@ -19,6 +19,24 @@ object NextParser {
     private const val MUSIC_VIDEO_TYPE_ATV = "MUSIC_VIDEO_TYPE_ATV"
     private const val MUSIC_VIDEO_TYPE_OMV = "MUSIC_VIDEO_TYPE_OMV"
 
+    fun extractRelatedBrowseId(jsonString: String): String? {
+        val response = runCatching {
+            JsonParser.instance.decodeFromString<NextResponse>(jsonString)
+        }.getOrNull() ?: return null
+
+        return response.contents
+            ?.singleColumnMusicWatchNextResultsRenderer
+            ?.tabbedRenderer
+            ?.watchNextTabbedResultsRenderer
+            ?.tabs
+            ?.firstOrNull { it.tabRenderer?.title?.equals("Related", ignoreCase = true) == true }
+            ?.tabRenderer
+            ?.endpoint
+            ?.browseEndpoint
+            ?.browseId
+            ?.takeIf { it.isNotBlank() }
+    }
+
     fun extractUpNextQueue(jsonString: String): PlaybackQueue? {
         val response = runCatching {
             JsonParser.instance.decodeFromString<NextResponse>(jsonString)

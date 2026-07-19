@@ -17,6 +17,7 @@ import androidx.media3.session.SessionToken
 import com.proj.Musicality.PlaybackService
 import com.proj.Musicality.api.LyricsRepository
 import com.proj.Musicality.api.RequestExecutor
+import com.proj.Musicality.api.RelatedRequestResolver
 import com.proj.Musicality.api.VisitorManager
 import com.proj.Musicality.api.StreamRequestResolver
 import com.proj.Musicality.cache.AppCache
@@ -27,6 +28,7 @@ import java.io.File
 import com.proj.Musicality.data.model.LyricsState
 import com.proj.Musicality.data.model.MediaItem
 import com.proj.Musicality.data.model.ProviderLoadState
+import com.proj.Musicality.data.model.RelatedState
 import com.proj.Musicality.lyrics.LyricsHelper
 import com.proj.Musicality.data.model.PlaybackQueue
 import com.proj.Musicality.data.model.QueueSource
@@ -101,10 +103,14 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
     private val _lyricsProviderStates = MutableStateFlow<Map<String, ProviderLoadState>>(emptyMap())
     val lyricsProviderStates: StateFlow<Map<String, ProviderLoadState>> = _lyricsProviderStates.asStateFlow()
 
+    private val _relatedState = MutableStateFlow<RelatedState>(RelatedState.Idle)
+    val relatedState: StateFlow<RelatedState> = _relatedState.asStateFlow()
+
     // videoId the lyricsProviderStates map currently corresponds to. Guards against
     // racing fetches when the user skips tracks rapidly.
     private var lyricsProviderTrackId: String? = null
     private var lyricsLazyLoadJob: Job? = null
+    private var relatedJob: Job? = null
 
     // ── Crossfade ──
     private val crossfadeManager = SimpleCrossfadeManager(application.applicationContext)
@@ -162,6 +168,42 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         _crossfadeEnabled.value = enabled
         com.proj.Musicality.config.AppConfig.setCrossfadeEnabled(enabled)
         crossfadeManager.setEnabled(enabled, getDelegatingPlayer())
+    }
+
+    fun loadRelated(videoId: String) {
+        if (videoId.isBlank()) return
+        when (val current = _relatedState.value) {
+            is RelatedState.Loaded -> if (current.videoId == videoId) return
+            is RelatedState.Loading -> if (current.videoId == videoId) return
+            else -> Unit
+        }
+
+        relatedJob?.cancel()
+        _relatedState.value = RelatedState.Loading(videoId)
+        relatedJob = viewModelScope.launch(Dispatchers.IO) {
+            val primaryArtist = _state.value.currentItem
+                ?.takeIf { it.videoId == videoId }
+            runCatching {
+                RelatedRequestResolver.fetchRelatedFeed(
+                    videoId = videoId,
+                    primaryArtistName = primaryArtist?.artistName,
+                    primaryArtistId = primaryArtist?.artistId
+                )
+            }
+                .onSuccess { feed ->
+                    _relatedState.value = if (feed != null) {
+                        RelatedState.Loaded(videoId, feed)
+                    } else {
+                        RelatedState.Error(videoId, "Related feed unavailable")
+                    }
+                }
+                .onFailure { error ->
+                    _relatedState.value = RelatedState.Error(
+                        videoId,
+                        error.message ?: "Unable to load related feed"
+                    )
+                }
+        }
     }
 
     private fun ensureServiceStarted() {
