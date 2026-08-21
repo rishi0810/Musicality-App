@@ -39,4 +39,8 @@ data class StreamingData(
 )
 
 @Serializable
-data class AdaptiveFormat(val itag: Int, val url: String? = null)
+data class AdaptiveFormat(
+    val itag: Int,
+    val url: String? = null,
+    val mimeType: String? = null
+)

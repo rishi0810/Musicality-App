@@ -199,8 +199,8 @@ object RequestExecutor {
                 "context": {
                     "client": {
                         "clientName": "WEB_REMIX",
-                        "clientVersion": "1.20260213.01.00",
-                        "gl": "US",
+                        "clientVersion": "${ApiConstants.ALL_SEARCH_CLIENT_VERSION}",
+                        "gl": "IN",
                         "hl": "en",
                         "visitorData": "$visitorId"
                     },
@@ -220,12 +220,13 @@ object RequestExecutor {
             .url(ApiConstants.SEARCH_URL + "?prettyPrint=false")
             .addHeader("x-goog-api-format-version", "1")
             .addHeader("x-youtube-client-name", "67")
-            .addHeader("x-youtube-client-version", "1.20260213.01.00")
+            .addHeader("x-youtube-client-version", ApiConstants.ALL_SEARCH_CLIENT_VERSION)
+            .addHeader("x-youtube-bootstrap-logged-in", "false")
             .addHeader("x-origin", "https://music.youtube.com")
             .addHeader("referer", "https://music.youtube.com/")
             .addHeader("x-goog-visitor-id", visitorId)
-            .addHeader("user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0")
-            .addHeader("accept", "application/json")
+            .addHeader("user-agent", ApiConstants.ALL_SEARCH_USER_AGENT)
+            .addHeader("accept", "*/*")
             .addHeader("accept-language", "en-US,en;q=0.9")
             .addHeader("cache-control", "no-cache")
             .addHeader("content-type", "application/json")
@@ -271,18 +272,44 @@ object RequestExecutor {
             Log.e(TAG, "executePlayerRequest: WARNING - visitorId is BLANK! Request will likely fail.")
         }
 
-        val body = """{"context":{"client":{"clientName":"${ApiConstants.ANDROID_VR_CLIENT_NAME}","clientVersion":"${ApiConstants.ANDROID_VR_CLIENT_VERSION}","osName":"Android","osVersion":"12","deviceMake":"Oculus","deviceModel":"Quest 3","androidSdkVersion":"32","gl":"US","hl":"en","visitorData":"$visitorId"},"request":{"internalExperimentFlags":[],"useSsl":true},"user":{"lockedSafetyMode":false}},"videoId":"$videoId","contentCheckOk":true,"racyCheckOk":true}"""
+        val body = """
+            {
+              "context": {
+                "client": {
+                  "clientName": "${ApiConstants.VISIONOS_CLIENT_NAME}",
+                  "clientVersion": "${ApiConstants.VISIONOS_CLIENT_VERSION}",
+                  "osName": "visionOS",
+                  "osVersion": "${ApiConstants.VISIONOS_OS_VERSION}",
+                  "deviceMake": "Apple",
+                  "deviceModel": "${ApiConstants.VISIONOS_DEVICE_MODEL}",
+                  "gl": "US",
+                  "hl": "en",
+                  "visitorData": "$visitorId"
+                },
+                "request": {
+                  "internalExperimentFlags": [],
+                  "useSsl": true
+                },
+                "user": {
+                  "lockedSafetyMode": false
+                }
+              },
+              "videoId": "$videoId",
+              "contentCheckOk": true,
+              "racyCheckOk": true
+            }
+        """.trimIndent()
             .toRequestBody(jsonMediaType)
 
         val request = Request.Builder()
             .url(ApiConstants.PLAYER_URL)
             .addHeader("x-goog-api-format-version", "1")
-            .addHeader("x-youtube-client-name", "28")
-            .addHeader("x-youtube-client-version", ApiConstants.ANDROID_VR_CLIENT_VERSION)
+            .addHeader("x-youtube-client-name", ApiConstants.VISIONOS_HEADER_CLIENT_NAME)
+            .addHeader("x-youtube-client-version", ApiConstants.VISIONOS_CLIENT_VERSION)
             .addHeader("x-origin", "https://music.youtube.com")
             .addHeader("referer", "https://music.youtube.com/")
             .addHeader("x-goog-visitor-id", visitorId)
-            .addHeader("user-agent", ApiConstants.ANDROID_VR_USER_AGENT)
+            .addHeader("user-agent", ApiConstants.VISIONOS_USER_AGENT)
             .addHeader("accept", "application/json")
             .addHeader("accept-language", "en-US,en;q=0.9")
             .addHeader("cache-control", "no-cache")
@@ -297,6 +324,7 @@ object RequestExecutor {
             if (code != 200) {
                 Log.e(TAG, "executePlayerRequest: NON-200 response: $code")
                 Log.e(TAG, "executePlayerRequest: response body (first 500): ${responseBody.take(500)}")
+                throw PlayerRequestException(videoId, code)
             } else {
                 Log.d(TAG, "executePlayerRequest: response body (first 300): ${responseBody.take(300)}")
             }

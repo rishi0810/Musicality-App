@@ -1,5 +1,8 @@
 package com.proj.Musicality
 
+import android.content.Intent
+import android.net.Uri
+import android.widget.Toast
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.fadeIn
@@ -70,6 +73,7 @@ import com.proj.Musicality.ui.components.ExpressiveBottomNavBar
 import com.proj.Musicality.ui.components.ExpressiveBottomNavItem
 import com.proj.Musicality.ui.components.HapticIconButton
 import com.proj.Musicality.ui.components.NetworkStatusToast
+import com.proj.Musicality.ui.player.PlaybackErrorReportSheet
 import com.proj.Musicality.ui.player.PlayerSheet
 import com.proj.Musicality.ui.screen.*
 import com.proj.Musicality.ui.theme.LocalPlaybackBackdropPalette
@@ -80,6 +84,7 @@ import com.proj.Musicality.ui.theme.rememberPlaybackBackdropPalette
 import com.proj.Musicality.ui.theme.rememberPlaybackUiPalette
 import com.proj.Musicality.update.AppUpdateManager
 import com.proj.Musicality.util.upscaleThumbnail
+import com.proj.Musicality.viewmodel.PlaybackErrorReport
 import com.proj.Musicality.viewmodel.PlaybackViewModel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -90,6 +95,7 @@ fun MusicApp() {
     val navController = rememberNavController()
     val context = LocalContext.current
     val playbackViewModel: PlaybackViewModel = viewModel()
+    val playbackErrorReport by playbackViewModel.playbackErrorReport.collectAsStateWithLifecycle()
     // Only subscribe to the hasMedia boolean — avoids full MusicApp recomposition on every state update
     val hasMediaFlow = remember(playbackViewModel) {
         playbackViewModel.state.map { it.hasMedia }.distinctUntilChanged()
@@ -776,6 +782,29 @@ fun MusicApp() {
         }
     }
 }
+            playbackErrorReport?.let { report ->
+                PlaybackErrorReportSheet(
+                    report = report,
+                    onDismiss = playbackViewModel::continueAfterPlaybackError,
+                    onReport = { userNotes ->
+                        val emailIntent = Intent(Intent.ACTION_SENDTO).apply {
+                            data = Uri.parse("mailto:${PlaybackErrorReport.REPORT_EMAIL}")
+                            putExtra(Intent.EXTRA_SUBJECT, "Musicality playback error")
+                            putExtra(Intent.EXTRA_TEXT, report.emailBody(userNotes))
+                        }
+                        playbackViewModel.continueAfterPlaybackError()
+                        runCatching {
+                            context.startActivity(Intent.createChooser(emailIntent, "Report playback error"))
+                        }.onFailure {
+                            Toast.makeText(
+                                context,
+                                "No email app is available",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        }
+                    }
+                )
+            }
             NetworkStatusToast(
                 isActive = true,
                 modifier = Modifier.align(Alignment.TopCenter)

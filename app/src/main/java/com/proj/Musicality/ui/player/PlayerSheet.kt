@@ -619,12 +619,13 @@ fun PlayerSheet(
                             )
                         }
 
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .verticalScroll(playerScrollState)
-                                .padding(top = PlayerControlsTopDistanceFromScreenTop)
-                        ) {
+                        CompositionLocalProvider(LocalOverscrollFactory provides null) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .verticalScroll(playerScrollState)
+                                    .padding(top = PlayerControlsTopDistanceFromScreenTop)
+                            ) {
                             // ── Row 1: Song title (full width, no trailing CTAs) ──
                             AnimatedContent(
                                 targetState = displayItem,
@@ -1012,6 +1013,7 @@ fun PlayerSheet(
                             )
                             Spacer(Modifier.height(24.dp))
                             Spacer(Modifier.height(48.dp))
+                            }
                         }
                     }
                     }

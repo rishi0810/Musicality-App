@@ -14,12 +14,13 @@ object StreamRequestResolver {
             return null
         }
 
-        val firstAttempt = runCatching {
+        val firstResult = runCatching {
             val json = RequestExecutor.executePlayerRequest(videoId, streamVisitorId)
             StreamParser.extractSongDetails(json)
         }.onFailure { throwable ->
             Log.e(TAG, "fetchSongPlaybackDetails: player request failed for '$videoId'", throwable)
-        }.getOrNull()
+        }
+        val firstAttempt = firstResult.getOrNull()
 
         if (!firstAttempt?.streamUrl.isNullOrBlank()) {
             return firstAttempt
@@ -27,14 +28,23 @@ object StreamRequestResolver {
 
         val refreshedVisitorId = VisitorManager.refreshStreamVisitorId()
         if (refreshedVisitorId.isBlank() || refreshedVisitorId == streamVisitorId) {
+            firstResult.exceptionOrNull()?.let { throw it }
             return firstAttempt
         }
 
-        return runCatching {
+        val retryResult = runCatching {
             val json = RequestExecutor.executePlayerRequest(videoId, refreshedVisitorId)
             StreamParser.extractSongDetails(json)
         }.onFailure { throwable ->
             Log.e(TAG, "fetchSongPlaybackDetails: player retry failed for '$videoId'", throwable)
-        }.getOrDefault(firstAttempt)
+        }
+        val retryAttempt = retryResult.getOrNull()
+        if (!retryAttempt?.streamUrl.isNullOrBlank()) {
+            return retryAttempt
+        }
+
+        retryResult.exceptionOrNull()?.let { throw it }
+        firstResult.exceptionOrNull()?.let { throw it }
+        return retryAttempt ?: firstAttempt
     }
 }

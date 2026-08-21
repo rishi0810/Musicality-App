@@ -12,10 +12,12 @@ import androidx.lifecycle.viewModelScope
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.datasource.HttpDataSource
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.proj.Musicality.PlaybackService
 import com.proj.Musicality.api.LyricsRepository
+import com.proj.Musicality.api.PlayerRequestException
 import com.proj.Musicality.api.RequestExecutor
 import com.proj.Musicality.api.RelatedRequestResolver
 import com.proj.Musicality.api.VisitorManager
@@ -45,6 +47,7 @@ import com.proj.Musicality.data.parser.NextParser
 import com.proj.Musicality.crossfade.SimpleCrossfadeManager
 import com.proj.Musicality.util.shouldRestartCurrentTrack
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -69,6 +72,46 @@ data class PlaybackState(
     val hasMedia: Boolean get() = currentItem != null
 }
 
+@androidx.compose.runtime.Immutable
+data class PlaybackErrorReport(
+    val videoId: String,
+    val title: String,
+    val artistName: String,
+    val reason: String,
+    val httpStatus: Int?,
+    val failedTrackWasCurrent: Boolean,
+) {
+    companion object {
+        const val REPORT_EMAIL = "rishi.1003raj@gmail.com"
+        private const val SEPARATOR =
+            "--------------------- PLEASE DO NOT ERASE ANYTHING ABOVE THIS LINE"
+    }
+
+    val fixedMessage: String
+        get() = buildString {
+            append("Error message: ")
+            append(reason)
+            httpStatus?.let {
+                append("\nHTTP status: ")
+                append(it)
+            }
+            append("\nSong: ")
+            append(title)
+            append("\nArtist: ")
+            append(artistName)
+            append("\nVideo ID: ")
+            append(videoId)
+            append("\n\n")
+            append(SEPARATOR)
+        }
+
+    fun emailBody(userNotes: String): String = buildString {
+        append(fixedMessage)
+        append("\n\n")
+        append(userNotes.trim())
+    }
+}
+
 class PlaybackViewModel(application: Application) : AndroidViewModel(application) {
     companion object {
         private const val TAG = "PlaybackViewModel"
@@ -78,13 +121,14 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         private const val LIBRARY_EXTENSION_SEED_COUNT = 5
         private const val LONG_FORM_THRESHOLD_SECONDS = 900L
         private const val PLAYED_CACHE_MIN_PLAY_MS = 20_000L
-        private const val MAX_CONSECUTIVE_FAILURES = 3
     }
 
     private val _state = MutableStateFlow(PlaybackState())
     val state: StateFlow<PlaybackState> = _state.asStateFlow()
     private val _positionMs = MutableStateFlow(0L)
     val positionMs: StateFlow<Long> = _positionMs.asStateFlow()
+    private val _playbackErrorReport = MutableStateFlow<PlaybackErrorReport?>(null)
+    val playbackErrorReport: StateFlow<PlaybackErrorReport?> = _playbackErrorReport.asStateFlow()
 
     // The videoId currently being resolved/downloaded before playback can start.
     // Non-null while fetchAndPlay is waiting on a stream URL or file download. The UI
@@ -135,7 +179,6 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
     private var lastRewindRealtimeMs: Long = 0L
     private var playedCacheTimerJob: Job? = null
     private var pendingPlayedCacheVideoId: String? = null
-    private var consecutivePlaybackFailures = 0
     private val listeningHistoryRepository =
         ListeningHistoryRepository.getInstance(application.applicationContext)
     private val libraryRepository =
@@ -299,7 +342,11 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
             override fun onPlayerError(error: PlaybackException) {
                 Log.e(TAG, "onPlayerError: code=${error.errorCode} msg=${error.localizedMessage}", error.cause)
                 val failedId = _state.value.currentItem?.videoId ?: return
-                handlePlaybackFailure(failedId, "ExoPlayer error: code=${error.errorCode}")
+                handlePlaybackFailure(
+                    videoId = failedId,
+                    reason = "ExoPlayer error: code=${error.errorCode}",
+                    httpStatus = findHttpStatus(error)
+                )
             }
 
             override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
@@ -478,6 +525,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun skipNext() {
+        if (_playbackErrorReport.value != null) return
         cancelUserDrivenCrossfade(reason = "skipNext")
         advanceToNextInternal()
     }
@@ -569,6 +617,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun skipPrev() {
+        if (_playbackErrorReport.value != null) return
         val wasTransitioning = crossfadeManager.isTransitioning()
         cancelUserDrivenCrossfade(reason = "skipPrev")
         val current = _state.value
@@ -648,6 +697,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun togglePlayPause() {
+        if (_playbackErrorReport.value != null) return
         cancelUserDrivenCrossfade(reason = "togglePlayPause")
 
         val exo = activePlayer() ?: return
@@ -678,6 +728,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
     }
 
     private fun autoAdvance() {
+        if (_playbackErrorReport.value != null) return
         val current = _state.value
         val next = nextIndexForQueue(current.queue)
         if (next != null) {
@@ -849,8 +900,21 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                 Log.d(TAG, "fetchAndPlay: durationText='${item.durationText}' parsed=${seconds}s threshold=${LONG_FORM_THRESHOLD_SECONDS}s")
                 seconds > LONG_FORM_THRESHOLD_SECONDS
             } else {
-                val details = withContext(Dispatchers.IO) {
-                    StreamRequestResolver.fetchSongPlaybackDetails(item.videoId)
+                val details = try {
+                    withContext(Dispatchers.IO) {
+                        StreamRequestResolver.fetchSongPlaybackDetails(item.videoId)
+                    }
+                } catch (error: Throwable) {
+                    if (error is CancellationException) throw error
+                    Log.e(TAG, "fetchAndPlay: playback details failed for '${item.videoId}'", error)
+                    withContext(Dispatchers.Main) {
+                        handlePlaybackFailure(
+                            videoId = item.videoId,
+                            reason = "Song playback details request failed",
+                            httpStatus = findHttpStatus(error)
+                        )
+                    }
+                    return@launch
                 }
                 details?.streamUrl?.let { AppCache.putStreamUrl(item.videoId, it) }
                 Log.d(TAG, "fetchAndPlay: durationText=null, API lengthSeconds=${details?.lengthSeconds} threshold=${LONG_FORM_THRESHOLD_SECONDS}s")
@@ -859,23 +923,39 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
 
             Log.d(TAG, "fetchAndPlay: videoId=${item.videoId} longForm=$longForm")
             if (longForm) {
-                val streamUrl = withContext(Dispatchers.IO) { resolveStreamUrl(item.videoId) }
+                val streamResult = withContext(Dispatchers.IO) { resolveStreamUrl(item.videoId) }
+                val streamUrl = streamResult.getOrNull()
                 if (streamUrl != null) {
                     val playableUrl = streamUrl.withFullRange()
                     Log.d(TAG, "fetchAndPlay: streaming long-form '${item.videoId}' (dur=${item.durationText})")
                     startLongFormPlayback(playableUrl, item)
                 } else {
                     Log.e(TAG, "fetchAndPlay: stream URL unavailable for long-form '${item.videoId}'")
-                    withContext(Dispatchers.Main) { handlePlaybackFailure(item.videoId, "long-form stream URL unavailable") }
+                    withContext(Dispatchers.Main) {
+                        handlePlaybackFailure(
+                            videoId = item.videoId,
+                            reason = "Long-form stream URL unavailable",
+                            httpStatus = findHttpStatus(streamResult.exceptionOrNull())
+                                ?: AudioFileCache.lastHttpError(item.videoId)
+                        )
+                    }
                 }
                 return@launch
             }
 
             if (!_crossfadeEnabled.value) {
-                val streamUrl = withContext(Dispatchers.IO) { resolveStreamUrl(item.videoId) }
+                val streamResult = withContext(Dispatchers.IO) { resolveStreamUrl(item.videoId) }
+                val streamUrl = streamResult.getOrNull()
                 if (streamUrl == null) {
                     Log.e(TAG, "fetchAndPlay: stream URL unavailable for '${item.videoId}'")
-                    withContext(Dispatchers.Main) { handlePlaybackFailure(item.videoId, "stream URL unavailable") }
+                    withContext(Dispatchers.Main) {
+                        handlePlaybackFailure(
+                            videoId = item.videoId,
+                            reason = "Stream URL unavailable",
+                            httpStatus = findHttpStatus(streamResult.exceptionOrNull())
+                                ?: AudioFileCache.lastHttpError(item.videoId)
+                        )
+                    }
                     return@launch
                 }
 
@@ -906,7 +986,13 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                 startPlayedCacheTimer(item, file)
             } else {
                 Log.e(TAG, "fetchAndPlay: Failed to download audio for '${item.videoId}'")
-                withContext(Dispatchers.Main) { handlePlaybackFailure(item.videoId, "audio download failed") }
+                withContext(Dispatchers.Main) {
+                    handlePlaybackFailure(
+                        videoId = item.videoId,
+                        reason = "Audio download failed",
+                        httpStatus = AudioFileCache.lastHttpError(item.videoId)
+                    )
+                }
             }
         }
     }
@@ -931,18 +1017,111 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         _loadingTrackId.update { current -> if (current == videoId) null else current }
     }
 
-    private fun handlePlaybackFailure(videoId: String, reason: String) {
-        Log.w(TAG, "handlePlaybackFailure: '$videoId' — $reason (consecutive=$consecutivePlaybackFailures)")
-        clearLoadingIfMatches(videoId)
-        consecutivePlaybackFailures++
-        if (consecutivePlaybackFailures >= MAX_CONSECUTIVE_FAILURES) {
-            Log.w(TAG, "handlePlaybackFailure: $MAX_CONSECUTIVE_FAILURES consecutive failures, stopping")
-            _state.update { it.copy(isPlaying = false) }
-            consecutivePlaybackFailures = 0
+    private fun handlePlaybackFailure(videoId: String, reason: String, httpStatus: Int? = null) {
+        if (_playbackErrorReport.value != null) return
+
+        val state = _state.value
+        val failedTrackWasCurrent = state.currentItem?.videoId == videoId
+        val failedTrackIsNext = (
+            nextIndexForQueue(state.queue)
+                ?.let { state.queue.items[it].videoId == videoId }
+                == true
+            )
+        if (!failedTrackWasCurrent && !failedTrackIsNext) {
+            Log.d(TAG, "Ignoring stale playback failure for '$videoId'")
             return
         }
-        if (_state.value.currentItem?.videoId != videoId) return
-        autoAdvance()
+        val failedItem = state.queue.items.firstOrNull { it.videoId == videoId }
+            ?: state.currentItem?.takeIf { it.videoId == videoId }
+            ?: MediaItem(
+                videoId = videoId,
+                title = videoId,
+                artistName = "Unknown artist",
+                artistId = null,
+                albumName = null,
+                albumId = null,
+                thumbnailUrl = null,
+                durationText = null,
+                musicVideoType = null
+            )
+
+        Log.w(TAG, "handlePlaybackFailure: '$videoId' — $reason${httpStatus?.let { " (HTTP $it)" }.orEmpty()}")
+        clearLoadingIfMatches(videoId)
+        AudioFileCache.unpin(videoId)
+        if (!failedTrackWasCurrent) {
+            removeFailedQueueItem(videoId)
+        }
+        crossfadeManager.cancelTransition(
+            delegatingPlayer = getDelegatingPlayer(),
+            commitToIncoming = false,
+            reason = "playbackError"
+        )
+        crossfadeManager.resetTriggerForTrack(_state.value.currentItem?.videoId)
+        activePlayer()?.pause()
+        stopPositionPolling()
+        _state.update { it.copy(isPlaying = false) }
+        _playbackErrorReport.value = PlaybackErrorReport(
+            videoId = failedItem.videoId,
+            title = failedItem.title,
+            artistName = failedItem.artistName,
+            reason = reason,
+            httpStatus = httpStatus,
+            failedTrackWasCurrent = failedTrackWasCurrent
+        )
+    }
+
+    fun continueAfterPlaybackError() {
+        val report = _playbackErrorReport.value ?: return
+        _playbackErrorReport.value = null
+
+        if (report.failedTrackWasCurrent) {
+            autoAdvance()
+            return
+        }
+
+        val player = activePlayer()
+        if (player?.playbackState == Player.STATE_ENDED) {
+            autoAdvance()
+            return
+        }
+        player?.play()
+        if (player != null) {
+            _state.update { it.copy(isPlaying = true) }
+            startPositionPolling()
+        }
+    }
+
+    private fun removeFailedQueueItem(videoId: String) {
+        _state.update { state ->
+            if (state.currentItem?.videoId == videoId) return@update state
+            val failedIndex = state.queue.items.indexOfFirst { it.videoId == videoId }
+            if (failedIndex < 0 || state.queue.items.size <= 1) return@update state
+
+            val items = state.queue.items.toMutableList().apply { removeAt(failedIndex) }
+            val currentIndex = if (failedIndex < state.queue.currentIndex) {
+                state.queue.currentIndex - 1
+            } else {
+                state.queue.currentIndex
+            }
+            state.copy(
+                queue = state.queue.copy(
+                    items = items,
+                    currentIndex = currentIndex.coerceIn(0, items.lastIndex)
+                )
+            )
+        }
+    }
+
+    private fun findHttpStatus(error: Throwable?): Int? {
+        var current = error
+        while (current != null) {
+            when (current) {
+                is HttpDataSource.InvalidResponseCodeException -> return current.responseCode
+                is PlayerRequestException -> return current.statusCode
+            }
+            current = current.cause
+        }
+        return null
     }
 
     private fun startPlayedCacheTimer(item: MediaItem, sourceFile: File) {
@@ -997,7 +1176,6 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
             exo.setMediaItem(media3Item)
             exo.prepare()
             exo.play()
-            consecutivePlaybackFailures = 0
             clearLoadingIfMatches(item.videoId)
         }
     }
@@ -1055,7 +1233,6 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
             exo.setMediaSource(mediaSource)
             exo.prepare()
             exo.play()
-            consecutivePlaybackFailures = 0
             clearLoadingIfMatches(item.videoId)
         }
     }
@@ -1077,7 +1254,14 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
             Log.w(TAG, "prepareCrossfade: PLAYED next '${nextItem.videoId}' has no local file; skipping prep")
             return null
         } else {
-            AudioFileCache.getOrDownload(nextItem.videoId) ?: return null
+            AudioFileCache.getOrDownload(nextItem.videoId) ?: run {
+                handlePlaybackFailure(
+                    videoId = nextItem.videoId,
+                    reason = "Crossfade audio download failed",
+                    httpStatus = AudioFileCache.lastHttpError(nextItem.videoId)
+                )
+                return null
+            }
         }
         val uri = file.toURI().toString()
         val media3 = androidx.media3.common.MediaItem.Builder()
@@ -1127,6 +1311,14 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                 AudioFileCache.unpinAll(except = pendingPlayedCacheVideoId)
                 AudioFileCache.pin(nextItem.videoId)
                 prefetchNext(_state.value.queue)
+            },
+            onCrossfadeError = { error ->
+                handlePlaybackFailure(
+                    videoId = nextItem.videoId,
+                    reason = "Crossfade playback failed",
+                    httpStatus = findHttpStatus(error)
+                        ?: AudioFileCache.lastHttpError(nextItem.videoId)
+                )
             }
         )
     }
@@ -1240,15 +1432,18 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         return parseDurationToSeconds(item.durationText) > LONG_FORM_THRESHOLD_SECONDS
     }
 
-    private suspend fun resolveStreamUrl(videoId: String): String? {
+    private suspend fun resolveStreamUrl(videoId: String): Result<String> {
         val cached = AppCache.getStreamUrl(videoId)
-        if (!cached.isNullOrBlank()) return cached
+        if (!cached.isNullOrBlank()) return Result.success(cached)
         return runCatching {
             val details = StreamRequestResolver.fetchSongPlaybackDetails(videoId)
-            details?.streamUrl?.also { AppCache.putStreamUrl(videoId, it) }
+            val streamUrl = details?.streamUrl
+            require(!streamUrl.isNullOrBlank()) { "No stream URL returned for '$videoId'" }
+            AppCache.putStreamUrl(videoId, streamUrl)
+            streamUrl
         }.onFailure {
             Log.e(TAG, "resolveStreamUrl: failed for '$videoId'", it)
-        }.getOrNull()
+        }
     }
 
     private fun String.withFullRange(): String {

@@ -2,6 +2,7 @@ package com.proj.Musicality.cache
 
 import android.content.Context
 import android.util.Log
+import com.proj.Musicality.api.PlayerRequestException
 import com.proj.Musicality.api.StreamRequestResolver
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -41,6 +42,7 @@ object AudioFileCache {
     private val downloadScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val stateLock = Any()
     private val inFlightDownloads = ConcurrentHashMap<String, kotlinx.coroutines.Deferred<File?>>()
+    private val lastHttpErrors = ConcurrentHashMap<String, Int>()
 
     /** videoId → File, ordered by access time (most recent last). */
     private val fileMap = LinkedHashMap<String, File>(MAX_CACHED_FILES + 2, 0.75f, true)
@@ -86,6 +88,8 @@ object AudioFileCache {
             }
         }
     }
+
+    fun lastHttpError(videoId: String): Int? = lastHttpErrors[videoId]
 
     /**
      * Get the cached file for [videoId], or download it first.
@@ -143,6 +147,7 @@ object AudioFileCache {
     }
 
     private suspend fun downloadAndCache(videoId: String): File? {
+        lastHttpErrors.remove(videoId)
         synchronized(stateLock) {
             existingCachedFileLocked(videoId)?.let { existing ->
                 Log.d(TAG, "CACHE HIT for '$videoId' (${existing.length() / 1024}KB)")
@@ -158,6 +163,7 @@ object AudioFileCache {
         val file = runCatching {
             client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
+                    lastHttpErrors[videoId] = response.code
                     Log.e(TAG, "Download failed: HTTP ${response.code} for '$videoId'")
                     return@use null
                 }
@@ -178,6 +184,7 @@ object AudioFileCache {
         }.getOrNull()
 
         if (file != null && file.exists() && file.length() > 0) {
+            lastHttpErrors.remove(videoId)
             synchronized(stateLock) {
                 fileMap[videoId] = file
                 evictIfNeededLocked()
@@ -220,6 +227,9 @@ object AudioFileCache {
             val details = StreamRequestResolver.fetchSongPlaybackDetails(videoId)
             details?.streamUrl?.also { AppCache.putStreamUrl(videoId, it) }
         }.onFailure {
+            if (it is PlayerRequestException) {
+                lastHttpErrors[videoId] = it.statusCode
+            }
             Log.e(TAG, "Failed to resolve stream URL for '$videoId'", it)
         }.getOrNull()
     }

@@ -13,7 +13,7 @@ enum class CornerRadiusPreset(val label: String, val scale: Float) {
     NONE("Sharp", 0f),
     SMALL("Small", 0.5f),
     DEFAULT("Default", 1f),
-    LARGE("Rounded", 1.5f)
+    LARGE("Rounded", 2.5f)
 }
 
 val LocalCornerRadius = compositionLocalOf { CornerRadiusPreset.DEFAULT }

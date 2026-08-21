@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.SystemClock
 import android.util.Log
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import kotlinx.coroutines.CancellationException
@@ -26,7 +27,8 @@ import kotlin.math.sin
 data class CrossfadeNextTrack(
     val mediaItem: MediaItem,
     val onCrossfadeStart: suspend () -> Unit,
-    val onCrossfadeComplete: suspend () -> Unit
+    val onCrossfadeComplete: suspend () -> Unit,
+    val onCrossfadeError: suspend (Throwable) -> Unit = {}
 )
 
 /**
@@ -333,6 +335,13 @@ class SimpleCrossfadeManager(@Suppress("UNUSED_PARAMETER") private val context: 
             incomingProc = incomingProc
         )
         transitionState = state
+        var incomingError: PlaybackException? = null
+        val incomingListener = object : Player.Listener {
+            override fun onPlayerError(error: PlaybackException) {
+                incomingError = error
+            }
+        }
+        incoming.addListener(incomingListener)
 
         try {
             // ── Prime processors ──
@@ -358,13 +367,14 @@ class SimpleCrossfadeManager(@Suppress("UNUSED_PARAMETER") private val context: 
             // Wait for incoming to actually start producing audio.
             var waited = 0L
             while (!incoming.isPlaying && waited < 3_000L) {
+                incomingError?.let { throw it }
                 delay(STEP_MS)
                 waited += STEP_MS
             }
             if (!incoming.isPlaying) {
                 Log.e(TAG, "Incoming player failed to start, aborting crossfade")
                 incoming.stop()
-                return
+                throw incomingError ?: IllegalStateException("Incoming player did not start")
             }
 
             // ── Pre-roll: settle, optionally absorb leading silence, then sample ──
@@ -430,6 +440,7 @@ class SimpleCrossfadeManager(@Suppress("UNUSED_PARAMETER") private val context: 
             var pausedDueToOutgoing = false
 
             while (true) {
+                incomingError?.let { throw it }
                 val now = SystemClock.elapsedRealtime()
                 val userWantsPlayback = outgoing.playWhenReady
 
@@ -523,7 +534,12 @@ class SimpleCrossfadeManager(@Suppress("UNUSED_PARAMETER") private val context: 
         } catch (cancelled: CancellationException) {
             abortTransition(state, commitToIncoming = state.uiSwitchedToIncoming)
             throw cancelled
+        } catch (error: Exception) {
+            abortTransition(state, commitToIncoming = false)
+            runCatching { nextTrack.onCrossfadeError(error) }
+            throw error
         } finally {
+            incoming.removeListener(incomingListener)
             transitionState = null
         }
     }

@@ -26,7 +26,13 @@ data class SearchSectionList(val contents: List<SearchSectionContent> = emptyLis
 @Serializable
 data class SearchSectionContent(
     val musicShelfRenderer: SearchMusicShelfRenderer? = null,
-    val musicCardShelfRenderer: MusicCardShelfRenderer? = null
+    val musicCardShelfRenderer: MusicCardShelfRenderer? = null,
+    val itemSectionRenderer: ItemSectionRenderer? = null
+)
+
+@Serializable
+data class ItemSectionRenderer(
+    val contents: List<MusicResponsiveListItemWrapper> = emptyList()
 )
 
 @Serializable

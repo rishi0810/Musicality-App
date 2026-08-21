@@ -8,10 +8,11 @@ import com.proj.Musicality.data.model.SongPlaybackDetails
 
 object StreamParser {
     private const val TAG = "StreamParser"
+    private val preferredAudioItags = listOf(251, 140, 250, 249, 139)
+    private val audioItags = preferredAudioItags.toSet()
 
     fun extractSongDetails(jsonResponse: String): SongPlaybackDetails {
         Log.d(TAG, "extractSongDetails: parsing response (${jsonResponse.length} chars)")
-        Log.d(TAG, "extractSongDetails: response (first 500): ${jsonResponse.take(500)}")
 
         val response = JsonParser.instance.decodeFromString<StreamResponse>(jsonResponse)
         val player = response.playerResponse
@@ -26,8 +27,7 @@ object StreamParser {
         val hasVideoDetails = player.videoDetails != null
         Log.d(TAG, "extractSongDetails: playerResponse=$hasPlayerResponse, streamingData=$hasStreamingData, videoDetails=$hasVideoDetails")
 
-        // Short-circuit on explicit playability errors so we don't waste a retry
-        // + VR fallback on something YT already said is unplayable.
+        // Do not retry a response that explicitly marks the video as unplayable.
         val playability = player.playabilityStatus
         if (playability?.status != null && playability.status != "OK") {
             Log.w(TAG, "extractSongDetails: playability=${playability.status} reason='${playability.reason}' — returning empty details")
@@ -44,19 +44,25 @@ object StreamParser {
         val streamingData = player.streamingData
         val formats = (streamingData?.adaptiveFormats ?: emptyList()) + (streamingData?.formats ?: emptyList())
         val details = player.videoDetails
-        Log.d(TAG, "extractSongDetails: ${formats.size} adaptive formats found")
+        Log.d(TAG, "extractSongDetails: ${formats.size} formats found")
         formats.forEach { fmt ->
-            Log.d(TAG, "  format: itag=${fmt.itag}, url=${if (fmt.url != null) "${fmt.url.take(80)}..." else "NULL"}")
+            Log.d(TAG, "  format: itag=${fmt.itag}, mime=${fmt.mimeType ?: "unknown"}, hasUrl=${!fmt.url.isNullOrBlank()}")
         }
 
-        val bestFormat = formats.find { it.itag == 251 }
-            ?: formats.find { it.itag == 140 }
+        val directAudioFormats = formats.filter { format ->
+            !format.url.isNullOrBlank() &&
+                (format.mimeType?.startsWith("audio/") == true || format.itag in audioItags)
+        }
+        val bestFormat = preferredAudioItags.asSequence()
+            .mapNotNull { itag -> directAudioFormats.firstOrNull { it.itag == itag } }
+            .firstOrNull()
+            ?: directAudioFormats.maxByOrNull { it.itag }
 
         if (bestFormat != null) {
-            Log.d(TAG, "extractSongDetails: selected itag=${bestFormat.itag}, url=${bestFormat.url?.take(100)}...")
+            Log.d(TAG, "extractSongDetails: selected itag=${bestFormat.itag}, mime=${bestFormat.mimeType ?: "unknown"}")
         } else {
-            Log.e(TAG, "extractSongDetails: NO suitable format found (no itag 251 or 140)!")
-            Log.e(TAG, "extractSongDetails: available itags: ${formats.map { it.itag }}")
+            Log.e(TAG, "extractSongDetails: no direct audio format found")
+            Log.e(TAG, "extractSongDetails: available formats: ${formats.map { "${it.itag}:${it.mimeType ?: "unknown"}:${!it.url.isNullOrBlank()}" }}")
         }
 
         return SongPlaybackDetails(
