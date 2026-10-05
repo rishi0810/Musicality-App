@@ -17,6 +17,7 @@ enum class QueueSource {
     PLAYLIST,
     ARTIST_TOP_SONGS,
     LIKED_SONGS,
+    CUSTOM_ALBUM,
     TOP_SONGS,
     LIBRARY,
     DOWNLOADED,

@@ -52,7 +52,18 @@ data class MediaDownloadState(
 )
 
 @Immutable
+data class CustomAlbum(
+    val id: String,
+    val name: String,
+    val artworkPath: String?,
+    val createdAt: Long,
+    val updatedAt: Long,
+    val itemCount: Int = 0
+)
+
+@Immutable
 data class LibrarySnapshot(
+    val customAlbums: List<CustomAlbum> = emptyList(),
     val likedSongs: List<MediaItem> = emptyList(),
     val topSongs: List<MediaItem> = emptyList(),
     val downloadedMedia: List<MediaItem> = emptyList(),

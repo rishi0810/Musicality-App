@@ -1,5 +1,10 @@
 package com.proj.Musicality.data.local
 
+import android.graphics.ImageDecoder
+import android.graphics.Bitmap
+import android.net.Uri
+import java.util.UUID
+import kotlinx.coroutines.flow.flowOn
 import android.content.Context
 import android.util.Log
 import com.proj.Musicality.api.StreamRequestResolver
@@ -49,12 +54,106 @@ class LibraryRepository private constructor(
 
     init {
         repositoryScope.launch {
-            _snapshot.value = loadSnapshot()
+            writeMutex.withLock { _snapshot.value = loadSnapshot() }
         }
     }
 
     suspend fun refresh() = withContext(Dispatchers.IO) {
-        _snapshot.value = loadSnapshot()
+        writeMutex.withLock { _snapshot.value = loadSnapshot() }
+    }
+
+    suspend fun createCustomAlbum(name: String, artworkUri: Uri?): CustomAlbum = withContext(Dispatchers.IO) {
+        writeMutex.withLock {
+            val normalized = validateCustomAlbumName(name)
+            val now = System.currentTimeMillis()
+            val id = UUID.randomUUID().toString()
+            val artworkPath = artworkUri?.let { importCustomArtwork(it) }
+            val album = CustomAlbum(id, normalized, artworkPath, now, now)
+            try {
+                db.insertCustomAlbum(album)
+            } catch (error: Exception) {
+                artworkPath?.let { File(it).delete() }
+                throw error
+            }
+            _snapshot.value = loadSnapshot()
+            album
+        }
+    }
+
+    suspend fun editCustomAlbum(albumId: String, name: String, artworkUri: Uri?, removeArtwork: Boolean = false) =
+        withContext(Dispatchers.IO) {
+            writeMutex.withLock {
+                val normalized = validateCustomAlbumName(name)
+                val existing = db.getCustomAlbums().firstOrNull { it.id == albumId }
+                    ?: error("Album no longer exists.")
+                val imported = artworkUri?.let { importCustomArtwork(it) }
+                val nextPath = imported ?: existing.artworkPath.takeUnless { removeArtwork }
+                try {
+                    db.updateCustomAlbum(albumId, normalized, nextPath, System.currentTimeMillis())
+                } catch (error: Exception) {
+                    imported?.let { File(it).delete() }
+                    throw error
+                }
+                if (nextPath != existing.artworkPath) existing.artworkPath?.let { File(it).delete() }
+                _snapshot.value = loadSnapshot()
+            }
+        }
+
+    suspend fun deleteCustomAlbum(albumId: String) = withContext(Dispatchers.IO) {
+        writeMutex.withLock {
+            val artworkPath = db.getCustomAlbums().firstOrNull { it.id == albumId }?.artworkPath
+            db.deleteCustomAlbum(albumId)
+            artworkPath?.let { File(it).delete() }
+            _snapshot.value = loadSnapshot()
+        }
+    }
+
+    suspend fun addToCustomAlbum(albumId: String, item: MediaItem): Boolean = withContext(Dispatchers.IO) {
+        writeMutex.withLock {
+            val inserted = db.addCustomAlbumItem(albumId, item, System.currentTimeMillis())
+            _snapshot.value = loadSnapshot()
+            inserted
+        }
+    }
+
+    suspend fun removeFromCustomAlbum(albumId: String, videoId: String) = withContext(Dispatchers.IO) {
+        writeMutex.withLock {
+            db.removeCustomAlbumItem(albumId, videoId, System.currentTimeMillis())
+            _snapshot.value = loadSnapshot()
+        }
+    }
+
+    fun observeCustomAlbumItems(albumId: String): Flow<List<MediaItem>> = snapshot
+        .map { db.getCustomAlbumItems(albumId) }.distinctUntilChanged().flowOn(Dispatchers.IO)
+
+    fun observeCustomAlbumMembership(videoId: String): Flow<Set<String>> = snapshot
+        .map { db.getCustomAlbumIdsForTrack(videoId) }.distinctUntilChanged().flowOn(Dispatchers.IO)
+
+    private fun validateCustomAlbumName(name: String): String = name.trim().also {
+        require(it.isNotEmpty()) { "Enter an album name." }
+        require(it.length <= 100) { "Use 100 characters or fewer." }
+    }
+
+    private fun importCustomArtwork(uri: Uri): String {
+        val directory = File(appContext.filesDir, "custom_album_artwork").apply { mkdirs() }
+        val file = File(directory, "${UUID.randomUUID()}.jpg")
+        val bitmap = ImageDecoder.decodeBitmap(ImageDecoder.createSource(appContext.contentResolver, uri)) { decoder, info, _ ->
+            decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+            val largest = maxOf(info.size.width, info.size.height)
+            if (largest > 1024) decoder.setTargetSize(
+                (info.size.width * 1024L / largest).toInt().coerceAtLeast(1),
+                (info.size.height * 1024L / largest).toInt().coerceAtLeast(1)
+            )
+        }
+        try {
+            file.outputStream().use { check(bitmap.compress(Bitmap.CompressFormat.JPEG, 90, it)) { "Could not save artwork." } }
+            return file.absolutePath
+        } catch (error: Exception) {
+            file.delete()
+            throw error
+        } finally {
+            bitmap.recycle()
+        }
     }
 
     suspend fun toggleLike(item: MediaItem): Boolean = withContext(Dispatchers.IO) {
@@ -637,6 +736,7 @@ class LibraryRepository private constructor(
         }
 
         return LibrarySnapshot(
+            customAlbums = db.getCustomAlbums(),
             likedSongs = likedSongs,
             topSongs = topSongs,
             downloadedMedia = downloadedMedia,

@@ -78,6 +78,12 @@ import com.proj.Musicality.data.local.LibraryRepository
 import com.proj.Musicality.data.local.MediaLibraryState
 import com.proj.Musicality.data.model.PlaybackQueue
 import com.proj.Musicality.data.model.QueueSource
+import com.proj.Musicality.ui.components.CustomAlbumFormSheet
+import com.proj.Musicality.ui.components.CustomAlbumArtwork
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import com.proj.Musicality.ui.components.HapticFilledTonalButton
 import com.proj.Musicality.ui.components.HapticOutlinedButton
 import com.proj.Musicality.ui.components.SongListItem
@@ -105,7 +111,9 @@ fun LibraryCollectionScreen(
     onAddToQueue: (com.proj.Musicality.data.model.MediaItem) -> Unit,
     onArtistTap: (String, String, String?) -> Unit,
     collapsedMiniPlayerHeight: Dp,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    customAlbumId: String? = null,
+    onAlbumDeleted: () -> Unit = {}
 ) {
     val radiusPreset = LocalCornerRadius.current
     val context = LocalContext.current
@@ -114,28 +122,32 @@ fun LibraryCollectionScreen(
     }
     val snapshot by repository.snapshot.collectAsStateWithLifecycle()
     val downloadStates by repository.downloadStates.collectAsStateWithLifecycle()
-    val items = when (collectionType) {
+    val customAlbum = snapshot.customAlbums.firstOrNull { it.id == customAlbumId }
+    val customItems by remember(repository, customAlbumId) {
+        repository.observeCustomAlbumItems(customAlbumId.orEmpty())
+    }.collectAsStateWithLifecycle(initialValue = emptyList())
+    val items = if (customAlbumId != null) customItems else when (collectionType) {
         LibraryCollectionType.LIKED -> snapshot.likedSongs
         LibraryCollectionType.TOP_SONGS -> snapshot.topSongs
         LibraryCollectionType.DOWNLOADED -> snapshot.downloadedMedia
         LibraryCollectionType.PLAYED -> snapshot.playedSongs
     }
 
-    val title = when (collectionType) {
+    val title = if (customAlbumId != null) customAlbum?.name ?: "Album" else when (collectionType) {
         LibraryCollectionType.LIKED -> "Liked Songs"
         LibraryCollectionType.TOP_SONGS -> "Top Songs"
         LibraryCollectionType.DOWNLOADED -> "Downloads"
         LibraryCollectionType.PLAYED -> "Played"
     }
-    val queueSource = when (collectionType) {
+    val queueSource = if (customAlbumId != null) QueueSource.CUSTOM_ALBUM else when (collectionType) {
         LibraryCollectionType.LIKED -> QueueSource.LIKED_SONGS
         LibraryCollectionType.TOP_SONGS -> QueueSource.TOP_SONGS
         LibraryCollectionType.DOWNLOADED -> QueueSource.DOWNLOADED
         LibraryCollectionType.PLAYED -> QueueSource.PLAYED
     }
-    val isDownloadedCollection = collectionType == LibraryCollectionType.DOWNLOADED
-            || collectionType == LibraryCollectionType.PLAYED
-    val artworkUrl = items.firstOrNull()?.thumbnailUrl
+    val isDownloadedCollection = customAlbumId == null && (collectionType == LibraryCollectionType.DOWNLOADED
+            || collectionType == LibraryCollectionType.PLAYED)
+    val artworkUrl = if (customAlbumId != null) customAlbum?.artworkPath?.let { java.io.File(it).toURI().toString() } else items.firstOrNull()?.thumbnailUrl
     val albumColors = rememberAlbumColors(
         imageUrl = artworkUrl,
         fallbackPrimary = MaterialTheme.colorScheme.primaryContainer,
@@ -145,6 +157,10 @@ fun LibraryCollectionScreen(
     val countLabel = "${items.size} ${if (items.size == 1) "song" else "songs"}"
     val surfaceColor = MaterialTheme.colorScheme.surface
     val scope = rememberCoroutineScope()
+    var showEditAlbum by remember { mutableStateOf(false) }
+    var showDeleteAlbum by remember { mutableStateOf(false) }
+    var deletingAlbum by remember { mutableStateOf(false) }
+    var albumError by remember { mutableStateOf<String?>(null) }
     var selectedTrackMenu by remember { mutableStateOf<LibraryTrackMenuModel?>(null) }
 
     Box(
@@ -179,7 +195,9 @@ fun LibraryCollectionScreen(
                         .padding(top = 24.dp + statusBarTop, start = 24.dp, end = 24.dp, bottom = 24.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    if (hasArtwork) {
+                    if (customAlbumId != null) {
+                        CustomAlbumArtwork(customAlbum?.artworkPath, Modifier.size(220.dp))
+                    } else if (hasArtwork) {
                         Thumbnail(
                             url = artworkUrl,
                             size = 220.dp,
@@ -242,6 +260,13 @@ fun LibraryCollectionScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center
                     )
+                    if (customAlbum != null) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            TextButton(onClick = { showEditAlbum = true }) { Text("Edit album") }
+                            TextButton(onClick = { showDeleteAlbum = true }) { Text("Delete album") }
+                        }
+                    }
+                    albumError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                     Spacer(Modifier.height(12.dp))
                 }
             }
@@ -295,7 +320,7 @@ fun LibraryCollectionScreen(
             if (items.isEmpty()) {
                 item(key = "empty-state") {
                     Text(
-                        text = "No items yet",
+                        text = if (customAlbumId != null) "No songs yet. Use Add in the player to add a song." else "No items yet",
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier
@@ -338,6 +363,38 @@ fun LibraryCollectionScreen(
         }
     }
 
+    if (showEditAlbum && customAlbum != null) {
+        CustomAlbumFormSheet(repository, onDismiss = { showEditAlbum = false },
+            onSaved = { showEditAlbum = false }, album = customAlbum)
+    }
+    if (showDeleteAlbum && customAlbum != null) {
+        AlertDialog(
+            onDismissRequest = { if (!deletingAlbum) showDeleteAlbum = false },
+            title = { Text("Delete album?") },
+            text = { Text("Delete ${customAlbum.name} and its song list?") },
+            confirmButton = {
+                TextButton(enabled = !deletingAlbum, onClick = {
+                    deletingAlbum = true
+                    scope.launch(Dispatchers.Main) {
+                        try {
+                            repository.deleteCustomAlbum(customAlbum.id)
+                            showDeleteAlbum = false
+                            onAlbumDeleted()
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (_: Exception) {
+                            showDeleteAlbum = false
+                            albumError = "Could not delete the album. Please try again."
+                        } finally {
+                            deletingAlbum = false
+                        }
+                    }
+                }) { Text(if (deletingAlbum) "Deleting…" else "Delete") }
+            },
+            dismissButton = { TextButton(enabled = !deletingAlbum, onClick = { showDeleteAlbum = false }) { Text("Cancel") } }
+        )
+    }
+
     selectedTrackMenu?.let { menu ->
         val mediaState by remember(menu.mediaItem.videoId) {
             repository.observeMediaState(menu.mediaItem.videoId)
@@ -353,9 +410,16 @@ fun LibraryCollectionScreen(
                 selectedTrackMenu = null
             },
             onRemoveFromCollection = {
-                scope.launch {
-                    repository.removeFromCollection(collectionType, menu.mediaItem)
-                    Toast.makeText(context, "Removed: ${menu.title}", Toast.LENGTH_SHORT).show()
+                scope.launch(Dispatchers.Main) {
+                    try {
+                        if (customAlbumId != null) repository.removeFromCustomAlbum(customAlbumId, menu.mediaItem.videoId)
+                        else repository.removeFromCollection(collectionType, menu.mediaItem)
+                        Toast.makeText(context, "Removed: ${menu.title}", Toast.LENGTH_SHORT).show()
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        Toast.makeText(context, "Could not remove the song. Please try again.", Toast.LENGTH_SHORT).show()
+                    }
                 }
                 selectedTrackMenu = null
             },

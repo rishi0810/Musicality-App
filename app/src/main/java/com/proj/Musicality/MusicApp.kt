@@ -254,6 +254,13 @@ fun MusicApp() {
             navController.navigate(Route.Playlist(title, playlistId, author, upscaleThumbnail(thumbnailUrl)))
         }
     }
+    val navToCustomAlbum = remember(navController) {
+        { id: String -> navController.navigate(Route.CustomAlbum(id)) }
+    }
+    val onCustomAlbumDeleted = remember(navController) {
+        { navController.popBackStack(); Unit }
+    }
+
     // Track selected bottom nav tab
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
 
@@ -288,7 +295,7 @@ fun MusicApp() {
         when {
             route.endsWith("Home") -> selectedTab = 0
             route.endsWith("Search") || route.endsWith("Explore") -> selectedTab = 1
-            route.endsWith("Library") || route.contains("LibraryCollection") -> selectedTab = 2
+            route.endsWith("Library") || route.contains("LibraryCollection") || route.contains("CustomAlbum") -> selectedTab = 2
         }
     }
     LaunchedEffect(context) {
@@ -647,10 +654,12 @@ fun MusicApp() {
                     composable<Route.Library> {
                         LibraryScreen(
                         modifier = Modifier.statusBarsPadding(),
+                        bottomContentPadding = floatingControlsHeight + 3.dp,
                         animatedVisibilityScope = this@composable,
                         onOpenCollection = { collectionType ->
                             navController.navigate(Route.LibraryCollection(collectionType.name))
                         },
+                        onOpenCustomAlbum = navToCustomAlbum,
                         onOpenArtist = navToArtist,
                         onOpenPlaylist = navToPlaylist,
                         onOpenAlbum = navToAlbum5
@@ -674,6 +683,25 @@ fun MusicApp() {
                             onArtistTap = navToArtistNoThumb,
                             collapsedMiniPlayerHeight = floatingControlsHeight + 3.dp,
                             modifier = Modifier
+                        )
+                    }
+
+                    composable<Route.CustomAlbum>(
+                        enterTransition = { slideInHorizontally(navSpring) { it } },
+                        exitTransition = { slideOutHorizontally(navSpring) { -it / 4 } + fadeOut(motionScheme.fastEffectsSpec()) },
+                        popEnterTransition = { slideInHorizontally(navSpring) { -it / 4 } + fadeIn(motionScheme.defaultEffectsSpec()) },
+                        popExitTransition = { slideOutHorizontally(navSpring) { it } + fadeOut(motionScheme.fastEffectsSpec()) }
+                    ) { backStackEntry ->
+                        val route = backStackEntry.toRoute<Route.CustomAlbum>()
+                        LibraryCollectionScreen(
+                            collectionType = LibraryCollectionType.LIKED,
+                            customAlbumId = route.albumId,
+                            onAlbumDeleted = onCustomAlbumDeleted,
+                            onTrackTap = onPlayQueue,
+                            onPlayNext = onPlayNext,
+                            onAddToQueue = onAddToQueue,
+                            onArtistTap = navToArtistNoThumb,
+                            collapsedMiniPlayerHeight = floatingControlsHeight + 3.dp
                         )
                     }
 

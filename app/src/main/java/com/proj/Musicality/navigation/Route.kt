@@ -28,6 +28,9 @@ sealed interface Route {
     ) : Route
 
     @Serializable
+    data class CustomAlbum(val albumId: String) : Route
+
+    @Serializable
     data class Artist(
         val name: String,
         val browseId: String,

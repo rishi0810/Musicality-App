@@ -1,5 +1,7 @@
 package com.proj.Musicality.data.local
 
+import androidx.core.database.sqlite.transaction
+import com.proj.Musicality.data.model.MediaItem
 import android.content.ContentValues
 import android.content.Context
 import android.database.Cursor
@@ -119,6 +121,7 @@ class SQLiteDatabaseHelper(context: Context) : SQLiteOpenHelper(
 ) {
     override fun onCreate(db: SQLiteDatabase) {
         createLibraryTables(db)
+        createCustomAlbumTables(db)
         createListeningHistoryTables(db)
         createPlayedCacheTable(db)
     }
@@ -132,6 +135,143 @@ class SQLiteDatabaseHelper(context: Context) : SQLiteOpenHelper(
         }
         if (oldVersion < 4) {
             createPlayedCacheTable(db)
+        }
+        if (oldVersion < 5) {
+            createCustomAlbumTables(db)
+        }
+    }
+
+    private fun createCustomAlbumTables(db: SQLiteDatabase) {
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS custom_albums (
+                album_id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                artwork_path TEXT,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            )
+        """.trimIndent())
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS custom_album_items (
+                album_id TEXT NOT NULL,
+                video_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                artist_name TEXT NOT NULL,
+                artist_id TEXT,
+                source_album_name TEXT,
+                source_album_id TEXT,
+                thumbnail_url TEXT,
+                duration_text TEXT,
+                music_video_type TEXT,
+                position INTEGER NOT NULL,
+                added_at INTEGER NOT NULL,
+                PRIMARY KEY (album_id, video_id)
+            )
+        """.trimIndent())
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_custom_album_items_order ON custom_album_items(album_id, position)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_custom_album_items_track ON custom_album_items(video_id)")
+    }
+
+    fun getCustomAlbums(): List<CustomAlbum> = readableDatabase.rawQuery("""
+        SELECT a.*, COUNT(i.video_id) AS item_count
+        FROM custom_albums a LEFT JOIN custom_album_items i ON a.album_id = i.album_id
+        GROUP BY a.album_id ORDER BY a.created_at DESC, a.album_id
+    """.trimIndent(), null).use { cursor ->
+        buildList {
+            while (cursor.moveToNext()) add(CustomAlbum(
+                id = cursor.getString(cursor.getColumnIndexOrThrow("album_id")),
+                name = cursor.getString(cursor.getColumnIndexOrThrow("name")),
+                artworkPath = cursor.getString(cursor.getColumnIndexOrThrow("artwork_path")),
+                createdAt = cursor.getLong(cursor.getColumnIndexOrThrow("created_at")),
+                updatedAt = cursor.getLong(cursor.getColumnIndexOrThrow("updated_at")),
+                itemCount = cursor.getInt(cursor.getColumnIndexOrThrow("item_count"))
+            ))
+        }
+    }
+
+    fun insertCustomAlbum(album: CustomAlbum) {
+        writableDatabase.insertOrThrow("custom_albums", null, ContentValues().apply {
+            put("album_id", album.id)
+            put("name", album.name)
+            put("artwork_path", album.artworkPath)
+            put("created_at", album.createdAt)
+            put("updated_at", album.updatedAt)
+        })
+    }
+
+    fun updateCustomAlbum(albumId: String, name: String, artworkPath: String?, now: Long) {
+        check(writableDatabase.update("custom_albums", ContentValues().apply {
+            put("name", name)
+            put("artwork_path", artworkPath)
+            put("updated_at", now)
+        }, "album_id = ?", arrayOf(albumId)) == 1) { "Album no longer exists." }
+    }
+
+    fun getCustomAlbumItems(albumId: String): List<MediaItem> =
+        readableDatabase.query("custom_album_items", null, "album_id = ?", arrayOf(albumId),
+            null, null, "position ASC, added_at ASC").use { cursor ->
+            buildList {
+                while (cursor.moveToNext()) add(MediaItem(
+                    videoId = cursor.getString(cursor.getColumnIndexOrThrow("video_id")),
+                    title = cursor.getString(cursor.getColumnIndexOrThrow("title")),
+                    artistName = cursor.getString(cursor.getColumnIndexOrThrow("artist_name")),
+                    artistId = cursor.getString(cursor.getColumnIndexOrThrow("artist_id")),
+                    albumName = cursor.getString(cursor.getColumnIndexOrThrow("source_album_name")),
+                    albumId = cursor.getString(cursor.getColumnIndexOrThrow("source_album_id")),
+                    thumbnailUrl = cursor.getString(cursor.getColumnIndexOrThrow("thumbnail_url")),
+                    durationText = cursor.getString(cursor.getColumnIndexOrThrow("duration_text")),
+                    musicVideoType = cursor.getString(cursor.getColumnIndexOrThrow("music_video_type"))
+                ))
+            }
+        }
+
+    fun getCustomAlbumIdsForTrack(videoId: String): Set<String> = readableDatabase.query(
+        "custom_album_items", arrayOf("album_id"), "video_id = ?", arrayOf(videoId), null, null, null
+    ).use { cursor -> buildSet { while (cursor.moveToNext()) add(cursor.getString(0)) } }
+
+    fun addCustomAlbumItem(albumId: String, item: MediaItem, now: Long): Boolean {
+        require(item.videoId.isNotBlank()) { "Song ID is missing." }
+        val database = writableDatabase
+        return database.transaction {
+            database.query("custom_albums", arrayOf("album_id"), "album_id = ?", arrayOf(albumId),
+                null, null, null).use { check(it.moveToFirst()) { "Album no longer exists." } }
+            val position = database.rawQuery(
+                "SELECT COALESCE(MAX(position), -1) + 1 FROM custom_album_items WHERE album_id = ?",
+                arrayOf(albumId)
+            ).use { it.moveToFirst(); it.getLong(0) }
+            val inserted = database.insertWithOnConflict("custom_album_items", null, ContentValues().apply {
+                put("album_id", albumId)
+                put("video_id", item.videoId)
+                put("title", item.title)
+                put("artist_name", item.artistName)
+                put("artist_id", item.artistId)
+                put("source_album_name", item.albumName)
+                put("source_album_id", item.albumId)
+                put("thumbnail_url", item.thumbnailUrl)
+                put("duration_text", item.durationText)
+                put("music_video_type", item.musicVideoType)
+                put("position", position)
+                put("added_at", now)
+            }, SQLiteDatabase.CONFLICT_IGNORE) != -1L
+            if (inserted) database.update("custom_albums", ContentValues().apply { put("updated_at", now) },
+                "album_id = ?", arrayOf(albumId))
+            inserted
+        }
+    }
+
+    fun removeCustomAlbumItem(albumId: String, videoId: String, now: Long) {
+        val database = writableDatabase
+        database.transaction {
+            database.delete("custom_album_items", "album_id = ? AND video_id = ?", arrayOf(albumId, videoId))
+            database.update("custom_albums", ContentValues().apply { put("updated_at", now) }, "album_id = ?", arrayOf(albumId))
+        }
+    }
+
+    fun deleteCustomAlbum(albumId: String) {
+        val database = writableDatabase
+        database.transaction {
+            database.delete("custom_album_items", "album_id = ?", arrayOf(albumId))
+            database.delete("custom_albums", "album_id = ?", arrayOf(albumId))
         }
     }
 
@@ -1061,6 +1201,6 @@ class SQLiteDatabaseHelper(context: Context) : SQLiteOpenHelper(
 
     companion object {
         private const val DATABASE_NAME = "musicality_library.db"
-        private const val DATABASE_VERSION = 4
+        private const val DATABASE_VERSION = 5
     }
 }

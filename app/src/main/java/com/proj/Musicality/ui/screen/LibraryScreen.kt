@@ -33,6 +33,7 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.rounded.DeleteForever
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Done
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Favorite
@@ -102,6 +103,8 @@ import com.proj.Musicality.data.local.SavedFilter
 import com.proj.Musicality.config.LocalCornerRadius
 import com.proj.Musicality.config.scaled
 import com.proj.Musicality.R
+import com.proj.Musicality.ui.components.CustomAlbumFormSheet
+import com.proj.Musicality.ui.components.CustomAlbumArtwork
 import com.proj.Musicality.ui.components.HapticFilledTonalButton
 import com.proj.Musicality.ui.components.HapticIconButton
 import com.proj.Musicality.ui.components.hapticClickable
@@ -113,11 +116,13 @@ import kotlinx.coroutines.launch
 @Composable
 fun LibraryScreen(
     onOpenCollection: (LibraryCollectionType) -> Unit,
+    onOpenCustomAlbum: (String) -> Unit,
     onOpenArtist: (String, String, String?) -> Unit,
     onOpenPlaylist: (String, String, String?, String?) -> Unit,
     onOpenAlbum: (String, String, String?, String?, String?) -> Unit,
     animatedVisibilityScope: AnimatedVisibilityScope,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    bottomContentPadding: Dp = 0.dp
 ) {
     val playbackUiPalette = LocalPlaybackUiPalette.current
     val selectedTabColor = playbackUiPalette?.accent ?: MaterialTheme.colorScheme.primary
@@ -132,6 +137,7 @@ fun LibraryScreen(
     var selectedPrimaryTab by rememberSaveable { mutableIntStateOf(0) }
     var selectedSavedFilter by rememberSaveable { mutableStateOf(SavedFilter.ARTIST) }
     var sortOrder by rememberSaveable { mutableStateOf(DateSortOrder.NEWEST) }
+    var showCreateAlbum by rememberSaveable { mutableStateOf(false) }
     var isSavedEditMode by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
@@ -204,6 +210,9 @@ fun LibraryScreen(
                 YouLibrarySection(
                     snapshot = snapshot,
                     onOpenCollection = onOpenCollection,
+                    onOpenCustomAlbum = onOpenCustomAlbum,
+                    onCreateAlbum = { showCreateAlbum = true },
+                    bottomContentPadding = bottomContentPadding,
                     modifier = Modifier.fillMaxSize()
                 )
             } else {
@@ -218,6 +227,7 @@ fun LibraryScreen(
                     onOpenPlaylist = onOpenPlaylist,
                     onOpenAlbum = onOpenAlbum,
                     isEditMode = isSavedEditMode,
+                    bottomContentPadding = bottomContentPadding,
                     onRemoveEntry = { entry ->
                         scope.launch {
                             repository.removeSavedEntry(entry)
@@ -228,12 +238,22 @@ fun LibraryScreen(
             }
         }
     }
+    if (showCreateAlbum) {
+        CustomAlbumFormSheet(
+            repository = repository,
+            onDismiss = { showCreateAlbum = false },
+            onSaved = { showCreateAlbum = false }
+        )
+    }
 }
 
 @Composable
 private fun YouLibrarySection(
     snapshot: LibrarySnapshot,
     onOpenCollection: (LibraryCollectionType) -> Unit,
+    onOpenCustomAlbum: (String) -> Unit,
+    onCreateAlbum: () -> Unit,
+    bottomContentPadding: Dp,
     modifier: Modifier = Modifier
 ) {
     val collections = remember(snapshot) {
@@ -245,47 +265,73 @@ private fun YouLibrarySection(
         )
     }
 
-    LazyVerticalGrid(
-        columns = GridCells.Fixed(2),
-        modifier = modifier,
-        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        items(collections, key = { it.third.name }) { (title, subtitle, type) ->
-            CollectionSummaryCard(
-                title = title,
-                subtitle = subtitle,
-                icon = {
-                    when (type) {
-                        LibraryCollectionType.LIKED -> Icon(
-                            imageVector = Icons.Rounded.Favorite,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.size(42.dp)
-                        )
-                        LibraryCollectionType.TOP_SONGS -> Icon(
-                            imageVector = Icons.Rounded.PlayArrow,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.size(42.dp)
-                        )
-                        LibraryCollectionType.DOWNLOADED -> Icon(
-                            painter = painterResource(id = R.drawable.download_24px),
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.size(42.dp)
-                        )
-                        LibraryCollectionType.PLAYED -> Icon(
-                            imageVector = Icons.Rounded.History,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.size(42.dp)
-                        )
-                    }
-                },
-                onClick = { onOpenCollection(type) }
-            )
+    Box(modifier = modifier) {
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(2),
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 10.dp, bottom = bottomContentPadding + 88.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            items(collections, key = { it.third.name }) { (title, subtitle, type) ->
+                CollectionSummaryCard(
+                    title = title,
+                    subtitle = subtitle,
+                    icon = {
+                        when (type) {
+                            LibraryCollectionType.LIKED -> Icon(
+                                imageVector = Icons.Rounded.Favorite,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.size(42.dp)
+                            )
+                            LibraryCollectionType.TOP_SONGS -> Icon(
+                                imageVector = Icons.Rounded.PlayArrow,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.size(42.dp)
+                            )
+                            LibraryCollectionType.DOWNLOADED -> Icon(
+                                painter = painterResource(id = R.drawable.download_24px),
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.size(42.dp)
+                            )
+                            LibraryCollectionType.PLAYED -> Icon(
+                                imageVector = Icons.Rounded.History,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.size(42.dp)
+                            )
+                        }
+                    },
+                    onClick = { onOpenCollection(type) }
+                )
+            }
+            items(snapshot.customAlbums, key = { "custom_${it.id}" }) { album ->
+                CollectionSummaryCard(
+                    title = album.name,
+                    subtitle = "${album.itemCount} items",
+                    icon = { CustomAlbumArtwork(album.artworkPath, Modifier.fillMaxSize()) },
+                    onClick = { onOpenCustomAlbum(album.id) }
+                )
+            }
+        }
+        Box(
+            Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                .padding(bottom = bottomContentPadding)
+                .background(MaterialTheme.colorScheme.surface)
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+        ) {
+            HapticFilledTonalButton(
+                onClick = onCreateAlbum,
+                modifier = Modifier.fillMaxWidth().height(56.dp),
+                shape = RoundedCornerShape(16.dp.scaled(LocalCornerRadius.current))
+            ) {
+                Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(24.dp))
+                Spacer(Modifier.width(10.dp))
+                Text("Create album", style = MaterialTheme.typography.titleMedium)
+            }
         }
     }
 }
@@ -302,6 +348,7 @@ private fun SavedLibrarySection(
     onOpenPlaylist: (String, String, String?, String?) -> Unit,
     onOpenAlbum: (String, String, String?, String?, String?) -> Unit,
     isEditMode: Boolean,
+    bottomContentPadding: Dp,
     onRemoveEntry: (SavedEntry) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -323,7 +370,7 @@ private fun SavedLibrarySection(
 
     LazyColumn(
         modifier = modifier,
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = bottomContentPadding + 8.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {

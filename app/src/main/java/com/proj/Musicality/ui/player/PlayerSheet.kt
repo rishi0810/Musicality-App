@@ -96,6 +96,7 @@ import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Repeat
@@ -197,6 +198,7 @@ import com.proj.Musicality.data.local.LibraryRepository
 import com.proj.Musicality.data.local.MediaLibraryState
 import com.proj.Musicality.data.model.LyricsState
 import com.proj.Musicality.data.model.MediaItem
+import com.proj.Musicality.ui.components.AddToCustomAlbumSheet
 import com.proj.Musicality.data.model.PlaybackQueue
 import com.proj.Musicality.data.model.ProviderLoadState
 import com.proj.Musicality.data.model.RelatedState
@@ -379,6 +381,7 @@ fun PlayerSheet(
     val showPlayerContent = true
 
     val isLooping = state.repeatMode == Player.REPEAT_MODE_ONE
+    var albumAddItem by remember { mutableStateOf<com.proj.Musicality.data.model.MediaItem?>(null) }
     var showQueueSheet by remember { mutableStateOf(false) }
     var showSleepTimerSheet by remember { mutableStateOf(false) }
     var sleepTimerMinutes by remember(item.videoId) { mutableStateOf<Int?>(null) }
@@ -731,6 +734,19 @@ fun PlayerSheet(
                                         )
                                     }
 
+                                    item {
+                                        PlayerOptionPill(
+                                            icon = { Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                                            label = "Add",
+                                            isActive = false,
+                                            isSuccess = false,
+                                            activeColor = playbackAccent,
+                                            onActiveColor = mediaPalette.onAccent,
+                                            controlColor = playerControlColor,
+                                            onClick = { albumAddItem = item }
+                                        )
+                                    }
+
                                     // Queue pill
                                     item {
                                         PlayerOptionPill(
@@ -1019,6 +1035,14 @@ fun PlayerSheet(
                     }
                 }
             }
+        }
+
+        albumAddItem?.let { capturedItem ->
+            AddToCustomAlbumSheet(
+                item = capturedItem,
+                repository = libraryRepository,
+                onDismiss = { albumAddItem = null }
+            )
         }
 
         if (showQueueSheet) {

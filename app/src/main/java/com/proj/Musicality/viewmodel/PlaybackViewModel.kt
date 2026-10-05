@@ -476,6 +476,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
     }
 
     private suspend fun normalizeDownloadedQueue(queue: PlaybackQueue): PlaybackQueue {
+        if (queue.source == QueueSource.CUSTOM_ALBUM) return queue
         if (queue.items.isEmpty() || queue.currentIndex !in queue.items.indices) return queue
         val currentId = queue.items[queue.currentIndex].videoId
         if (currentId.isBlank()) return queue
