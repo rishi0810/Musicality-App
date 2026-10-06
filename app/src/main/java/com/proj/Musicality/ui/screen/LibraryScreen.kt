@@ -319,7 +319,7 @@ private fun YouLibrarySection(
         }
         Box(
             Modifier.align(Alignment.BottomCenter).fillMaxWidth()
-                .padding(bottom = bottomContentPadding)
+                .padding(bottom = bottomContentPadding + 4.dp)
                 .padding(horizontal = 16.dp, vertical = 8.dp)
         ) {
             HapticFilledTonalButton(

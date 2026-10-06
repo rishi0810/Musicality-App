@@ -166,10 +166,9 @@ fun MusicApp() {
                 )
         }
     }
-    // Let content render under the floating pills; only scroll containers should use this as bottom padding.
-    val floatingControlsHeight = remember(hasMedia) {
+    // Insets can arrive after the first composition, so do not cache this height.
+    val floatingControlsHeight =
         if (hasMedia) miniPlayerHeight + navBarContainerHeight else navBarContainerHeight
-    }
 
     // ── Remembered callbacks (stable across recompositions) ──
     val onPlayQueue = remember<(PlaybackQueue) -> Unit> {
