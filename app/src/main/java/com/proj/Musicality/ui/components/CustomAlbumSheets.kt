@@ -197,13 +197,29 @@ fun CustomAlbumFormSheet(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddToCustomAlbumSheet(item: MediaItem, repository: LibraryRepository, onDismiss: () -> Unit) {
+    AddToCustomAlbumSheet(listOf(item), repository, onDismiss)
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AddToCustomAlbumSheet(
+    selectedItems: List<MediaItem>,
+    repository: LibraryRepository,
+    onDismiss: () -> Unit,
+    onAdded: () -> Unit = {}
+) {
+    val items = remember(selectedItems) { selectedItems.distinctBy { it.videoId } }
+    val selectionKey = items.map { it.videoId }
+
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val snapshot by repository.snapshot.collectAsStateWithLifecycle()
-    val membership by remember(item.videoId, repository) {
-        repository.observeCustomAlbumMembership(item.videoId)
+    val membership by remember(selectionKey, repository) {
+        kotlinx.coroutines.flow.combine(items.map { repository.observeCustomAlbumMembership(it.videoId) }) { memberships ->
+            memberships.map { it.toSet() }.reduceOrNull { all, next -> all intersect next }.orEmpty()
+        }
     }.collectAsStateWithLifecycle(initialValue = emptySet())
-    var selectedId by rememberSaveable(item.videoId) { mutableStateOf<String?>(null) }
+    var selectedId by rememberSaveable(selectionKey) { mutableStateOf<String?>(null) }
     var showCreate by rememberSaveable { mutableStateOf(false) }
     var saving by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -226,7 +242,7 @@ fun AddToCustomAlbumSheet(item: MediaItem, repository: LibraryRepository, onDism
         Column(Modifier.fillMaxWidth().heightIn(max = maxSheetHeight).padding(horizontal = 24.dp).padding(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Add to album", style = MaterialTheme.typography.headlineSmall)
-            Text(item.title, style = MaterialTheme.typography.bodyMedium, maxLines = 2)
+            Text(if (items.size == 1) items.first().title else "${items.size} songs selected", style = MaterialTheme.typography.bodyMedium, maxLines = 2)
             if (snapshot.customAlbums.isEmpty()) Text("Create an album to save this song.")
             LazyColumn(Modifier.fillMaxWidth().weight(1f, fill = false)) {
                 items(snapshot.customAlbums, key = { it.id }) { album ->
@@ -266,8 +282,9 @@ fun AddToCustomAlbumSheet(item: MediaItem, repository: LibraryRepository, onDism
                     error = null
                     scope.launch(Dispatchers.Main) {
                         try {
-                            val inserted = repository.addToCustomAlbum(album.id, item)
-                            Toast.makeText(context, if (inserted) "Added to ${album.name}" else "Already added", Toast.LENGTH_SHORT).show()
+                            val inserted = repository.addToCustomAlbum(album.id, items)
+                            Toast.makeText(context, if (inserted > 0) "Added to ${album.name}" else "Already added", Toast.LENGTH_SHORT).show()
+                            onAdded()
                             onDismiss()
                         } catch (cancelled: CancellationException) {
                             throw cancelled
@@ -279,7 +296,7 @@ fun AddToCustomAlbumSheet(item: MediaItem, repository: LibraryRepository, onDism
                         }
                     }
                 },
-                enabled = !saving && selectedAlbum != null && item.videoId.isNotBlank(),
+                enabled = !saving && selectedAlbum != null && items.isNotEmpty() && items.all { it.videoId.isNotBlank() },
                 modifier = Modifier.fillMaxWidth()
             ) { Text(if (saving) "Adding…" else "Add") }
         }

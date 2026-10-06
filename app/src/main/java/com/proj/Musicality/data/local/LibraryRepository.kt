@@ -1,5 +1,6 @@
 package com.proj.Musicality.data.local
 
+import androidx.core.database.sqlite.transaction
 import android.graphics.ImageDecoder
 import android.graphics.Bitmap
 import android.net.Uri
@@ -108,11 +109,27 @@ class LibraryRepository private constructor(
         }
     }
 
-    suspend fun addToCustomAlbum(albumId: String, item: MediaItem): Boolean = withContext(Dispatchers.IO) {
+    suspend fun addToCustomAlbum(albumId: String, item: MediaItem): Boolean =
+        addToCustomAlbum(albumId, listOf(item)) > 0
+
+    suspend fun addToCustomAlbum(albumId: String, items: List<MediaItem>): Int = withContext(Dispatchers.IO) {
         writeMutex.withLock {
-            val inserted = db.addCustomAlbumItem(albumId, item, System.currentTimeMillis())
+            val now = System.currentTimeMillis()
+            val inserted = db.writableDatabase.transaction {
+                items.distinctBy { it.videoId }.count { db.addCustomAlbumItem(albumId, it, now) }
+            }
             _snapshot.value = loadSnapshot()
             inserted
+        }
+    }
+
+    suspend fun removeFromCustomAlbum(albumId: String, videoIds: List<String>) = withContext(Dispatchers.IO) {
+        writeMutex.withLock {
+            val now = System.currentTimeMillis()
+            db.writableDatabase.transaction {
+                videoIds.distinct().forEach { db.removeCustomAlbumItem(albumId, it, now) }
+            }
+            _snapshot.value = loadSnapshot()
         }
     }
 
@@ -462,67 +479,76 @@ class LibraryRepository private constructor(
         }
     }
 
-    suspend fun removeFromCollection(
-        collectionType: LibraryCollectionType,
-        item: MediaItem
-    ) = withContext(Dispatchers.IO) {
-        writeMutex.withLock {
-            val song = db.getSong(item.videoId)
-            val video = db.getVideo(item.videoId)
+    suspend fun removeFromCollection(collectionType: LibraryCollectionType, item: MediaItem) =
+        removeFromCollection(collectionType, listOf(item))
 
-            when (collectionType) {
-                LibraryCollectionType.LIKED,
-                LibraryCollectionType.TOP_SONGS -> {
-                    if (song != null) {
-                        db.upsertSong(song.copy(isLiked = false))
-                    } else if (video != null) {
-                        db.upsertVideo(video.copy(isLiked = false))
-                    }
-                }
-                LibraryCollectionType.DOWNLOADED -> {
-                    if (song != null) {
-                        song.filePath?.let { path ->
-                            val playedRef = db.getPlayedCacheEntry(item.videoId)
-                            val sharedByPlayed = playedRef != null && playedRef.filePath == path
-                            if (!sharedByPlayed) runCatching { File(path).delete() }
-                        }
-                        db.upsertSong(
-                            song.copy(
-                                isDownloaded = false,
-                                filePath = null
-                            )
-                        )
-                        setDownloadState(song.videoId, null)
-                    } else if (video != null) {
-                        video.filePath?.let { path ->
-                            val playedRef = db.getPlayedCacheEntry(item.videoId)
-                            val sharedByPlayed = playedRef != null && playedRef.filePath == path
-                            if (!sharedByPlayed) runCatching { File(path).delete() }
-                        }
-                        db.upsertVideo(
-                            video.copy(
-                                isDownloaded = false,
-                                filePath = null
-                            )
-                        )
-                        setDownloadState(video.videoId, null)
-                    }
-                }
-                LibraryCollectionType.PLAYED -> {
-                    val entry = db.getPlayedCacheEntry(item.videoId)
-                    if (entry != null) {
-                        val dlSong = db.getSong(item.videoId)
-                        val dlVideo = db.getVideo(item.videoId)
-                        val sharedByDownload =
-                            (dlSong?.isDownloaded == true && dlSong.filePath == entry.filePath) ||
-                            (dlVideo?.isDownloaded == true && dlVideo.filePath == entry.filePath)
-                        if (!sharedByDownload) runCatching { File(entry.filePath).delete() }
-                        db.deletePlayedCacheEntry(item.videoId)
-                    }
+    suspend fun removeFromCollection(collectionType: LibraryCollectionType, items: List<MediaItem>) =
+        withContext(Dispatchers.IO) {
+            writeMutex.withLock {
+                try {
+                    items.distinctBy { it.videoId }.forEach { removeCollectionItem(collectionType, it) }
+                } finally {
+                    _snapshot.value = loadSnapshot()
                 }
             }
+        }
 
-            _snapshot.value = loadSnapshot()
+    private fun removeCollectionItem(collectionType: LibraryCollectionType, item: MediaItem) {
+        val song = db.getSong(item.videoId)
+        val video = db.getVideo(item.videoId)
+
+        when (collectionType) {
+            LibraryCollectionType.TOP_SONGS -> {
+                db.writableDatabase.delete("song_play_counts", "video_id = ?", arrayOf(item.videoId))
+            }
+            LibraryCollectionType.LIKED -> {
+                if (song != null) {
+                    db.upsertSong(song.copy(isLiked = false))
+                } else if (video != null) {
+                    db.upsertVideo(video.copy(isLiked = false))
+                }
+            }
+            LibraryCollectionType.DOWNLOADED -> {
+                if (song != null) {
+                    song.filePath?.let { path ->
+                        val playedRef = db.getPlayedCacheEntry(item.videoId)
+                        val sharedByPlayed = playedRef != null && playedRef.filePath == path
+                        if (!sharedByPlayed) runCatching { File(path).delete() }
+                    }
+                    db.upsertSong(
+                        song.copy(
+                            isDownloaded = false,
+                            filePath = null
+                        )
+                    )
+                    setDownloadState(song.videoId, null)
+                } else if (video != null) {
+                    video.filePath?.let { path ->
+                        val playedRef = db.getPlayedCacheEntry(item.videoId)
+                        val sharedByPlayed = playedRef != null && playedRef.filePath == path
+                        if (!sharedByPlayed) runCatching { File(path).delete() }
+                    }
+                    db.upsertVideo(
+                        video.copy(
+                            isDownloaded = false,
+                            filePath = null
+                        )
+                    )
+                    setDownloadState(video.videoId, null)
+                }
+            }
+            LibraryCollectionType.PLAYED -> {
+                val entry = db.getPlayedCacheEntry(item.videoId)
+                if (entry != null) {
+                    val dlSong = db.getSong(item.videoId)
+                    val dlVideo = db.getVideo(item.videoId)
+                    val sharedByDownload =
+                        (dlSong?.isDownloaded == true && dlSong.filePath == entry.filePath) ||
+                        (dlVideo?.isDownloaded == true && dlVideo.filePath == entry.filePath)
+                    if (!sharedByDownload) runCatching { File(entry.filePath).delete() }
+                    db.deletePlayedCacheEntry(item.videoId)
+                }
+            }
         }
     }
 

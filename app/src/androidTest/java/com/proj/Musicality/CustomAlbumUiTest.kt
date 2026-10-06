@@ -131,6 +131,95 @@ class CustomAlbumUiTest {
     }
 
     @Test
+    fun longPressSelectAllPortsWithoutDuplicatesThenDeletesOnlySourceMembership() {
+        val source = runBlocking { repository.createCustomAlbum("Source ${UUID.randomUUID()}", null) }
+        val target = runBlocking { repository.createCustomAlbum("Target ${UUID.randomUUID()}", null) }
+        createdIds.addAll(listOf(source.id, target.id))
+        val other = track.copy(videoId = "custom-album-ui-other", title = "Other test song")
+        runBlocking {
+            repository.addToCustomAlbum(source.id, listOf(track, other))
+            repository.addToCustomAlbum(target.id, track)
+        }
+        var playbackStarted = false
+        compose.setContent {
+            MaterialTheme {
+                LibraryCollectionScreen(
+                    LibraryCollectionType.LIKED, onTrackTap = { playbackStarted = true },
+                    onPlayNext = {}, onAddToQueue = {}, onArtistTap = { _, _, _ -> },
+                    collapsedMiniPlayerHeight = 0.dp, customAlbumId = source.id
+                )
+            }
+        }
+        compose.onNodeWithText(track.title).performScrollTo().performTouchInput { longClick() }
+        compose.onNodeWithText("1 selected").assertExists()
+        compose.onNodeWithText("Select all").performClick()
+        compose.onNodeWithText("2 selected").assertExists()
+        compose.onNodeWithText("Port to album").performClick()
+        compose.onNodeWithText(target.name).performScrollTo().performClick()
+        compose.onNodeWithText("Add", substring = false).performClick()
+        compose.waitUntil(10_000) {
+            repository.snapshot.value.customAlbums.first { it.id == target.id }.itemCount == 2 &&
+                compose.onAllNodesWithText("Add to album").fetchSemanticsNodes().isEmpty()
+        }
+        assertEquals(2, repository.snapshot.value.customAlbums.first { it.id == source.id }.itemCount)
+        compose.onNodeWithText(track.title).performScrollTo().performTouchInput { longClick() }
+        compose.onNodeWithText("Select all").performClick()
+        compose.onNodeWithText("Delete", substring = false).performClick()
+        compose.onNodeWithText("Delete 2 songs?").assertExists()
+        compose.onAllNodesWithText("Delete", substring = false).onLast().performClick()
+        compose.waitUntil(10_000) {
+            repository.snapshot.value.customAlbums.first { it.id == source.id }.itemCount == 0
+        }
+        assertEquals(2, repository.snapshot.value.customAlbums.first { it.id == target.id }.itemCount)
+        assertFalse(playbackStarted)
+    }
+
+    @Test
+    fun likedSongSelectionDeletesLikesAndKeepsCustomAlbumMembership() {
+        val album = runBlocking { repository.createCustomAlbum("Kept ${UUID.randomUUID()}", null) }
+        createdIds.add(album.id)
+        val likedTracks = listOf(
+            track.copy(videoId = "bulk-liked-first", title = "First liked test song"),
+            track.copy(videoId = "bulk-liked-second", title = "Second liked test song")
+        )
+        runBlocking {
+            repository.addToCustomAlbum(album.id, likedTracks)
+            likedTracks.forEach { repository.toggleLike(it) }
+        }
+        try {
+            compose.setContent {
+                MaterialTheme {
+                    LibraryCollectionScreen(
+                        LibraryCollectionType.LIKED, onTrackTap = {}, onPlayNext = {}, onAddToQueue = {},
+                        onArtistTap = { _, _, _ -> }, collapsedMiniPlayerHeight = 0.dp
+                    )
+                }
+            }
+            compose.onNodeWithText(likedTracks.first().title).performScrollTo().performTouchInput { longClick() }
+            compose.onNodeWithText("Select all").performClick()
+            compose.onNodeWithText("2 selected").assertExists()
+            compose.onNodeWithText("Delete", substring = false).performClick()
+            compose.onAllNodesWithText("Delete", substring = false).onLast().performClick()
+            compose.waitUntil(10_000) { repository.snapshot.value.likedSongs.isEmpty() }
+            assertEquals(2, repository.snapshot.value.customAlbums.first { it.id == album.id }.itemCount)
+        } finally {
+            runBlocking { repository.removeFromCollection(LibraryCollectionType.LIKED, likedTracks) }
+        }
+    }
+
+    @Test
+    fun bulkAddRollsBackAllSongsWhenOneSongHasNoId() = runBlocking {
+        val album = repository.createCustomAlbum("Atomic ${UUID.randomUUID()}", null)
+        createdIds.add(album.id)
+        try {
+            repository.addToCustomAlbum(album.id, listOf(track, track.copy(videoId = "")))
+            fail("A missing song ID must fail")
+        } catch (_: IllegalArgumentException) {
+            assertTrue(repository.observeCustomAlbumItems(album.id).first().isEmpty())
+        }
+    }
+
+    @Test
     fun existingMembershipDisablesAddingTheSameSong() {
         val album = runBlocking { repository.createCustomAlbum("Existing ${UUID.randomUUID()}", null) }
         createdIds.add(album.id)

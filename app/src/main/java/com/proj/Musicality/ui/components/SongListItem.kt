@@ -2,6 +2,10 @@ package com.proj.Musicality.ui.components
 
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.foundation.background
+import androidx.compose.material3.Checkbox
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -38,7 +42,9 @@ fun SongListItem(
     onLongPress: (() -> Unit)? = null,
     downloadState: MediaDownloadState? = null,
     sharedElementKey: String? = null,
-    animatedVisibilityScope: AnimatedVisibilityScope? = null
+    animatedVisibilityScope: AnimatedVisibilityScope? = null,
+    selectionMode: Boolean = false,
+    isSelected: Boolean = false
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val displayTitle = remember(title) { title.toCompactSongTitle() }
@@ -62,6 +68,8 @@ fun SongListItem(
 
     Row(
         modifier = modifier
+            .then(if (selectionMode) Modifier.semantics { selected = isSelected } else Modifier)
+            .background(if (isSelected) MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.45f) else androidx.compose.ui.graphics.Color.Transparent)
             .fillMaxWidth()
             .pressScale(interactionSource)
             .then(clickModifier)
@@ -134,7 +142,9 @@ fun SongListItem(
                 )
             }
         }
-        if (onOverflowClick != null) {
+        if (selectionMode) {
+            Checkbox(checked = isSelected, onCheckedChange = { onClick() })
+        } else if (onOverflowClick != null) {
             HapticIconButton(onClick = onOverflowClick) {
                 Icon(
                     imageVector = Icons.Rounded.MoreVert,

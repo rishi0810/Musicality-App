@@ -1,8 +1,19 @@
 package com.proj.Musicality.ui.screen
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Surface
+import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Close
+import com.proj.Musicality.data.model.MediaItem
+import com.proj.Musicality.ui.components.AddToCustomAlbumSheet
 import android.content.Intent
 import android.widget.Toast
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
@@ -162,6 +173,21 @@ fun LibraryCollectionScreen(
     var deletingAlbum by remember { mutableStateOf(false) }
     var albumError by remember { mutableStateOf<String?>(null) }
     var selectedTrackMenu by remember { mutableStateOf<LibraryTrackMenuModel?>(null) }
+    var selectedIds by rememberSaveable(customAlbumId, collectionType) { mutableStateOf(listOf<String>()) }
+    val selecting = selectedIds.isNotEmpty()
+    var portItems by remember { mutableStateOf<List<MediaItem>?>(null) }
+    var deleteItems by remember { mutableStateOf<List<MediaItem>?>(null) }
+    var deletingSongs by remember { mutableStateOf(false) }
+    fun toggleSelection(id: String) {
+        if (!deletingSongs) selectedIds = if (id in selectedIds) selectedIds - id else selectedIds + id
+    }
+    LaunchedEffect(items) {
+        selectedIds = selectedIds.filter { id -> items.any { it.videoId == id } }
+    }
+    BackHandler(enabled = selecting && !deletingSongs && portItems == null && deleteItems == null) {
+        selectedIds = emptyList()
+    }
+
 
     Box(
         modifier = modifier
@@ -185,7 +211,10 @@ fun LibraryCollectionScreen(
 
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = collapsedMiniPlayerHeight)
+            contentPadding = PaddingValues(
+                top = if (selecting) 56.dp else 0.dp,
+                bottom = collapsedMiniPlayerHeight + if (selecting) 80.dp else 0.dp
+            )
         ) {
             item(key = "collection-header") {
                 val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
@@ -260,7 +289,7 @@ fun LibraryCollectionScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center
                     )
-                    if (customAlbum != null) {
+                    if (customAlbum != null && !selecting) {
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             TextButton(onClick = { showEditAlbum = true }) { Text("Edit album") }
                             TextButton(onClick = { showDeleteAlbum = true }) { Text("Delete album") }
@@ -271,7 +300,7 @@ fun LibraryCollectionScreen(
                 }
             }
 
-            if (items.isNotEmpty()) {
+            if (items.isNotEmpty() && !selecting) {
                 item(key = "action-buttons") {
                     Row(
                         modifier = Modifier
@@ -337,13 +366,13 @@ fun LibraryCollectionScreen(
                         thumbnailUrl = item.thumbnailUrl,
                         trailingText = item.durationText,
                         downloadState = downloadStates[item.videoId],
+                        selectionMode = selecting,
+                        isSelected = item.videoId in selectedIds,
+                        onLongPress = { toggleSelection(item.videoId) },
                         onClick = {
-                            onTrackTap(
-                                PlaybackQueue(
-                                    items = items,
-                                    currentIndex = index,
-                                    source = queueSource
-                                )
+                            if (selecting) toggleSelection(item.videoId)
+                            else onTrackTap(
+                                PlaybackQueue(items = items, currentIndex = index, source = queueSource)
                             )
                         },
                         onOverflowClick = {
@@ -361,6 +390,144 @@ fun LibraryCollectionScreen(
                 }
             }
         }
+        if (selecting) {
+            Row(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .padding(start = 60.dp, end = 12.dp, top = 10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    modifier = Modifier
+                        .height(40.dp)
+                        .background(
+                            color = Color.Black.copy(alpha = 0.44f),
+                            shape = CircleShape
+                        )
+                        .border(
+                            width = 1.dp,
+                            color = Color.White.copy(alpha = 0.36f),
+                            shape = CircleShape
+                        )
+                        .hapticClickable(enabled = !deletingSongs) { selectedIds = emptyList() }
+                        .padding(start = 12.dp, end = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        Icons.Rounded.Close,
+                        contentDescription = "Clear selection",
+                        tint = Color.White,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Text(
+                        "${selectedIds.size} selected",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = Color.White
+                    )
+                }
+                if (selectedIds.size != items.size) {
+                    Row(
+                        modifier = Modifier
+                            .height(40.dp)
+                            .background(
+                                color = Color.Black.copy(alpha = 0.44f),
+                                shape = CircleShape
+                            )
+                            .border(
+                                width = 1.dp,
+                                color = Color.White.copy(alpha = 0.36f),
+                                shape = CircleShape
+                            )
+                            .hapticClickable(enabled = !deletingSongs) {
+                                selectedIds = items.map { it.videoId }
+                            }
+                            .padding(horizontal = 20.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Text(
+                            "Select all",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = Color.White
+                        )
+                    }
+                }
+            }
+            Row(
+                modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                    .padding(start = 16.dp, end = 16.dp, bottom = collapsedMiniPlayerHeight + 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                FilledTonalButton(
+                    enabled = !deletingSongs,
+                    onClick = { deleteItems = items.filter { it.videoId in selectedIds } },
+                    modifier = Modifier.weight(1f).height(52.dp),
+                    colors = ButtonDefaults.filledTonalButtonColors(
+                        containerColor = Color(0xFFB3261E),
+                        contentColor = Color.White
+                    )
+                ) {
+                    Icon(Icons.Rounded.Delete, contentDescription = null)
+                    Spacer(Modifier.size(8.dp))
+                    Text("Delete")
+                }
+                FilledTonalButton(
+                    enabled = !deletingSongs,
+                    onClick = { portItems = items.filter { it.videoId in selectedIds } },
+                    modifier = Modifier.weight(1f).height(52.dp)
+                ) { Text("Port to album") }
+            }
+        }
+    }
+
+    portItems?.let { tracks ->
+        AddToCustomAlbumSheet(
+            selectedItems = tracks,
+            repository = repository,
+            onDismiss = { portItems = null },
+            onAdded = { selectedIds = emptyList() }
+        )
+    }
+    deleteItems?.let { tracks ->
+        AlertDialog(
+            onDismissRequest = { if (!deletingSongs) deleteItems = null },
+            title = { Text("Delete ${tracks.size} songs?") },
+            text = {
+                Text(when {
+                    customAlbumId != null -> "Remove the selected songs from $title?"
+                    collectionType == LibraryCollectionType.DOWNLOADED -> "Remove the selected downloads from this device?"
+                    collectionType == LibraryCollectionType.PLAYED -> "Remove the selected songs from Played and its audio cache?"
+                    else -> "Remove the selected songs from $title?"
+                })
+            },
+            confirmButton = {
+                TextButton(enabled = !deletingSongs, onClick = {
+                    deletingSongs = true
+                    scope.launch(Dispatchers.Main) {
+                        try {
+                            if (customAlbumId != null) repository.removeFromCustomAlbum(customAlbumId, tracks.map { it.videoId })
+                            else repository.removeFromCollection(collectionType, tracks)
+                            selectedIds = emptyList()
+                            deleteItems = null
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (_: Exception) {
+                            deleteItems = null
+                            albumError = "Could not remove the songs. Please try again."
+                        } finally {
+                            deletingSongs = false
+                        }
+                    }
+                }) { Text(if (deletingSongs) "Deleting…" else "Delete") }
+            },
+            dismissButton = {
+                TextButton(enabled = !deletingSongs, onClick = { deleteItems = null }) { Text("Cancel") }
+            }
+        )
     }
 
     if (showEditAlbum && customAlbum != null) {
