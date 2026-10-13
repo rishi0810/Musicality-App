@@ -13,6 +13,7 @@ import com.proj.Musicality.api.VisitorManager
 import com.proj.Musicality.cache.AppCache
 import com.proj.Musicality.config.AppConfig
 import com.proj.Musicality.data.model.MediaItem
+import com.proj.Musicality.data.model.withMissingMetadataFrom
 import java.io.File
 import java.net.URLDecoder
 import java.util.Locale
@@ -56,6 +57,21 @@ class LibraryRepository private constructor(
     init {
         repositoryScope.launch {
             writeMutex.withLock { _snapshot.value = loadSnapshot() }
+        }
+    }
+
+    suspend fun repairCustomAlbumMetadata(details: MediaItem) = withContext(Dispatchers.IO) {
+        writeMutex.withLock {
+            db.writableDatabase.transaction {
+                db.getCustomAlbumIdsForTrack(details.videoId).forEach { albumId ->
+                    val saved = db.getCustomAlbumItems(albumId).firstOrNull { it.videoId == details.videoId }
+                    if (saved != null) {
+                        val repaired = saved.withMissingMetadataFrom(details)
+                        if (repaired != saved) db.updateCustomAlbumItemMetadata(albumId, repaired)
+                    }
+                }
+            }
+            _snapshot.value = loadSnapshot()
         }
     }
 

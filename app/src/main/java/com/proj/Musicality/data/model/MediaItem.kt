@@ -16,6 +16,26 @@ data class MediaItem(
     val musicVideoType: String?
 )
 
+fun MediaItem.hasMissingPlaybackMetadata(): Boolean =
+    artistName.isBlank() || artistName.equals("Unknown Artist", ignoreCase = true) ||
+        artistId.isNullOrBlank() || thumbnailUrl.isNullOrBlank()
+
+fun MediaItem.withMissingMetadataFrom(details: MediaItem): MediaItem {
+    if (videoId != details.videoId) return this
+    return copy(
+        title = title.ifBlank { details.title },
+        artistName = if (artistName.isBlank() || artistName.equals("Unknown Artist", ignoreCase = true)) {
+            details.artistName
+        } else artistName,
+        artistId = artistId?.takeIf { it.isNotBlank() } ?: details.artistId,
+        albumName = albumName?.takeIf { it.isNotBlank() } ?: details.albumName,
+        albumId = albumId?.takeIf { it.isNotBlank() } ?: details.albumId,
+        thumbnailUrl = thumbnailUrl?.takeIf { it.isNotBlank() } ?: details.thumbnailUrl,
+        durationText = durationText?.takeIf { it.isNotBlank() } ?: details.durationText,
+        musicVideoType = musicVideoType?.takeIf { it.isNotBlank() } ?: details.musicVideoType
+    )
+}
+
 fun SongResult.toMediaItem() = MediaItem(
     videoId = videoId, title = title, artistName = artist.primaryArtistName(),
     artistId = artistId, albumName = album, albumId = albumId,

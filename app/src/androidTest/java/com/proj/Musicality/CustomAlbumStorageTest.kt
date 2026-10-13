@@ -97,6 +97,21 @@ class CustomAlbumStorageTest {
     }
 
     @Test
+    fun metadataRepairPreservesMembershipAndOrder() {
+        helper.insertCustomAlbum(CustomAlbum("workout", "Workout", null, 1L, 1L))
+        val incomplete = track.copy(artistName = "", artistId = null, thumbnailUrl = null)
+        val second = track.copy(videoId = "second")
+        helper.addCustomAlbumItem("workout", incomplete, 2L)
+        helper.addCustomAlbumItem("workout", second, 3L)
+        helper.updateCustomAlbumItemMetadata("workout", track)
+        helper.close()
+        helper = SQLiteDatabaseHelper(context)
+        assertEquals(listOf(track, second), helper.getCustomAlbumItems("workout"))
+        assertEquals(setOf("workout"), helper.getCustomAlbumIdsForTrack(track.videoId))
+        assertEquals(2, helper.getCustomAlbums().single().itemCount)
+    }
+
+    @Test
     fun addingToDeletedAlbumFailsWithoutOrphanItems() {
         helper.insertCustomAlbum(CustomAlbum("deleted", "Deleted", null, 1L, 1L))
         helper.deleteCustomAlbum("deleted")

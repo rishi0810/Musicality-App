@@ -29,6 +29,8 @@ import com.proj.Musicality.data.local.ListeningHistoryRepository
 import java.io.File
 import com.proj.Musicality.data.model.LyricsState
 import com.proj.Musicality.data.model.MediaItem
+import com.proj.Musicality.data.model.hasMissingPlaybackMetadata
+import com.proj.Musicality.data.model.withMissingMetadataFrom
 import com.proj.Musicality.data.model.ProviderLoadState
 import com.proj.Musicality.data.model.RelatedState
 import com.proj.Musicality.lyrics.LyricsHelper
@@ -825,20 +827,13 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         )
     }
 
-    private fun fetchAndPlay(item: MediaItem) {
-        crossfadeManager.resetTriggerForTrack(item.videoId)
-        fetchLyrics(item)
+    private fun fetchAndPlay(initialItem: MediaItem) {
+        crossfadeManager.resetTriggerForTrack(initialItem.videoId)
         ensureServiceStarted()
-        _loadingTrackId.value = item.videoId
-        viewModelScope.launch(Dispatchers.IO) {
-            if (!com.proj.Musicality.config.AppConfig.listeningHistoryPaused.value) {
-                runCatching { listeningHistoryRepository.recordPlayback(item) }
-                HomePrefetchManager.prefetch(getApplication<Application>().applicationContext, forcePersonalization = true)
-            }
-        }
+        _loadingTrackId.value = initialItem.videoId
 
         AudioFileCache.unpinAll(except = pendingPlayedCacheVideoId)
-        AudioFileCache.pin(item.videoId)
+        AudioFileCache.pin(initialItem.videoId)
 
         playedCacheTimerJob?.cancel()
         fetchAndPlayJob?.cancel()
@@ -850,7 +845,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
             }
             if (activePlayer() == null) {
                 Log.e(TAG, "fetchAndPlay: Service player not available after 5s")
-                withContext(Dispatchers.Main) { handlePlaybackFailure(item.videoId, "player not available") }
+                withContext(Dispatchers.Main) { handlePlaybackFailure(initialItem.videoId, "player not available") }
                 return@launch
             }
 
@@ -862,7 +857,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                 // placeholder carries the new title/artist/artwork but has no URI, so the
                 // player sits in STATE_IDLE — the real setMediaItem in startExoPlayback
                 // then replaces both metadata and URI together when the audio is ready.
-                val placeholder = buildSessionPlaceholderMedia(item)
+                val placeholder = buildSessionPlaceholderMedia(initialItem)
                 getDelegatingPlayer()?.let { dp ->
                     if (dp.activePlayer.isPlaying) dp.activePlayer.pause()
                     // The inactive player may be holding a primed crossfade target that's no
@@ -873,6 +868,19 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                 } ?: activePlayer()?.let { exo ->
                     if (exo.isPlaying) exo.pause()
                     runCatching { exo.setMediaItem(placeholder) }
+                }
+            }
+
+            val item = resolvePlaybackMetadata(initialItem)
+            if (_state.value.currentItem?.videoId != item.videoId) return@launch
+            withContext(Dispatchers.Main) {
+                if (item != initialItem) activePlayer()?.setMediaItem(buildSessionPlaceholderMedia(item))
+                fetchLyrics(item)
+            }
+            viewModelScope.launch(Dispatchers.IO) {
+                if (!com.proj.Musicality.config.AppConfig.listeningHistoryPaused.value) {
+                    runCatching { listeningHistoryRepository.recordPlayback(item) }
+                    HomePrefetchManager.prefetch(getApplication<Application>().applicationContext, forcePersonalization = true)
                 }
             }
 
@@ -1244,7 +1252,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         val current = _state.value
         val nextIndex = nextIndexForQueue(current.queue) ?: return null
 
-        val nextItem = current.queue.items[nextIndex]
+        val nextItem = resolvePlaybackMetadata(current.queue.items[nextIndex])
         val localFile = withContext(Dispatchers.IO) { libraryRepository.findLocalAudioFile(nextItem.videoId) }
         val file = if (localFile != null) {
             Log.d(TAG, "prepareCrossfade: reusing local file for '${nextItem.videoId}' (${localFile.length() / 1024}KB)")
@@ -1522,6 +1530,37 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                 withContext(Dispatchers.Main) { advanceToNextInternal() }
             }
         }
+    }
+
+    private suspend fun resolvePlaybackMetadata(item: MediaItem): MediaItem {
+        if (!item.hasMissingPlaybackMetadata()) return item
+        if (isLocalOnlyQueue(_state.value.queue.source) && AppCache.browse.get("next:${item.videoId}") == null) return item
+        val resolved = try {
+            val details = fetchUpNextQueue(item.videoId)?.items?.firstOrNull { it.videoId == item.videoId }
+            details?.let { item.withMissingMetadataFrom(it) } ?: item
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            Log.w(TAG, "Metadata recovery failed for '${item.videoId}'", error)
+            item
+        }
+        if (resolved == item) return item
+        withContext(Dispatchers.Main) {
+            _state.update { state ->
+                state.copy(
+                    currentItem = state.currentItem?.let { current -> current.withMissingMetadataFrom(resolved) },
+                    queue = state.queue.copy(items = state.queue.items.map { it.withMissingMetadataFrom(resolved) })
+                )
+            }
+        }
+        try {
+            libraryRepository.repairCustomAlbumMetadata(resolved)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            Log.w(TAG, "Could not save recovered metadata for '${item.videoId}'", error)
+        }
+        return resolved
     }
 
     private suspend fun fetchUpNextQueue(seedVideoId: String): PlaybackQueue? {

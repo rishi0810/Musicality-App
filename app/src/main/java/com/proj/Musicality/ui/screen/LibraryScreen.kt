@@ -313,6 +313,7 @@ private fun YouLibrarySection(
                     title = album.name,
                     subtitle = "${album.itemCount} items",
                     icon = { CustomAlbumArtwork(album.artworkPath, Modifier.fillMaxSize()) },
+                    iconPadding = 0.dp,
                     onClick = { onOpenCustomAlbum(album.id) }
                 )
             }
@@ -693,7 +694,8 @@ private fun CollectionSummaryCard(
     title: String,
     subtitle: String,
     icon: @Composable () -> Unit,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    iconPadding: Dp = 14.dp
 ) {
     val radiusPreset = LocalCornerRadius.current
     Column(
@@ -713,7 +715,7 @@ private fun CollectionSummaryCard(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(14.dp),
+                    .padding(iconPadding),
                 contentAlignment = Alignment.Center
             ) {
                 icon()

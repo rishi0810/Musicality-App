@@ -259,6 +259,22 @@ class SQLiteDatabaseHelper(context: Context) : SQLiteOpenHelper(
         }
     }
 
+    fun updateCustomAlbumItemMetadata(albumId: String, item: MediaItem) {
+        writableDatabase.update("custom_album_items", ContentValues().apply {
+            put("title", item.title)
+            put("artist_name", item.artistName)
+            put("artist_id", item.artistId)
+            put("source_album_name", item.albumName)
+            put("source_album_id", item.albumId)
+            put("thumbnail_url", item.thumbnailUrl)
+            put("duration_text", item.durationText)
+            put("music_video_type", item.musicVideoType)
+        }, "album_id = ? AND video_id = ?", arrayOf(albumId, item.videoId))
+        writableDatabase.update("custom_albums", ContentValues().apply {
+            put("updated_at", System.currentTimeMillis())
+        }, "album_id = ?", arrayOf(albumId))
+    }
+
     fun removeCustomAlbumItem(albumId: String, videoId: String, now: Long) {
         val database = writableDatabase
         database.transaction {

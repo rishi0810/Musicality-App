@@ -8,6 +8,8 @@ import com.proj.Musicality.data.parser.ArtistParser
 import com.proj.Musicality.data.model.RelatedFeed
 import com.proj.Musicality.data.parser.NextParser
 import com.proj.Musicality.data.parser.RelatedParser
+import com.proj.Musicality.data.model.MediaItem
+import com.proj.Musicality.data.model.withMissingMetadataFrom
 
 object RelatedRequestResolver {
     private const val TAG = "RelatedRequestResolver"
@@ -21,30 +23,37 @@ object RelatedRequestResolver {
         if (initialVisitorId.isBlank()) return null
 
         val firstAttempt = runCatching {
-            fetchWithVisitor(videoId, initialVisitorId)
+            fetchWithVisitor(videoId, initialVisitorId, primaryArtistName, primaryArtistId)
         }.onFailure {
             Log.e(TAG, "fetchRelatedFeed: request failed for '$videoId'", it)
         }.getOrNull()
         if (firstAttempt != null) {
-            return firstAttempt.withPrimaryArtist(primaryArtistName, primaryArtistId)
+            return firstAttempt
         }
 
         val refreshedVisitorId = VisitorManager.refreshBrowseVisitorId()
         if (refreshedVisitorId.isBlank() || refreshedVisitorId == initialVisitorId) return null
         return runCatching {
-            fetchWithVisitor(videoId, refreshedVisitorId)
-                ?.withPrimaryArtist(primaryArtistName, primaryArtistId)
+            fetchWithVisitor(videoId, refreshedVisitorId, primaryArtistName, primaryArtistId)
         }.onFailure {
             Log.e(TAG, "fetchRelatedFeed: retry failed for '$videoId'", it)
         }.getOrNull()
     }
 
-    private suspend fun fetchWithVisitor(videoId: String, visitorId: String): RelatedFeed? {
+    private suspend fun fetchWithVisitor(
+        videoId: String,
+        visitorId: String,
+        artistName: String?,
+        artistId: String?
+    ): RelatedFeed? {
         val nextJson = RequestExecutor.executeNextRequest(videoId, visitorId)
         val relatedBrowseId = NextParser.extractRelatedBrowseId(nextJson)
             ?: return null
         val relatedJson = RequestExecutor.executeRelatedBrowseRequest(relatedBrowseId, visitorId)
-        return RelatedParser.extractFeed(relatedJson)
+        val seed = MediaItem(videoId, "", artistName.orEmpty(), artistId, null, null, null, null, null)
+        val details = NextParser.extractUpNextQueue(nextJson)?.items?.firstOrNull { it.videoId == videoId }
+        val artist = details?.let { seed.withMissingMetadataFrom(it) } ?: seed
+        return RelatedParser.extractFeed(relatedJson)?.withPrimaryArtist(artist.artistName, artist.artistId)
     }
 
     private suspend fun RelatedFeed.withPrimaryArtist(

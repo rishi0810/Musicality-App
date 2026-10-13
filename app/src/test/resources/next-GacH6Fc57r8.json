@@ -1,0 +1,144 @@
+{
+  "contents": {
+    "singleColumnMusicWatchNextResultsRenderer": {
+      "tabbedRenderer": {
+        "watchNextTabbedResultsRenderer": {
+          "tabs": [
+            {
+              "tabRenderer": {
+                "title": "Up next",
+                "content": {
+                  "musicQueueRenderer": {
+                    "content": {
+                      "playlistPanelRenderer": {
+                        "contents": [
+                          {
+                            "playlistPanelVideoRenderer": {
+                              "videoId": "GacH6Fc57r8",
+                              "title": {
+                                "runs": [
+                                  {
+                                    "text": "delicate"
+                                  }
+                                ]
+                              },
+                              "shortBylineText": {
+                                "runs": [
+                                  {
+                                    "text": "almost monday"
+                                  }
+                                ]
+                              },
+                              "longBylineText": {
+                                "runs": [
+                                  {
+                                    "text": "almost monday",
+                                    "navigationEndpoint": {
+                                      "browseEndpoint": {
+                                        "browseId": "UCn5ErQ1909_LjCdhJhc5-8w",
+                                        "browseEndpointContextSupportedConfigs": {
+                                          "browseEndpointContextMusicConfig": {
+                                            "pageType": "MUSIC_PAGE_TYPE_ARTIST"
+                                          }
+                                        }
+                                      }
+                                    }
+                                  },
+                                  {
+                                    "text": " \u2022 "
+                                  },
+                                  {
+                                    "text": "delicate",
+                                    "navigationEndpoint": {
+                                      "browseEndpoint": {
+                                        "browseId": "MPREb_gtqnVTbbjFp",
+                                        "browseEndpointContextSupportedConfigs": {
+                                          "browseEndpointContextMusicConfig": {
+                                            "pageType": "MUSIC_PAGE_TYPE_ALBUM"
+                                          }
+                                        }
+                                      }
+                                    }
+                                  },
+                                  {
+                                    "text": " \u2022 "
+                                  },
+                                  {
+                                    "text": "2026"
+                                  }
+                                ]
+                              },
+                              "thumbnail": {
+                                "thumbnails": [
+                                  {
+                                    "url": "https://yt3.googleusercontent.com/8xoKHJjvPgL5rU3USdm2NYtGIw9SNazKX8hrWhp5sHpUe6hn5TSrP1am-kTlmuIDUKkp_xx2DmQB2Qlm=w60-h60-l90-rj",
+                                    "width": 60,
+                                    "height": 60
+                                  },
+                                  {
+                                    "url": "https://yt3.googleusercontent.com/8xoKHJjvPgL5rU3USdm2NYtGIw9SNazKX8hrWhp5sHpUe6hn5TSrP1am-kTlmuIDUKkp_xx2DmQB2Qlm=w120-h120-l90-rj",
+                                    "width": 120,
+                                    "height": 120
+                                  },
+                                  {
+                                    "url": "https://yt3.googleusercontent.com/8xoKHJjvPgL5rU3USdm2NYtGIw9SNazKX8hrWhp5sHpUe6hn5TSrP1am-kTlmuIDUKkp_xx2DmQB2Qlm=w180-h180-l90-rj",
+                                    "width": 180,
+                                    "height": 180
+                                  },
+                                  {
+                                    "url": "https://yt3.googleusercontent.com/8xoKHJjvPgL5rU3USdm2NYtGIw9SNazKX8hrWhp5sHpUe6hn5TSrP1am-kTlmuIDUKkp_xx2DmQB2Qlm=w226-h226-l90-rj",
+                                    "width": 226,
+                                    "height": 226
+                                  },
+                                  {
+                                    "url": "https://yt3.googleusercontent.com/8xoKHJjvPgL5rU3USdm2NYtGIw9SNazKX8hrWhp5sHpUe6hn5TSrP1am-kTlmuIDUKkp_xx2DmQB2Qlm=w302-h302-l90-rj",
+                                    "width": 302,
+                                    "height": 302
+                                  },
+                                  {
+                                    "url": "https://yt3.googleusercontent.com/8xoKHJjvPgL5rU3USdm2NYtGIw9SNazKX8hrWhp5sHpUe6hn5TSrP1am-kTlmuIDUKkp_xx2DmQB2Qlm=w544-h544-l90-rj",
+                                    "width": 544,
+                                    "height": 544
+                                  }
+                                ]
+                              },
+                              "lengthText": {
+                                "runs": [
+                                  {
+                                    "text": "3:03"
+                                  }
+                                ],
+                                "accessibility": {
+                                  "accessibilityData": {
+                                    "label": "3 minutes, 3 seconds"
+                                  }
+                                }
+                              },
+                              "selected": true,
+                              "navigationEndpoint": {
+                                "watchEndpoint": {
+                                  "videoId": "GacH6Fc57r8",
+                                  "params": "OAHyAQIIAeoEC0dhY0g2RmM1N3I4",
+                                  "watchEndpointMusicSupportedConfigs": {
+                                    "watchEndpointMusicConfig": {
+                                      "hasPersistentPlaylistPanel": true,
+                                      "musicVideoType": "MUSIC_VIDEO_TYPE_ATV"
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

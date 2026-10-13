@@ -103,23 +103,8 @@ fun CustomAlbumFormSheet(
                 verticalArrangement = Arrangement.spacedBy(24.dp)
             ) {
                 Text(if (album == null) "New album" else "Edit album", style = MaterialTheme.typography.headlineMedium)
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Album name", style = MaterialTheme.typography.titleSmall)
-                    OutlinedTextField(
-                        value = name,
-                        onValueChange = { name = it; error = null },
-                        placeholder = { Text("e.g. Workout") },
-                        singleLine = true,
-                        enabled = !saving,
-                        isError = name.trim().length > 100,
-                        shape = RoundedCornerShape(16.dp.scaled(radiusPreset)),
-                        supportingText = if (name.trim().length > 80) {
-                            { Text("${name.trim().length}/100") }
-                        } else null,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("Artwork", style = MaterialTheme.typography.titleSmall)
@@ -128,9 +113,9 @@ fun CustomAlbumFormSheet(
                         ) { Text("Remove") }
                     }
                     Surface(
-                        modifier = Modifier.fillMaxWidth().height(168.dp)
+                        modifier = Modifier.widthIn(max = 240.dp).fillMaxWidth().aspectRatio(1f)
                             .hapticClickable(enabled = !saving, onClickLabel = "Choose album artwork", onClick = chooseArtwork),
-                        shape = RoundedCornerShape(20.dp.scaled(radiusPreset)),
+                        shape = RoundedCornerShape(16.dp.scaled(radiusPreset)),
                         color = MaterialTheme.colorScheme.surfaceContainerHigh,
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
                     ) {
@@ -155,6 +140,22 @@ fun CustomAlbumFormSheet(
                             }
                         }
                     }
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Album name", style = MaterialTheme.typography.titleSmall)
+                    OutlinedTextField(
+                        value = name,
+                        onValueChange = { name = it; error = null },
+                        placeholder = { Text("e.g. Workout") },
+                        singleLine = true,
+                        enabled = !saving,
+                        isError = name.trim().length > 100,
+                        shape = RoundedCornerShape(16.dp.scaled(radiusPreset)),
+                        supportingText = if (name.trim().length > 80) {
+                            { Text("${name.trim().length}/100") }
+                        } else null,
+                        modifier = Modifier.fillMaxWidth()
+                    )
                 }
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             }
