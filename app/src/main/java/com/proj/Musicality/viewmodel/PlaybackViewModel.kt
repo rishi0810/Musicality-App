@@ -28,6 +28,10 @@ import com.proj.Musicality.data.local.LibraryRepository
 import com.proj.Musicality.data.local.ListeningHistoryRepository
 import java.io.File
 import com.proj.Musicality.data.model.LyricsState
+import com.proj.Musicality.data.model.LyricsTranslationState
+import com.proj.Musicality.data.model.ProviderLyricsSnapshot
+import com.proj.Musicality.lyrics.alignTranslations
+import com.proj.Musicality.lyrics.providers.YouTubeMusicLyrics
 import com.proj.Musicality.data.model.MediaItem
 import com.proj.Musicality.data.model.hasMissingPlaybackMetadata
 import com.proj.Musicality.data.model.withMissingMetadataFrom
@@ -156,6 +160,12 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
     // racing fetches when the user skips tracks rapidly.
     private var lyricsProviderTrackId: String? = null
     private var lyricsLazyLoadJob: Job? = null
+
+    private val _lyricsTranslation = MutableStateFlow<LyricsTranslationState>(LyricsTranslationState.Unavailable)
+    val lyricsTranslation: StateFlow<LyricsTranslationState> = _lyricsTranslation.asStateFlow()
+    private var translationProbeJob: Job? = null
+    private var translationJob: Job? = null
+    private var translationProbedFor: String? = null
     private var relatedJob: Job? = null
 
     // ── Crossfade ──
@@ -747,6 +757,10 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
         lyricsLazyLoadJob?.cancel()
         lyricsLazyLoadJob = null
         lyricsProviderTrackId = item.videoId
+        translationProbeJob?.cancel()
+        translationJob?.cancel()
+        translationProbedFor = null
+        _lyricsTranslation.value = LyricsTranslationState.Unavailable
         // All providers start Idle; the race winner is promoted to Loaded below.
         _lyricsProviderStates.value = LyricsHelper.providerNames.associateWith { ProviderLoadState.Idle }
 
@@ -764,6 +778,7 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
                     val snapshot = com.proj.Musicality.data.model.ProviderLyricsSnapshot(
                         lines = state.lines,
                         isSynced = state.isSynced,
+                        sourceMessage = state.sourceMessage,
                     )
                     _lyricsProviderStates.update { current ->
                         current + (winnerName to ProviderLoadState.Loaded(snapshot))
@@ -824,7 +839,87 @@ class PlaybackViewModel(application: Application) : AndroidViewModel(application
             lines = loaded.snapshot.lines,
             isSynced = loaded.snapshot.isSynced,
             provider = providerName,
+            sourceMessage = loaded.snapshot.sourceMessage,
         )
+    }
+
+    /**
+     * Called when the lyrics panel is shown: checks (once per track) whether YouTube
+     * Music offers a translation, so the translate action only appears when usable.
+     * Deferred to panel-open to avoid extra requests for tracks nobody reads.
+     */
+    fun prepareLyricsTranslation(item: MediaItem) {
+        if (lyricsProviderTrackId != item.videoId) return
+        if (translationProbedFor == item.videoId || translationProbeJob?.isActive == true) return
+        if (_lyricsTranslation.value !is LyricsTranslationState.Unavailable) return
+        translationProbedFor = item.videoId
+        translationProbeJob = viewModelScope.launch {
+            val result = LyricsRepository.translationOffer(item)
+            if (lyricsProviderTrackId != item.videoId) return@launch
+            result
+                .onSuccess { offer ->
+                    if (offer != null && _lyricsTranslation.value is LyricsTranslationState.Unavailable) {
+                        _lyricsTranslation.value = LyricsTranslationState.Available(offer.attribution)
+                    }
+                }
+                // Network failure: allow a retry next time the panel opens.
+                .onFailure { translationProbedFor = null }
+        }
+    }
+
+    /**
+     * Translations are index-aligned with YouTube Music's lines only, so showing one
+     * switches the active provider to YouTube Music.
+     */
+    fun toggleLyricsTranslation(item: MediaItem) {
+        if (lyricsProviderTrackId != item.videoId) return
+        val ytm = YouTubeMusicLyrics.PROVIDER_NAME
+        val activeProvider = (_lyricsState.value as? LyricsState.Loaded)?.provider
+        when (val current = _lyricsTranslation.value) {
+            LyricsTranslationState.Unavailable, is LyricsTranslationState.Loading -> return
+            is LyricsTranslationState.Shown -> {
+                if (activeProvider == ytm) {
+                    _lyricsTranslation.value = LyricsTranslationState.Available(current.attribution)
+                } else {
+                    switchLyricsProvider(ytm)
+                }
+            }
+            is LyricsTranslationState.Available -> {
+                _lyricsTranslation.value = LyricsTranslationState.Loading(current.attribution)
+                translationJob = viewModelScope.launch {
+                    val snapshot = ensureProviderSnapshot(item, ytm)
+                    val translation = snapshot?.let { LyricsRepository.fetchTranslation(item) }
+                    if (lyricsProviderTrackId != item.videoId) return@launch
+                    val aligned = if (snapshot != null && translation != null) {
+                        alignTranslations(snapshot.lines, translation.lines)
+                    } else null
+                    _lyricsTranslation.value = when {
+                        aligned != null -> {
+                            switchLyricsProvider(ytm)
+                            LyricsTranslationState.Shown(aligned, translation?.attribution ?: current.attribution)
+                        }
+                        // Fetched but can't be lined up with the lyrics — not usable for this track.
+                        translation != null -> {
+                            Log.w(TAG, "Translation line count mismatch; discarding")
+                            LyricsTranslationState.Unavailable
+                        }
+                        else -> LyricsTranslationState.Available(current.attribution)
+                    }
+                }
+            }
+        }
+    }
+
+    private suspend fun ensureProviderSnapshot(item: MediaItem, providerName: String): ProviderLyricsSnapshot? {
+        (_lyricsProviderStates.value[providerName] as? ProviderLoadState.Loaded)?.let { return it.snapshot }
+        _lyricsProviderStates.update { it + (providerName to ProviderLoadState.Loading) }
+        val snapshot = LyricsRepository.fetchProvider(item, providerName)
+            ?.let { LyricsRepository.toSnapshot(item, it) }
+        if (lyricsProviderTrackId != item.videoId) return null
+        _lyricsProviderStates.update {
+            it + (providerName to (snapshot?.let { s -> ProviderLoadState.Loaded(s) } ?: ProviderLoadState.Unavailable))
+        }
+        return snapshot
     }
 
     private fun fetchAndPlay(initialItem: MediaItem) {

@@ -23,6 +23,13 @@ object ApiConstants {
     const val VISIONOS_OS_VERSION = "1.3.21O771"
     const val VISIONOS_DEVICE_MODEL = "RealityDevice14,1"
     const val VISIONOS_HEADER_CLIENT_NAME = "101"
+
+    // Only ANDROID_MUSIC renders the timed-lyrics page model; pinned because the
+    // renderer shape is tied to the client version.
+    const val ANDROID_MUSIC_CLIENT_NAME = "ANDROID_MUSIC"
+    const val ANDROID_MUSIC_CLIENT_VERSION = "9.45.51"
+    const val ANDROID_MUSIC_HEADER_CLIENT_NAME = "21"
+    const val ANDROID_MUSIC_USER_AGENT = "com.google.android.apps.youtube.music/9.45.51 (Linux; U; Android 12) gzip"
 }
 
 enum class SearchType(val params: String) {

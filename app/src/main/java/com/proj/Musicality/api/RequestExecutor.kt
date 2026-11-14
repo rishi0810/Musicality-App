@@ -3,6 +3,9 @@ package com.proj.Musicality.api
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonObject
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -395,6 +398,97 @@ object RequestExecutor {
                 response.body?.string() ?: ""
             }
         }
+
+    // ── Lyrics (YouTube Music lyrics tab) ─────────────────────────────────────
+
+    data class HttpResult(val code: Int, val body: String) {
+        val isSuccessful: Boolean get() = code in 200..299
+    }
+
+    /** WEB_REMIX `next` — the only client whose response carries the per-video Lyrics tab. */
+    suspend fun executeLyricsNextRequest(videoId: String, hl: String): HttpResult =
+        withContext(Dispatchers.IO) {
+            val body = buildJsonObject {
+                putJsonObject("context") {
+                    putJsonObject("client") {
+                        put("clientName", ApiConstants.WEB_REMIX_CLIENT_NAME)
+                        put("clientVersion", ApiConstants.WEB_REMIX_CLIENT_VERSION)
+                        put("hl", hl)
+                        put("gl", "US")
+                    }
+                }
+                put("videoId", videoId)
+            }.toString().toRequestBody(jsonMediaType)
+
+            val request = Request.Builder()
+                .url(ApiConstants.NEXT_URL)
+                .addHeader("User-Agent", ApiConstants.WEB_REMIX_USER_AGENT)
+                .addHeader("Content-Type", "application/json")
+                .addHeader("x-youtube-client-name", "67")
+                .addHeader("x-youtube-client-version", ApiConstants.WEB_REMIX_CLIENT_VERSION)
+                .addHeader("x-origin", "https://music.youtube.com")
+                .addHeader("referer", "https://music.youtube.com/")
+                .post(body)
+                .build()
+
+            client.newCall(request).execute().use { response ->
+                HttpResult(response.code, response.body?.string() ?: "")
+            }
+        }
+
+    /**
+     * Lyrics page `browse` (pass [browseId]) or translation continuation (pass [continuation]).
+     * [webFallback] switches to WEB_REMIX, which renders the same page as a plain-text shelf.
+     */
+    suspend fun executeLyricsBrowseRequest(
+        hl: String,
+        browseId: String? = null,
+        continuation: String? = null,
+        webFallback: Boolean = false,
+    ): HttpResult = withContext(Dispatchers.IO) {
+        val body = buildJsonObject {
+            putJsonObject("context") {
+                putJsonObject("client") {
+                    if (webFallback) {
+                        put("clientName", ApiConstants.WEB_REMIX_CLIENT_NAME)
+                        put("clientVersion", ApiConstants.WEB_REMIX_CLIENT_VERSION)
+                    } else {
+                        put("clientName", ApiConstants.ANDROID_MUSIC_CLIENT_NAME)
+                        put("clientVersion", ApiConstants.ANDROID_MUSIC_CLIENT_VERSION)
+                        put("androidSdkVersion", 32)
+                        put("osName", "Android")
+                        put("osVersion", "12")
+                    }
+                    put("hl", hl)
+                    put("gl", "US")
+                }
+            }
+            if (browseId != null) put("browseId", browseId)
+            // Token is already URL-encoded upstream; must be sent verbatim.
+            if (continuation != null) put("continuation", continuation)
+        }.toString().toRequestBody(jsonMediaType)
+
+        val builder = Request.Builder()
+            .url(ApiConstants.BROWSE_URL)
+            .addHeader("Content-Type", "application/json")
+        if (webFallback) {
+            builder
+                .addHeader("User-Agent", ApiConstants.WEB_REMIX_USER_AGENT)
+                .addHeader("x-youtube-client-name", "67")
+                .addHeader("x-youtube-client-version", ApiConstants.WEB_REMIX_CLIENT_VERSION)
+                .addHeader("x-origin", "https://music.youtube.com")
+                .addHeader("referer", "https://music.youtube.com/")
+        } else {
+            builder
+                .addHeader("User-Agent", ApiConstants.ANDROID_MUSIC_USER_AGENT)
+                .addHeader("x-youtube-client-name", ApiConstants.ANDROID_MUSIC_HEADER_CLIENT_NAME)
+                .addHeader("x-youtube-client-version", ApiConstants.ANDROID_MUSIC_CLIENT_VERSION)
+        }
+
+        client.newCall(builder.post(body).build()).execute().use { response ->
+            HttpResult(response.code, response.body?.string() ?: "")
+        }
+    }
 
     /** Simple GET request — used for IP geolocation. */
     suspend fun executeGetRequest(url: String): String = withContext(Dispatchers.IO) {

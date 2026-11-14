@@ -13,8 +13,38 @@ private val BG_TAG = Regex("""\{bg\}""")
 fun lyricsTextLooksSynced(lyrics: String?): Boolean {
     if (lyrics.isNullOrBlank()) return false
     val t = lyrics.trim().removePrefix("﻿").trimStart()
-    if (t.startsWith('[')) return true
+    // A bare '[' isn't enough: plain lyrics often open with "[Verse 1]".
     return LRC_TIMESTAMP_HINT.containsMatchIn(t.take(4096))
+}
+
+/** `[mm:ss.cc]` for an LRC line. */
+internal fun formatLrcTimestamp(timeMs: Long): String {
+    val m = timeMs / 60000
+    val s = (timeMs % 60000) / 1000
+    val c = (timeMs % 1000) / 10
+    return String.format(Locale.US, "[%02d:%02d.%02d]", m, s, c)
+}
+
+private fun isTranslatableLine(text: String): Boolean = text.replace("♪", "").isNotBlank()
+
+/**
+ * Maps YouTube Music translations onto displayed lines. Upstream omits blank / "♪"
+ * rows from the translation list, so alignment skips them; any other count mismatch
+ * means the lists can't be trusted to line up and the translation is discarded.
+ * Lines whose translation equals the source (already in the target language) get null.
+ */
+fun alignTranslations(lines: List<LyricLine>, translations: List<String>): List<String?>? {
+    val aligned: List<String?> = when {
+        lines.count { isTranslatableLine(it.text) } == translations.size -> {
+            var next = 0
+            lines.map { if (isTranslatableLine(it.text)) translations[next++] else null }
+        }
+        lines.size == translations.size -> translations
+        else -> return null
+    }
+    return aligned.mapIndexed { i, t ->
+        t?.trim()?.takeIf { it.isNotEmpty() && !it.equals(lines[i].text.trim(), ignoreCase = true) }
+    }
 }
 
 fun cleanTitleForSearch(title: String): String =

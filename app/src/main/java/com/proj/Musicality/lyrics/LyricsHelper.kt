@@ -5,14 +5,20 @@ import com.proj.Musicality.cache.LruCache
 import com.proj.Musicality.lyrics.providers.BetterLyricsProvider
 import com.proj.Musicality.lyrics.providers.LrcLibProvider
 import com.proj.Musicality.lyrics.providers.LyricsPlusProvider
+import com.proj.Musicality.lyrics.providers.YouTubeMusicProvider
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withTimeoutOrNull
 
-data class LyricsWithProvider(val lrc: String, val provider: String)
+data class LyricsWithProvider(
+    val lrc: String,
+    val provider: String,
+    val sourceMessage: String? = null,
+)
 
 /**
- * Sequential lyrics fetch across enabled providers.
- * Order matters: the first provider that returns a usable LRC wins, no race.
+ * Sequential lyrics fetch across enabled providers, no race. The first *synced*
+ * result wins; a plain-text result is held as a fallback while later providers
+ * get a chance to return timing.
  *
  * BetterLyrics is intentionally excluded from [providers] right now (its
  * upstream has been unreliable). The class is still imported and kept on
@@ -22,24 +28,26 @@ object LyricsHelper {
 
     private const val TAG = "LyricsHelper"
     private const val MAX_LYRICS_FETCH_MS = 30_000L
-    private const val MAX_CACHE_SIZE = 64
+    // In-memory only, sized for the current + previous track (skip-back).
+    const val RECENT_TRACKS = 2
 
     @Suppress("unused")
     private val disabledProviders: List<LyricsProvider> = listOf(BetterLyricsProvider)
 
     private val providers: List<LyricsProvider> = listOf(
-        LyricsPlusProvider,     // Primary: word-sync via Binimum + LyricsPlus mirrors
-        LrcLibProvider,         // Fallback: line-level, widest coverage
+        YouTubeMusicProvider,   // Primary: exact videoId match; line-synced or plain, plus translations
+        LyricsPlusProvider,     // Word-sync via LyricsPlus mirrors
+        LrcLibProvider,         // Fallback: line-level fuzzy search
     )
 
     /** Ordered, stable display names — drives the provider-switch dropdown. */
     val providerNames: List<String> = providers.map { it.name }
 
-    private val cache = LruCache<String, LyricsWithProvider>(MAX_CACHE_SIZE)
+    private val cache = LruCache<String, LyricsWithProvider>(RECENT_TRACKS)
 
     // Per-(provider, cacheKey) cache so the switch dropdown is instant on second open
     // and so the sequential fetch + lazy-load paths don't duplicate work for the same track.
-    private val providerCache = LruCache<String, LyricsWithProvider>(MAX_CACHE_SIZE * 2)
+    private val providerCache = LruCache<String, LyricsWithProvider>(RECENT_TRACKS * providers.size)
 
     private fun providerCacheKey(providerName: String, cacheKey: String) =
         "$providerName::$cacheKey"
@@ -67,7 +75,7 @@ object LyricsHelper {
         }
         if (result.isFailure) return null
         val lrc = result.getOrNull() ?: return null
-        val out = LyricsWithProvider(lrc, provider.name)
+        val out = LyricsWithProvider(lrc, provider.name, provider.attributionFor(id))
         providerCache.put(pcKey, out)
         return out
     }
@@ -83,9 +91,13 @@ object LyricsHelper {
         cache.get(cacheKey)?.let { return it }
 
         val cleanedTitle = cleanTitleForSearch(title)
-        val result = withTimeoutOrNull(MAX_LYRICS_FETCH_MS) {
-            fetchSequential(cacheKey, id, cleanedTitle, artist, duration, album)
+        var plainFallback: LyricsWithProvider? = null
+        val synced = withTimeoutOrNull(MAX_LYRICS_FETCH_MS) {
+            fetchSequential(cacheKey, id, cleanedTitle, artist, duration, album) { plain ->
+                if (plainFallback == null) plainFallback = plain
+            }
         }
+        val result = synced ?: plainFallback
 
         if (result != null) {
             val filtered = result.copy(lrc = filterLyricsCreditLines(result.lrc, title, artist))
@@ -102,6 +114,7 @@ object LyricsHelper {
         artist: String,
         duration: Int,
         album: String?,
+        onPlainResult: (LyricsWithProvider) -> Unit,
     ): LyricsWithProvider? {
         for (provider in providers) {
             val attempt = try {
@@ -119,11 +132,12 @@ object LyricsHelper {
             }
             val lrc = attempt.getOrNull() ?: continue
             Log.i(TAG, "${provider.name} returned lyrics")
-            val out = LyricsWithProvider(lrc, provider.name)
+            val out = LyricsWithProvider(lrc, provider.name, provider.attributionFor(id))
             // Pre-populate the per-provider cache so the dropdown is instant if the
             // user opens it without triggering the lazy-load path.
             providerCache.put(providerCacheKey(provider.name, cacheKey), out)
-            return out
+            if (lyricsTextLooksSynced(lrc)) return out
+            onPlainResult(out)
         }
         return null
     }

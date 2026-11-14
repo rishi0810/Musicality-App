@@ -16,4 +16,7 @@ interface LyricsProvider {
         duration: Int,
         album: String? = null,
     ): Result<String>
+
+    /** Attribution line (e.g. "Source: Musixmatch") for the last successful fetch of [id]. */
+    fun attributionFor(id: String): String? = null
 }

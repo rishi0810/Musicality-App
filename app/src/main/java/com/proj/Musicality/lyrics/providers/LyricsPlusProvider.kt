@@ -2,6 +2,7 @@ package com.proj.Musicality.lyrics.providers
 
 import com.proj.Musicality.lyrics.LyricsProvider
 import com.proj.Musicality.lyrics.TTMLParser
+import com.proj.Musicality.lyrics.formatLrcTimestamp
 import com.proj.Musicality.lyrics.lyricsHttpClient
 import io.ktor.client.call.body
 import io.ktor.client.request.get
@@ -227,7 +228,7 @@ object LyricsPlusProvider : LyricsProvider {
             }
             if (text.isBlank()) continue
 
-            sb.append(formatLrcTime(line.time)).append(text).append('\n')
+            sb.append(formatLrcTimestamp(line.time)).append(text).append('\n')
 
             if (isWordSync && mainWords.isNotEmpty()) {
                 val valid = mainWords.filter { it.text.isNotBlank() }
@@ -244,20 +245,5 @@ object LyricsPlusProvider : LyricsProvider {
             }
         }
         return sb.toString().trimEnd().ifBlank { null }
-    }
-
-    private fun formatLrcTime(timeMs: Long): String {
-        val m = timeMs / 60000
-        val s = (timeMs % 60000) / 1000
-        val c = (timeMs % 1000) / 10
-        return buildString {
-            append('[')
-            if (m < 10) append('0')
-            append(m).append(':')
-            if (s < 10) append('0')
-            append(s).append('.')
-            if (c < 10) append('0')
-            append(c).append(']')
-        }
     }
 }

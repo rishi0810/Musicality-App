@@ -6,7 +6,7 @@
 
 A modern, feature-rich Android music player that brings millions of songs, albums, and playlists to your fingertips — beautifully.
 
-<img src="https://img.shields.io/badge/Latest%20Version-v1.3.1-blue" alt="Latest Version"/>
+<img src="https://img.shields.io/badge/Latest%20Version-v1.3.2-blue" alt="Latest Version"/>
 
 <br/>
 
@@ -85,3 +85,55 @@ Musicality is built around the idea that your music experience should feel effor
 3. Install and enjoy
 
 > **For developers:** Clone the repo, open in Android Studio, and run on a device or emulator. Requires Android SDK 34+, Kotlin 1.9+, and Gradle 8+.
+
+## Release Process
+
+Releases are made from `main`. The release tag supplies the app version, and pushing a `v*` tag starts `.github/workflows/android-signed-release.yml`, which builds a signed APK and publishes a GitHub Release. GitHub Actions must have the Android signing secrets configured.
+
+For each release:
+
+1. Fetch the latest main branch and tags, then check the latest tag already pushed to GitHub:
+
+   ```bash
+   git fetch origin --tags
+   git ls-remote --tags --refs origin 'v*' \
+     | cut -f2 \
+     | sed 's#refs/tags/##' \
+     | sort -V \
+     | tail -n1
+   ```
+
+2. Update the version badge above and run the checks:
+
+   ```bash
+   ./gradlew test :app:assembleDebug
+   ```
+
+3. Stage only the README and app source. Review the staged paths and diff to ensure unrelated files (screenshots, IDE settings, local configuration, and coding-agent files) are excluded:
+
+   ```bash
+   git add README.md app/src/main
+   git diff --cached --check
+   git diff --cached --stat
+   git diff --cached --name-only
+   ```
+
+4. Commit and push the commit to `main`:
+
+   ```bash
+   git commit -m "Release vX.Y.Z"
+   git push origin HEAD:main
+   ```
+
+5. Create and push an annotated version tag on that commit. Replace `vX.Y.Z` with the new version, and do not reuse a tag already present on origin:
+
+   ```bash
+   git tag -a vX.Y.Z -m "Release vX.Y.Z"
+   git push origin vX.Y.Z
+   ```
+
+6. Confirm the tag is on GitHub and check the Actions run and published release:
+
+   ```bash
+   git ls-remote --tags origin 'refs/tags/vX.Y.Z' 'refs/tags/vX.Y.Z^{}'
+   ```

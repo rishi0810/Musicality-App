@@ -35,7 +35,9 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -87,6 +89,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Album
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Translate
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
@@ -171,6 +174,7 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -197,6 +201,8 @@ import com.proj.Musicality.R
 import com.proj.Musicality.data.local.LibraryRepository
 import com.proj.Musicality.data.local.MediaLibraryState
 import com.proj.Musicality.data.model.LyricsState
+import com.proj.Musicality.data.model.LyricsTranslationState
+import com.proj.Musicality.lyrics.providers.YouTubeMusicLyrics
 import com.proj.Musicality.data.model.MediaItem
 import com.proj.Musicality.ui.components.AddToCustomAlbumSheet
 import com.proj.Musicality.data.model.PlaybackQueue
@@ -237,6 +243,10 @@ private const val MAX_LYRICS_SHARE_LINES = 6
 // Active-line transition fires this many ms before the line's timestamp, matching
 // the anticipatory feel of Apple-Music-style synced lyrics.
 private const val LINE_LOOKAHEAD_MS = 100L
+// TEMP: measured ~1700 ms lyrics lag on the Pixel emulator; testing whether a fixed offset fixes it.
+private const val LYRICS_SYNC_OFFSET_MS = 1700L
+// Where the eye naturally rests in the lyrics viewport; the active line is pinned here.
+private const val ACTIVE_LYRIC_ANCHOR_FRACTION = 0.4f
 private const val PlayerHeroHeightFraction = 0.47f
 private val PlayerHorizontalPadding = 20.dp
 private val PlayerHeroMinHeight = 360.dp
@@ -308,6 +318,9 @@ fun PlayerSheet(
     onRelatedSongTap: (MediaItem) -> Unit,
     onLyricsLoadAllProviders: (MediaItem) -> Unit,
     onLyricsSwitchProvider: (String) -> Unit,
+    lyricsTranslationFlow: StateFlow<LyricsTranslationState>,
+    onLyricsToggleTranslation: (MediaItem) -> Unit,
+    onLyricsPanelShown: (MediaItem) -> Unit,
     crossfadeEnabled: Boolean = false,
     onToggleCrossfade: () -> Unit = {},
     miniPlayerHeight: Dp = 70.dp,
@@ -411,6 +424,7 @@ fun PlayerSheet(
     }
 
     LaunchedEffect(isLyricsOpen) { onLyricsOpenChange(isLyricsOpen) }
+    LaunchedEffect(isLyricsOpen, item.videoId) { if (isLyricsOpen) onLyricsPanelShown(item) }
 
     // Reset lyrics panel when the sheet collapses
     LaunchedEffect(isExpanded) {
@@ -1572,6 +1586,8 @@ fun PlayerSheet(
                     onPlayPause = onPlayPause,
                     onLoadAllProviders = { onLyricsLoadAllProviders(item) },
                     onSwitchProvider = onLyricsSwitchProvider,
+                    translationStateFlow = lyricsTranslationFlow,
+                    onToggleTranslation = { onLyricsToggleTranslation(item) },
                     backgroundColor = mediaPalette.bottom,
                     playbackAccent = playbackAccent,
                     playbackButton = playbackAccent,
@@ -2915,6 +2931,8 @@ private fun LyricsPanel(
     onPlayPause: () -> Unit,
     onLoadAllProviders: () -> Unit,
     onSwitchProvider: (String) -> Unit,
+    translationStateFlow: StateFlow<LyricsTranslationState>,
+    onToggleTranslation: () -> Unit,
     onProgressBarInteractingChange: (Boolean) -> Unit,
     backgroundColor: Color,
     playbackAccent: Color,
@@ -2927,6 +2945,7 @@ private fun LyricsPanel(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
+    val density = LocalDensity.current
     val wordSyncEnabled by AppConfig.wordSyncLyrics.collectAsStateWithLifecycle()
     val positionMs by positionMsFlow.collectAsStateWithLifecycle()
     // Project position forward from the last poll using the monotonic clock, so word
@@ -2934,12 +2953,12 @@ private fun LyricsPanel(
     // poll cadence. Held as a State<Long> (not a delegated Long) because the
     // derivedStateOf below needs to observe the underlying State directly — a local
     // `val` captured by the remember'd lambda would freeze at its first value.
-    val syncPositionState = produceState(initialValue = positionMs, positionMs, isPlaying) {
+    val syncPositionState = produceState(initialValue = positionMs + LYRICS_SYNC_OFFSET_MS, positionMs, isPlaying) {
         if (!isPlaying) {
-            value = positionMs
+            value = positionMs + LYRICS_SYNC_OFFSET_MS
             return@produceState
         }
-        val anchorPos = positionMs
+        val anchorPos = positionMs + LYRICS_SYNC_OFFSET_MS
         val anchorClock = SystemClock.elapsedRealtime()
         while (true) {
             withFrameNanos { }
@@ -3032,27 +3051,36 @@ private fun LyricsPanel(
         }
     }
 
+    var lyricsViewportHeightPx by remember { mutableIntStateOf(0) }
+    val activeLineAnchorPx = (lyricsViewportHeightPx * ACTIVE_LYRIC_ANCHOR_FRACTION).toInt()
+    val pinActiveLine = !shareMode && syncedLines != null && lyricsViewportHeightPx > 0
+
+    // Only real drags count as user scrolls; isScrollInProgress is also true during our
+    // own auto-scroll, which would otherwise pause following after every line change.
     var userScrolled by remember { mutableStateOf(false) }
-    LaunchedEffect(listState.isScrollInProgress, shareMode) {
-        if (shareMode) return@LaunchedEffect
-        if (listState.isScrollInProgress) {
-            userScrolled = true
-        } else if (userScrolled) {
-            coroutineScope.launch {
-                kotlinx.coroutines.delay(5000)
-                userScrolled = false
-            }
+    LaunchedEffect(listState) {
+        listState.interactionSource.interactions.collect { interaction ->
+            if (interaction is DragInteraction.Start) userScrolled = true
         }
     }
-    LaunchedEffect(currentLineIndex, shareMode) {
-        if (!shareMode && !userScrolled && syncedLines != null && syncedLines.isNotEmpty()) {
-            val target = (currentLineIndex - 2).coerceAtLeast(0)
-            listState.animateScrollToItem(index = target)
+    LaunchedEffect(userScrolled, listState.isScrollInProgress) {
+        if (userScrolled && !listState.isScrollInProgress) {
+            kotlinx.coroutines.delay(5000)
+            userScrolled = false
         }
+    }
+    var hasPinnedOnce by remember(syncedLines) { mutableStateOf(false) }
+    LaunchedEffect(currentLineIndex, syncedLines, pinActiveLine, activeLineAnchorPx, userScrolled) {
+        if (!pinActiveLine || userScrolled || syncedLines.isNullOrEmpty()) return@LaunchedEffect
+        listState.pinLineAtAnchor(currentLineIndex, activeLineAnchorPx, animate = hasPinnedOnce)
+        hasPinnedOnce = true
     }
 
     val providerStates by lyricsProviderStatesFlow.collectAsStateWithLifecycle()
     val activeProvider = (lyricsState as? LyricsState.Loaded)?.provider
+    val translationState by translationStateFlow.collectAsStateWithLifecycle()
+    val shownTranslation = (translationState as? LyricsTranslationState.Shown)
+        ?.takeIf { activeProvider == YouTubeMusicLyrics.PROVIDER_NAME }
 
     Column(
         modifier = modifier
@@ -3111,14 +3139,27 @@ private fun LyricsPanel(
                         fontSize = 24.sp,
                         fontWeight = FontWeight.Bold
                     )
-                    if (providerStates.isNotEmpty()) {
-                        LyricsProviderDropdown(
-                            providers = providerStates,
-                            activeProvider = activeProvider,
-                            accentColor = playbackAccent,
-                            onMenuOpen = onLoadAllProviders,
-                            onSelect = onSwitchProvider
-                        )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        if (translationState !is LyricsTranslationState.Unavailable) {
+                            LyricsTranslateButton(
+                                active = shownTranslation != null,
+                                loading = translationState is LyricsTranslationState.Loading,
+                                accentColor = playbackAccent,
+                                onClick = onToggleTranslation
+                            )
+                        }
+                        if (providerStates.isNotEmpty()) {
+                            LyricsProviderDropdown(
+                                providers = providerStates,
+                                activeProvider = activeProvider,
+                                accentColor = playbackAccent,
+                                onMenuOpen = onLoadAllProviders,
+                                onSelect = onSwitchProvider
+                            )
+                        }
                     }
                 }
             }
@@ -3242,6 +3283,7 @@ private fun LyricsPanel(
                         userScrollEnabled = true,
                         modifier = Modifier
                             .fillMaxSize()
+                            .onSizeChanged { lyricsViewportHeightPx = it.height }
                             .then(
                                 if (nestedScrollConnection != null) {
                                     Modifier.nestedScroll(nestedScrollConnection)
@@ -3253,8 +3295,17 @@ private fun LyricsPanel(
                         contentPadding = androidx.compose.foundation.layout.PaddingValues(
                             start = if (shareMode) 18.dp else 24.dp,
                             end = if (shareMode) 18.dp else 24.dp,
+                            // No top spacer: early lines sit at the top and the active line moves down
+                            // until it reaches the anchor (scroll clamps at 0). Bottom padding lets the
+                            // last lines still reach the anchor.
                             top = 12.dp,
-                            bottom = if (shareMode) 12.dp else 72.dp
+                            bottom = when {
+                                shareMode -> 12.dp
+                                pinActiveLine -> with(density) {
+                                    (lyricsViewportHeightPx - activeLineAnchorPx).toDp()
+                                }.coerceAtLeast(72.dp)
+                                else -> 72.dp
+                            }
                         ),
                         verticalArrangement = Arrangement.spacedBy(if (shareMode) 2.dp else 10.dp)
                     ) {
@@ -3318,6 +3369,9 @@ private fun LyricsPanel(
                             val words = line.words
                             val useWordSync = wordSyncEnabled && !shareMode && ls.isSynced &&
                                 distance == 0 && !words.isNullOrEmpty()
+                            val lineTranslation = if (shareMode) null else
+                                shownTranslation?.lines?.takeIf { it.size == ls.lines.size }?.get(index)
+                            Column(modifier = lineModifier) {
                             if (useWordSync) {
                                 // Keep original line text intact and style ranges in-place,
                                 // so we don't alter word spacing/kerning while syncing.
@@ -3405,8 +3459,7 @@ private fun LyricsPanel(
                                     text = annotated,
                                     fontSize = 28.sp,
                                     lineHeight = 36.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = lineModifier
+                                    fontWeight = FontWeight.Bold
                                 )
                             } else {
                                 Text(
@@ -3414,8 +3467,30 @@ private fun LyricsPanel(
                                     fontSize = 28.sp,
                                     lineHeight = 36.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = Color.White.copy(alpha = lineAlpha),
-                                    modifier = lineModifier
+                                    color = Color.White.copy(alpha = lineAlpha)
+                                )
+                            }
+                            if (lineTranslation != null) {
+                                Text(
+                                    text = lineTranslation,
+                                    fontSize = 18.sp,
+                                    lineHeight = 24.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = Color.White.copy(alpha = lineAlpha * 0.7f),
+                                    modifier = Modifier.padding(top = 4.dp)
+                                )
+                            }
+                            }
+                        }
+                        val attribution = listOfNotNull(ls.sourceMessage, shownTranslation?.attribution)
+                        if (!shareMode && attribution.isNotEmpty()) {
+                            item(key = "lyrics-attribution") {
+                                Text(
+                                    text = attribution.joinToString("\n"),
+                                    fontSize = 13.sp,
+                                    lineHeight = 18.sp,
+                                    color = Color.White.copy(alpha = 0.5f),
+                                    modifier = Modifier.padding(top = 16.dp)
                                 )
                             }
                         }
@@ -3487,9 +3562,10 @@ private fun LyricsPanel(
                         Surface(
                             onClick = {
                                 userScrolled = false
-                                coroutineScope.launch {
-                                    val target = (currentLineIndex - 2).coerceAtLeast(0)
-                                    listState.animateScrollToItem(index = target)
+                                if (pinActiveLine) {
+                                    coroutineScope.launch {
+                                        listState.pinLineAtAnchor(currentLineIndex, activeLineAnchorPx, animate = true)
+                                    }
                                 }
                             },
                             shape = RoundedCornerShape(50),
@@ -3687,6 +3763,38 @@ private fun LyricsPanel(
 }
 
 @Composable
+private fun LyricsTranslateButton(
+    active: Boolean,
+    loading: Boolean,
+    accentColor: Color,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(100))
+            .background(if (active) accentColor.copy(alpha = 0.32f) else Color.White.copy(alpha = 0.14f))
+            .hapticClickable(enabled = !loading, onClick = onClick)
+            .padding(8.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        if (loading) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(18.dp),
+                color = Color.White.copy(alpha = 0.7f),
+                strokeWidth = 2.dp
+            )
+        } else {
+            Icon(
+                imageVector = Icons.Rounded.Translate,
+                contentDescription = if (active) "Hide translation" else "Translate lyrics",
+                tint = if (active) accentColor else Color.White,
+                modifier = Modifier.size(18.dp)
+            )
+        }
+    }
+}
+
+@Composable
 private fun LyricsProviderDropdown(
     providers: Map<String, ProviderLoadState>,
     activeProvider: String?,
@@ -3849,6 +3957,28 @@ private fun LyricsShareContinueBar(
                 Text("Continue", fontWeight = FontWeight.SemiBold)
             }
         }
+    }
+}
+
+private suspend fun androidx.compose.foundation.lazy.LazyListState.pinLineAtAnchor(
+    index: Int,
+    anchorPx: Int,
+    animate: Boolean
+) {
+    if (layoutInfo.visibleItemsInfo.none { it.index == index }) {
+        scrollToItem(index)
+    }
+    val info = layoutInfo
+    val item = info.visibleItemsInfo.firstOrNull { it.index == index } ?: return
+    val itemCenterInViewport = item.offset + info.beforeContentPadding + item.size / 2f
+    val delta = itemCenterInViewport - anchorPx
+    if (delta.absoluteValue < 1f) return
+    if (animate) {
+        // Spring instead of tween: a line change mid-animation restarts it, and a soft spring
+        // keeps that hand-off from looking like a jolt.
+        animateScrollBy(delta, spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 90f))
+    } else {
+        scrollBy(delta)
     }
 }
 
