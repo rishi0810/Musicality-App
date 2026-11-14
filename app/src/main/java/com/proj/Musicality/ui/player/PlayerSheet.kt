@@ -244,7 +244,7 @@ private const val MAX_LYRICS_SHARE_LINES = 6
 // the anticipatory feel of Apple-Music-style synced lyrics.
 private const val LINE_LOOKAHEAD_MS = 100L
 // TEMP: measured ~1700 ms lyrics lag on the Pixel emulator; testing whether a fixed offset fixes it.
-private const val LYRICS_SYNC_OFFSET_MS = 1700L
+private const val LYRICS_SYNC_OFFSET_MS = 600L
 // Where the eye naturally rests in the lyrics viewport; the active line is pinned here.
 private const val ACTIVE_LYRIC_ANCHOR_FRACTION = 0.4f
 private const val PlayerHeroHeightFraction = 0.47f
